@@ -169,14 +169,14 @@ export const SpinRevealCardModal: React.FC<SpinRevealCardModalProps> = ({
                       YOUR TOURNAMENT EVENT
                     </span>
                     <span className="font-mono text-xs text-purple-300 bg-purple-950/70 border border-purple-800 px-2.5 py-0.5 rounded-lg font-bold">
-                      ID: {topic.topicId || topic.id}
+                      ID: {topic?.topicId || topic?.id || '—'}
                     </span>
                   </div>
 
                   {onClose && (
                     <button
                       onClick={onClose}
-                      className="p-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition-colors"
+                      className="p-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition-colors cursor-pointer"
                       title="Close preview"
                     >
                       <X className="w-4 h-4" />
@@ -198,10 +198,10 @@ export const SpinRevealCardModal: React.FC<SpinRevealCardModalProps> = ({
                   {/* Topic Title & Category */}
                   <div className="space-y-2 flex-1">
                     <div className="inline-block px-2.5 py-0.5 rounded-md bg-purple-900/50 border border-purple-700/60 text-purple-200 text-xs font-semibold">
-                      {topic.category || 'General Speech'}
+                      {topic?.category || 'General Speech'}
                     </div>
                     <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white font-['Outfit'] tracking-tight leading-tight drop-shadow-md">
-                      "{topic.topic}"
+                      "{topic?.topic || (topic as any)?.title || 'Selected Topic'}"
                     </h2>
                     <p className="text-slate-300 text-xs sm:text-sm font-medium">
                       Speak with clarity. Compete with confidence.

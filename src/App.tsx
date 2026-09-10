@@ -22,6 +22,7 @@ import { EventHistory } from './pages/EventHistory';
 import { ProjectorDisplay } from './pages/ProjectorDisplay';
 import { Master } from './pages/Master';
 import { StationModals } from './components/StationModals';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 const AppContent: React.FC = () => {
   const { currentPage, isConnected, soundUnlocked, unlockSound } = useApp();
@@ -29,10 +30,10 @@ const AppContent: React.FC = () => {
   // If page is Projector Display mode, render pure stage without organizer layout
   if (currentPage === 'projector') {
     return (
-      <>
+      <ErrorBoundary fallbackTitle="Projector Stage Display Error">
         <ProjectorDisplay />
         <StationModals />
-      </>
+      </ErrorBoundary>
     );
   }
 
@@ -65,7 +66,11 @@ const AppContent: React.FC = () => {
           {currentPage === 'topics' && <TopicsManager />}
           {currentPage === 'images' && <ImagesManager />}
           {currentPage === 'round1' && <Round1 />}
-          {currentPage === 'round2' && <Round2 />}
+          {currentPage === 'round2' && (
+            <ErrorBoundary fallbackTitle="Round 2 Topic Wheel Error">
+              <Round2 />
+            </ErrorBoundary>
+          )}
           {currentPage === 'round3' && <Round3 />}
           {currentPage === 'buzzer' && <BuzzerControl />}
           {currentPage === 'results' && <Results />}
@@ -96,8 +101,10 @@ const AppContent: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <ErrorBoundary fallbackTitle="Mind to Mic Application Error">
+      <AppProvider>
+        <AppContent />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

@@ -39,7 +39,8 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
 
       const center = size / 2;
       const radius = center - 18;
-      const totalSlices = topics.length;
+      const safeTopics = Array.isArray(topics) ? topics.filter(Boolean) : [];
+      const totalSlices = safeTopics.length;
       if (totalSlices === 0) return;
 
       const sliceAngle = (2 * Math.PI) / totalSlices;
@@ -90,7 +91,9 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
         ctx.shadowColor = 'rgba(0,0,0,0.85)';
         ctx.shadowBlur = 4;
 
-        const rawTopicText = `${i + 1}. ${topics[i].topic}`;
+        const topicItem = safeTopics[i];
+        const topicTitle = topicItem?.topic || (topicItem as any)?.title || `Topic ${i + 1}`;
+        const rawTopicText = `${i + 1}. ${topicTitle}`;
         let displayText = rawTopicText;
 
         // Dynamically measure width to prevent any characters from going under center hub

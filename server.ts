@@ -1544,20 +1544,20 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
 
     // Slot-preservation topic replacement:
     // Replace the used topic in the wheel candidates with a fresh unused topic from the pool
-    let currentWheel = station.activeWheelTopics || station.wheelSpin?.wheelTopics || [];
+    let currentWheel = (station.activeWheelTopics || station.wheelSpin?.wheelTopics || []).filter(Boolean);
     if (currentWheel.length === 0) {
       const wheelCount = db.settings.round2.activeWheelTopicCount || 20;
-      currentWheel = db.topics.filter((t) => t.status === 'available').slice(0, wheelCount);
+      currentWheel = db.topics.filter((t) => t && t.status === 'available').slice(0, wheelCount);
     }
-    const targetIdx = currentWheel.findIndex((t) => t.id === winningTopic.id);
+    const targetIdx = currentWheel.findIndex((t) => t && t.id === winningTopic.id);
     if (targetIdx !== -1) {
       const replacement = db.topics.find(
-        (t) => t.status === 'available' && t.id !== winningTopic.id && !currentWheel.some((w) => w.id === t.id)
+        (t) => t && t.status === 'available' && t.id !== winningTopic.id && !currentWheel.some((w) => w && w.id === t.id)
       );
       if (replacement) {
         currentWheel[targetIdx] = replacement;
       }
-      station.activeWheelTopics = [...currentWheel];
+      station.activeWheelTopics = [...currentWheel].filter(Boolean);
     }
   }
   station.pendingTopic = undefined;
@@ -1590,26 +1590,26 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
 app.post('/api/stations/:id/wheel-replace', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
   const { usedTopicId, replacementTopicId } = req.body;
-  let currentWheel = station.activeWheelTopics || [];
+  let currentWheel = (station.activeWheelTopics || []).filter(Boolean);
   const wheelCount = db.settings.round2.activeWheelTopicCount || 20;
   if (currentWheel.length === 0) {
-    currentWheel = db.topics.filter((t) => t.status === 'available').slice(0, wheelCount);
+    currentWheel = db.topics.filter((t) => t && t.status === 'available').slice(0, wheelCount);
   }
 
   if (usedTopicId) {
-    const idx = currentWheel.findIndex((t) => t.id === usedTopicId);
+    const idx = currentWheel.findIndex((t) => t && t.id === usedTopicId);
     if (idx !== -1) {
       const replacement = replacementTopicId
-        ? db.topics.find((t) => t.id === replacementTopicId)
+        ? db.topics.find((t) => t && t.id === replacementTopicId)
         : db.topics.find(
-            (t) => t.status === 'available' && t.id !== usedTopicId && !currentWheel.some((w) => w.id === t.id)
+            (t) => t && t.status === 'available' && t.id !== usedTopicId && !currentWheel.some((w) => w && w.id === t.id)
           );
       if (replacement) {
         currentWheel[idx] = replacement;
       }
     }
   }
-  station.activeWheelTopics = [...currentWheel];
+  station.activeWheelTopics = [...currentWheel].filter(Boolean);
   persistDB();
   broadcastSSE('station_updated', station);
   res.json({ success: true, activeWheelTopics: station.activeWheelTopics });

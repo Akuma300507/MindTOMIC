@@ -114,21 +114,24 @@ export const Round2: React.FC = () => {
 
   // Compute active wheel topics when not locked - strictly available topics so no topic repeats
   const dynamicWheelTopics = useMemo(() => {
-    if (topicsPool.length === 0) return [];
+    if (!topicsPool || topicsPool.length === 0) return [];
 
     const available = reuseAllowed
       ? [...topicsPool]
-      : topicsPool.filter((t) => t.status === 'available');
+      : topicsPool.filter((t) => t && t.status === 'available');
 
     if (available.length === 0) {
-      return reuseAllowed ? [...topicsPool].slice(0, wheelCount) : [];
+      return reuseAllowed ? [...topicsPool].filter(Boolean).slice(0, wheelCount) : [];
     }
 
-    return available.slice(0, wheelCount);
+    return available.filter(Boolean).slice(0, wheelCount);
   }, [topicsPool, wheelCount, reuseAllowed]);
 
   // Actual topics rendered on the wheel: locked takes priority during/after spin
-  const activeWheelTopics = lockedWheelTopics || dynamicWheelTopics;
+  const activeWheelTopics = useMemo(() => {
+    const list = (lockedWheelTopics && lockedWheelTopics.length > 0) ? lockedWheelTopics : dynamicWheelTopics;
+    return (list || []).filter(Boolean);
+  }, [lockedWheelTopics, dynamicWheelTopics]);
 
   // Color palette for slices
   const sliceColors = useMemo(
@@ -154,19 +157,23 @@ export const Round2: React.FC = () => {
     setPoolNotice(null);
 
     // Clean wheel topics before spinning: replace any topic that is already used with a fresh unused topic from the pool
-    const pool = db?.topics || topicsPool;
+    const pool = (db?.topics || topicsPool || []).filter(Boolean);
     const cleanedWheel = activeWheelTopics.map((sliceTopic) => {
-      const dbTopic = pool.find((t) => t.id === sliceTopic.id);
+      if (!sliceTopic) return null;
+      const dbTopic = pool.find((t) => t?.id === sliceTopic.id);
       const isUsed = sliceTopic.status === 'used' || (!reuseAllowed && dbTopic?.status === 'used');
       if (isUsed) {
-        const unused = pool.find((p) => p.status === 'available' && !activeWheelTopics.some((w) => w.id === p.id));
+        const unused = pool.find((p) => p && p.status === 'available' && !activeWheelTopics.some((w) => w?.id === p.id));
         return unused || sliceTopic;
       }
       return sliceTopic;
-    });
+    }).filter(Boolean) as Topic[];
 
     // Freeze current wheel topics before initiating spin
-    let currentWheel = [...cleanedWheel];
+    let currentWheel = cleanedWheel.length > 0 ? [...cleanedWheel] : [...activeWheelTopics];
+    if (currentWheel.length === 0 && pool.length > 0) {
+      currentWheel = pool.slice(0, wheelCount);
+    }
     setLockedWheelTopics(currentWheel);
     setIsSpinning(true);
     setWinningTopic(null);
@@ -174,17 +181,17 @@ export const Round2: React.FC = () => {
     let chosenTopic: Topic;
     let targetIndex = 0;
     try {
-      const wheelTopicIds = currentWheel.map((t) => t.id);
+      const wheelTopicIds = currentWheel.map((t) => t?.id).filter(Boolean) as string[];
       const res = await spinStationTopic(currentStationId, wheelTopicIds);
       chosenTopic = res.topic;
       if (res.wheelTopics && res.wheelTopics.length > 0) {
-        currentWheel = [...res.wheelTopics];
+        currentWheel = res.wheelTopics.filter(Boolean);
         setLockedWheelTopics(currentWheel);
       }
       if (typeof res.targetIndex === 'number' && res.targetIndex >= 0) {
         targetIndex = res.targetIndex;
       } else {
-        targetIndex = currentWheel.findIndex((t) => t.id === chosenTopic.id);
+        targetIndex = currentWheel.findIndex((t) => t?.id === chosenTopic?.id);
       }
     } catch (err: any) {
       setIsSpinning(false);
@@ -194,7 +201,7 @@ export const Round2: React.FC = () => {
     }
 
     // Verify chosenTopic is positioned in currentWheel
-    if (targetIndex === -1) {
+    if (targetIndex === -1 && chosenTopic) {
       currentWheel[0] = chosenTopic;
       targetIndex = 0;
       setLockedWheelTopics([...currentWheel]);
@@ -249,8 +256,10 @@ export const Round2: React.FC = () => {
       } else {
         setRotationAngle(desiredFinalAngle);
         setIsSpinning(false);
-        setWinningTopic(chosenTopic);
-        setShowRevealModal(true);
+        if (chosenTopic) {
+          setWinningTopic(chosenTopic);
+          setShowRevealModal(true);
+        }
         soundEngine.playChime(); // celebration chime
 
         try {
@@ -266,29 +275,33 @@ export const Round2: React.FC = () => {
         setLockedWheelTopics(currentWheel);
 
         // Inform backend spin completed for this station
-        completeStationSpin(currentStationId).catch(() => {});
+        if (currentStationId) {
+          completeStationSpin(currentStationId).catch(() => {});
+        }
 
         // Sync with projector display with current wheel
-        updateLiveSync({
-          currentRound: 2,
-          activeParticipantId: activeParticipant?.id || null,
-          locationId: currentStationId,
-          activeItem: {
-            type: 'topic',
-            title: chosenTopic.topic,
-            id: chosenTopic.id,
-            category: chosenTopic.category,
-          },
-          wheelSpin: {
-            isSpinning: false,
-            targetTopicId: chosenTopic.id,
-            targetTopicTitle: chosenTopic.topic,
-            targetIndex,
-            wheelTopics: currentWheel,
-            startedAt: 0,
-            durationMs: 0,
-          },
-        }).catch(() => {});
+        if (chosenTopic) {
+          updateLiveSync({
+            currentRound: 2,
+            activeParticipantId: activeParticipant?.id || null,
+            locationId: currentStationId,
+            activeItem: {
+              type: 'topic',
+              title: chosenTopic.topic || 'Selected Topic',
+              id: chosenTopic.id,
+              category: chosenTopic.category,
+            },
+            wheelSpin: {
+              isSpinning: false,
+              targetTopicId: chosenTopic.id,
+              targetTopicTitle: chosenTopic.topic || 'Selected Topic',
+              targetIndex,
+              wheelTopics: currentWheel,
+              startedAt: 0,
+              durationMs: 0,
+            },
+          }).catch(() => {});
+        }
       }
     };
 
@@ -298,17 +311,20 @@ export const Round2: React.FC = () => {
   // Replace used topic on wheel with next unused topic from pool
   const handleReplaceUsedTopic = useCallback(() => {
     if (!winningTopic) return;
-    const pool = db?.topics || topicsPool;
-    const currentWheel = lockedWheelTopics || activeWheelTopics;
+    const pool = (db?.topics || topicsPool || []).filter(Boolean);
+    const currentWheel = (lockedWheelTopics || activeWheelTopics || []).filter(Boolean);
+    const winningId = winningTopic?.id;
+    if (!winningId) return;
+
     const remainingUnused = pool.filter(
-      (t) => t.status === 'available' && t.id !== winningTopic.id && !currentWheel.some((cw) => cw.id === t.id)
+      (t) => t && t.status === 'available' && t.id !== winningId && !currentWheel.some((cw) => cw?.id === t.id)
     );
-    if (remainingUnused.length > 0 && currentWheel.some((t) => t.id === winningTopic.id)) {
+    if (remainingUnused.length > 0 && currentWheel.some((t) => t?.id === winningId)) {
       const nextTopic = remainingUnused[0];
-      const updated = currentWheel.map((t) => (t.id === winningTopic.id ? nextTopic : t));
+      const updated = currentWheel.map((t) => (t?.id === winningId ? nextTopic : t));
       setLockedWheelTopics(updated);
-      if (currentStationId) {
-        replaceStationWheelTopic(currentStationId, winningTopic.id, nextTopic.id).catch(() => {});
+      if (currentStationId && nextTopic?.id) {
+        replaceStationWheelTopic(currentStationId, winningId, nextTopic.id).catch(() => {});
       }
       updateLiveSync({
         currentRound: 2,
@@ -316,14 +332,14 @@ export const Round2: React.FC = () => {
         locationId: currentStationId,
         activeItem: {
           type: 'topic',
-          title: winningTopic.topic,
+          title: winningTopic.topic || 'Selected Topic',
           id: winningTopic.id,
           category: winningTopic.category,
         },
         wheelSpin: {
           isSpinning: false,
           targetTopicId: winningTopic.id,
-          targetTopicTitle: winningTopic.topic,
+          targetTopicTitle: winningTopic.topic || 'Selected Topic',
           wheelTopics: updated,
           startedAt: 0,
           durationMs: 0,
@@ -343,7 +359,7 @@ export const Round2: React.FC = () => {
     }) => {
       if (!activeParticipant || !winningTopic) return;
 
-      const currentTopicId = winningTopic.topicId || winningTopic.id;
+      const currentTopicId = winningTopic.topicId || winningTopic.id || 'topic';
 
       const resultPayload = {
         participantId: activeParticipant.id,
@@ -351,7 +367,7 @@ export const Round2: React.FC = () => {
         participantName: activeParticipant.name,
         mobile: activeParticipant.mobile || activeParticipant.phone || activeParticipant.customData?.phone || '',
         topicId: currentTopicId,
-        topicText: winningTopic.topic,
+        topicText: winningTopic.topic || 'Selected Topic',
         prepDurationSeconds: 0,
         speechDurationSeconds: data.speechDurationSeconds,
         targetSpeechDurationSeconds: speechSeconds,
@@ -364,31 +380,36 @@ export const Round2: React.FC = () => {
       setLastSavedResult(saved);
 
       // Topic has now been used for speech; replace it on the wheel with the next unused topic
-      const remainingUnused = (db?.topics || topicsPool).filter(
-        (t) => t.status === 'available' && t.id !== winningTopic.id && !activeWheelTopics.some((cw) => cw.id === t.id)
-      );
-      if (remainingUnused.length > 0 && activeWheelTopics.some((t) => t.id === winningTopic.id)) {
-        const updated = activeWheelTopics.map((t) => (t.id === winningTopic.id ? remainingUnused[0] : t));
-        setLockedWheelTopics(updated);
-        updateLiveSync({
-          currentRound: 2,
-          activeParticipantId: activeParticipant?.id || null,
-          locationId: currentStationId,
-          activeItem: {
-            type: 'topic',
-            title: winningTopic.topic,
-            id: winningTopic.id,
-            category: winningTopic.category,
-          },
-          wheelSpin: {
-            isSpinning: false,
-            targetTopicId: winningTopic.id,
-            targetTopicTitle: winningTopic.topic,
-            wheelTopics: updated,
-            startedAt: 0,
-            durationMs: 0,
-          },
-        }).catch(() => {});
+      const pool = (db?.topics || topicsPool || []).filter(Boolean);
+      const currentWheel = (activeWheelTopics || []).filter(Boolean);
+      const winningId = winningTopic?.id;
+      if (winningId) {
+        const remainingUnused = pool.filter(
+          (t) => t && t.status === 'available' && t.id !== winningId && !currentWheel.some((cw) => cw?.id === t.id)
+        );
+        if (remainingUnused.length > 0 && currentWheel.some((t) => t?.id === winningId)) {
+          const updated = currentWheel.map((t) => (t?.id === winningId ? remainingUnused[0] : t));
+          setLockedWheelTopics(updated);
+          updateLiveSync({
+            currentRound: 2,
+            activeParticipantId: activeParticipant?.id || null,
+            locationId: currentStationId,
+            activeItem: {
+              type: 'topic',
+              title: winningTopic.topic || 'Selected Topic',
+              id: winningTopic.id,
+              category: winningTopic.category,
+            },
+            wheelSpin: {
+              isSpinning: false,
+              targetTopicId: winningTopic.id,
+              targetTopicTitle: winningTopic.topic || 'Selected Topic',
+              wheelTopics: updated,
+              startedAt: 0,
+              durationMs: 0,
+            },
+          }).catch(() => {});
+        }
       }
     },
     [activeParticipant, winningTopic, speechSeconds, saveRound2Result, db?.topics, topicsPool, activeWheelTopics, updateLiveSync, currentStationId]
@@ -597,7 +618,7 @@ export const Round2: React.FC = () => {
           <div className="w-full">
             {winningTopic ? (
               <motion.div
-                key={winningTopic.id}
+                key={winningTopic.id || 'winning-topic'}
                 initial={{ scale: 0.1, rotate: -360, opacity: 0 }}
                 animate={{ scale: 1, rotate: 0, opacity: 1 }}
                 transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
@@ -610,7 +631,7 @@ export const Round2: React.FC = () => {
                       Selected Topic
                     </span>
                     <span className="font-mono font-bold text-xs text-purple-300 bg-purple-500/10 border border-purple-500/30 px-2 py-0.5 rounded-md">
-                      ID: {winningTopic.topicId || winningTopic.id}
+                      ID: {winningTopic.topicId || winningTopic.id || '—'}
                     </span>
                   </div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-900/60 text-purple-200 border border-purple-700">
@@ -618,7 +639,7 @@ export const Round2: React.FC = () => {
                   </span>
                 </div>
                 <h3 className="text-lg sm:text-xl font-black text-white font-['Outfit'] leading-snug">
-                  "{winningTopic.topic}"
+                  "{winningTopic.topic || 'Selected Topic'}"
                 </h3>
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-purple-800/40 text-xs">
                   <span className="text-purple-300/80 font-mono text-[11px] flex items-center gap-1.5">
@@ -628,16 +649,16 @@ export const Round2: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setShowRevealModal(true)}
-                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold text-[11px] transition-colors flex items-center gap-1"
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
                       title="View topic card reveal animation"
                     >
                       <Sparkles className="w-3 h-3 text-amber-400" />
                       View Card Reveal
                     </button>
-                    {activeWheelTopics.some((t) => t.id === winningTopic.id) && (
+                    {winningTopic && activeWheelTopics.some((t) => t?.id === winningTopic?.id) && (
                       <button
                         onClick={handleReplaceUsedTopic}
-                        className="px-2.5 py-1 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-700/60 font-semibold text-[11px] transition-colors"
+                        className="px-2.5 py-1 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-700/60 font-semibold text-[11px] transition-colors cursor-pointer"
                         title="Replace this used slice with the next available topic now"
                       >
                         Replace on Wheel Now
@@ -726,7 +747,7 @@ export const Round2: React.FC = () => {
         participantName={activeParticipant?.name}
         participantNumber={activeParticipant?.participantNumber}
         onReplaceOnWheel={
-          winningTopic && (lockedWheelTopics || activeWheelTopics).some((t) => t.id === winningTopic.id)
+          winningTopic && (lockedWheelTopics || activeWheelTopics || []).some((t) => t?.id === winningTopic?.id)
             ? () => {
                 handleReplaceUsedTopic();
                 setShowRevealModal(false);
