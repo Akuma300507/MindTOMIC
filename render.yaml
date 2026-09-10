@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: mind-to-mic
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Free MongoDB Atlas connection string (stores 100+ participants, topics, settings)
+      - key: MONGODB_URI
+        sync: false
+      # Free Cloudinary connection URL (stores 100+ high-res images on CDN)
+      - key: CLOUDINARY_URL
+        sync: false

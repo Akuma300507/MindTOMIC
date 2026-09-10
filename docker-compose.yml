@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  mind-to-mic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mind_to_mic_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATA_DIR=/app/data
+      - UPLOADS_DIR=/app/uploads
+    volumes:
+      # Persistent named volumes for database and media uploads
+      - mindtomic_data:/app/data
+      - mindtomic_uploads:/app/uploads
+
+volumes:
+  mindtomic_data:
+    driver: local
+  mindtomic_uploads:
+    driver: local

@@ -1,0 +1,481 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 320" width="1000" height="320">
+  <defs>
+    <!-- Filter effects -->
+    <filter id="drop-shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.75"/>
+    </filter>
+    <filter id="glow-green" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glow-amber" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glow-bulb" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Gradients -->
+    <linearGradient id="brass-metal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="20%" stop-color="#d97706"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="75%" stop-color="#92400e"/>
+      <stop offset="100%" stop-color="#78350f"/>
+    </linearGradient>
+
+    <linearGradient id="pipe-sheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef3c7"/>
+      <stop offset="25%" stop-color="#f59e0b"/>
+      <stop offset="50%" stop-color="#d97706"/>
+      <stop offset="75%" stop-color="#78350f"/>
+      <stop offset="100%" stop-color="#451a03"/>
+    </linearGradient>
+
+    <linearGradient id="crane-orange" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="25%" stop-color="#ea580c"/>
+      <stop offset="70%" stop-color="#9a3412"/>
+      <stop offset="100%" stop-color="#431407"/>
+    </linearGradient>
+
+    <linearGradient id="crt-yellow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="30%" stop-color="#eab308"/>
+      <stop offset="70%" stop-color="#ca8a04"/>
+      <stop offset="100%" stop-color="#713f12"/>
+    </linearGradient>
+
+    <linearGradient id="crt-screen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#022c22"/>
+      <stop offset="40%" stop-color="#064e3b"/>
+      <stop offset="80%" stop-color="#022c22"/>
+      <stop offset="100%" stop-color="#011711"/>
+    </linearGradient>
+
+    <linearGradient id="gear-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="35%" stop-color="#f59e0b"/>
+      <stop offset="65%" stop-color="#b45309"/>
+      <stop offset="100%" stop-color="#451a03"/>
+    </linearGradient>
+
+    <linearGradient id="concrete-rock" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef3c7"/>
+      <stop offset="30%" stop-color="#d6d3d1"/>
+      <stop offset="70%" stop-color="#a8a29e"/>
+      <stop offset="100%" stop-color="#57534e"/>
+    </linearGradient>
+
+    <linearGradient id="chassis-dark" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3f3f46"/>
+      <stop offset="40%" stop-color="#27272a"/>
+      <stop offset="80%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+
+    <linearGradient id="gold-emboss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef9c3"/>
+      <stop offset="30%" stop-color="#facc15"/>
+      <stop offset="70%" stop-color="#ca8a04"/>
+      <stop offset="100%" stop-color="#713f12"/>
+    </linearGradient>
+
+    <linearGradient id="badge-2k26" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#451a03"/>
+      <stop offset="30%" stop-color="#27272a"/>
+      <stop offset="80%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+  </defs>
+
+  <g id="inspire-arcade-logo" filter="url(#drop-shadow)">
+    <!-- ========================================== -->
+    <!-- LOWER INDUSTRIAL CHASSIS & PIPELINE        -->
+    <!-- ========================================== -->
+    <!-- Heavy Horizontal Steam/Conduit Pipe along bottom -->
+    <path d="M 65 240 L 935 240 C 945 240 952 245 952 252 C 952 259 945 264 935 264 L 65 264 C 55 264 48 259 48 252 C 48 245 55 240 65 240 Z" fill="url(#chassis-dark)" stroke="#78350f" stroke-width="3"/>
+    <line x1="55" y1="247" x2="945" y2="247" stroke="#f59e0b" stroke-width="2" stroke-opacity="0.6"/>
+    <!-- Pipe mounting collars with hex bolts -->
+    <rect x="110" y="237" width="12" height="30" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+    <circle cx="116" cy="242" r="2" fill="#fef08a"/>
+    <circle cx="116" cy="262" r="2" fill="#fef08a"/>
+    <rect x="270" y="237" width="12" height="30" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+    <rect x="410" y="237" width="12" height="30" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+    <rect x="595" y="237" width="12" height="30" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+    <rect x="665" y="237" width="12" height="30" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+    <rect x="790" y="237" width="12" height="30" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+    <rect x="890" y="237" width="12" height="30" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+
+    <!-- Right Side VU Audio/Power LED Meter on conduit -->
+    <g transform="translate(805, 246)">
+      <rect x="0" y="0" width="86" height="12" rx="2" fill="#09090b" stroke="#3f3f46" stroke-width="1"/>
+      <!-- Green LEDs -->
+      <rect x="4" y="2" width="5" height="8" rx="1" fill="#22c55e" filter="url(#glow-green)"/>
+      <rect x="12" y="2" width="5" height="8" rx="1" fill="#22c55e" filter="url(#glow-green)"/>
+      <rect x="20" y="2" width="5" height="8" rx="1" fill="#22c55e" filter="url(#glow-green)"/>
+      <rect x="28" y="2" width="5" height="8" rx="1" fill="#22c55e" filter="url(#glow-green)"/>
+      <rect x="36" y="2" width="5" height="8" rx="1" fill="#4ade80" filter="url(#glow-green)"/>
+      <!-- Amber/Yellow LEDs -->
+      <rect x="44" y="2" width="5" height="8" rx="1" fill="#facc15" filter="url(#glow-amber)"/>
+      <rect x="52" y="2" width="5" height="8" rx="1" fill="#facc15" filter="url(#glow-amber)"/>
+      <rect x="60" y="2" width="5" height="8" rx="1" fill="#f59e0b" filter="url(#glow-amber)"/>
+      <!-- Red Peak LEDs -->
+      <rect x="68" y="2" width="5" height="8" rx="1" fill="#ef4444"/>
+      <rect x="76" y="2" width="5" height="8" rx="1" fill="#991b1b"/>
+    </g>
+
+    <!-- Left side conduit return loop into letter I -->
+    <path d="M 48 252 C 32 252 24 240 24 225 L 24 190 C 24 180 32 175 42 175" fill="none" stroke="url(#brass-metal)" stroke-width="8" stroke-linecap="round"/>
+
+    <!-- ========================================== -->
+    <!-- LETTER 1: 'I' - 026 INDUSTRIAL NIXIE GAUGE -->
+    <!-- ========================================== -->
+    <g id="letter-1-I">
+      <!-- Main Vertical Heavy Gauge Housing -->
+      <rect x="44" y="22" width="76" height="178" rx="14" fill="url(#brass-metal)" stroke="#451a03" stroke-width="4"/>
+      <!-- Recessed Inner Dark Metallic Plate -->
+      <rect x="52" y="30" width="60" height="162" rx="10" fill="url(#chassis-dark)" stroke="#78350f" stroke-width="2"/>
+      
+      <!-- Corner Rivets -->
+      <circle cx="52" cy="30" r="3" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+      <circle cx="112" cy="30" r="3" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+      <circle cx="52" cy="192" r="3" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+      <circle cx="112" cy="192" r="3" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+
+      <!-- 3 Green Seven-Segment / Nixie Counter Windows: 0 - 2 - 6 -->
+      <!-- Window 1: '0' -->
+      <rect x="60" y="38" width="44" height="34" rx="4" fill="#022c22" stroke="#15803d" stroke-width="2"/>
+      <text x="82" y="64" fill="#4ade80" font-family="Courier, monospace" font-size="28" font-weight="900" text-anchor="middle" filter="url(#glow-green)">0</text>
+      
+      <!-- Window 2: '2' -->
+      <rect x="60" y="78" width="44" height="34" rx="4" fill="#022c22" stroke="#15803d" stroke-width="2"/>
+      <text x="82" y="104" fill="#4ade80" font-family="Courier, monospace" font-size="28" font-weight="900" text-anchor="middle" filter="url(#glow-green)">2</text>
+
+      <!-- Window 3: '6' -->
+      <rect x="60" y="118" width="44" height="34" rx="4" fill="#022c22" stroke="#15803d" stroke-width="2"/>
+      <text x="82" y="144" fill="#4ade80" font-family="Courier, monospace" font-size="28" font-weight="900" text-anchor="middle" filter="url(#glow-green)">6</text>
+
+      <!-- Bottom Amber Pilot Lamp with Heavy Beveled Brass Rim -->
+      <circle cx="82" cy="172" r="14" fill="url(#brass-metal)" stroke="#451a03" stroke-width="2"/>
+      <circle cx="82" cy="172" r="10" fill="#d97706" stroke="#78350f" stroke-width="1" filter="url(#glow-amber)"/>
+      <circle cx="82" cy="172" r="7" fill="#f59e0b"/>
+      <circle cx="80" cy="170" r="3" fill="#fef08a"/>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- LETTER 2: 'N' - STEEL CONSTRUCTION CRANE   -->
+    <!-- ========================================== -->
+    <g id="letter-2-N">
+      <!-- Left Vertical Mast Column with Lattice Truss -->
+      <rect x="136" y="32" width="26" height="170" fill="url(#crane-orange)" stroke="#431407" stroke-width="2.5"/>
+      <line x1="136" y1="38" x2="162" y2="64" stroke="#fef08a" stroke-width="2"/>
+      <line x1="162" y1="64" x2="136" y2="90" stroke="#fef08a" stroke-width="2"/>
+      <line x1="136" y1="90" x2="162" y2="116" stroke="#fef08a" stroke-width="2"/>
+      <line x1="162" y1="116" x2="136" y2="142" stroke="#fef08a" stroke-width="2"/>
+      <line x1="136" y1="142" x2="162" y2="168" stroke="#fef08a" stroke-width="2"/>
+      <line x1="162" y1="168" x2="136" y2="194" stroke="#fef08a" stroke-width="2"/>
+
+      <!-- Right Vertical Mast Leg -->
+      <rect x="234" y="88" width="26" height="114" fill="url(#crane-orange)" stroke="#431407" stroke-width="2.5"/>
+      <line x1="234" y1="94" x2="260" y2="120" stroke="#fef08a" stroke-width="2"/>
+      <line x1="260" y1="120" x2="234" y2="146" stroke="#fef08a" stroke-width="2"/>
+      <line x1="234" y1="146" x2="260" x2="172" stroke="#fef08a" stroke-width="2"/>
+      <line x1="260" y1="172" x2="234" y2="198" stroke="#fef08a" stroke-width="2"/>
+
+      <!-- Diagonal Truss Strut forming the 'N' -->
+      <path d="M 160 40 L 238 196 L 258 190 L 180 34 Z" fill="url(#crane-orange)" stroke="#431407" stroke-width="3"/>
+      <line x1="168" y1="52" x2="242" y2="186" stroke="#fef08a" stroke-width="2.5" stroke-dasharray="6 4"/>
+
+      <!-- Horizontal Tower Crane Boom on top -->
+      <rect x="124" y="16" width="140" height="16" rx="3" fill="url(#crane-orange)" stroke="#431407" stroke-width="2"/>
+      <line x1="128" y1="24" x2="260" y2="24" stroke="#fef08a" stroke-width="2"/>
+      <!-- Crane Operator Cab & Counterweight -->
+      <rect x="238" y="18" width="24" height="20" rx="2" fill="#c2410c" stroke="#431407" stroke-width="1.5"/>
+      <rect x="242" y="22" width="8" height="10" fill="#67e8f9"/>
+      <!-- Cable Hoist Pulley & Hook Assembly -->
+      <circle cx="204" cy="35" r="5" fill="#f59e0b" stroke="#78350f" stroke-width="1.5"/>
+      <line x1="204" y1="40" x2="204" y2="68" stroke="#94a3b8" stroke-width="2"/>
+      <!-- Lifting Hook -->
+      <path d="M 200 68 C 200 78, 212 78, 210 70" fill="none" stroke="#d97706" stroke-width="3.5" stroke-linecap="round"/>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- LETTER 3: 'S' - STEAMPUNK COPPER PIPES     -->
+    <!-- ========================================== -->
+    <g id="letter-3-S">
+      <!-- Main S-Curve Pipe Segments -->
+      <path d="M 386 64 C 386 28, 308 28, 308 82 C 308 126, 396 102, 396 154 C 396 208, 302 208, 302 166"
+            fill="none" stroke="url(#pipe-sheen)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- Core Metallic Light Reflection Highlight -->
+      <path d="M 386 64 C 386 28, 308 28, 308 82 C 308 126, 396 102, 396 154 C 396 208, 302 208, 302 166"
+            fill="none" stroke="#fef08a" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+
+      <!-- Bolted Brass Flange Rings -->
+      <rect x="358" y="28" width="14" height="44" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="2"/>
+      <rect x="294" y="72" width="14" height="44" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="2"/>
+      <rect x="348" y="112" width="44" height="14" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="2"/>
+      <rect x="300" y="156" width="14" height="44" rx="2" fill="url(#brass-metal)" stroke="#451a03" stroke-width="2"/>
+
+      <!-- Handwheel Pressure Valve on Lower Pipe -->
+      <g transform="translate(382, 150)">
+        <circle cx="0" cy="0" r="23" fill="none" stroke="url(#brass-metal)" stroke-width="5"/>
+        <circle cx="0" cy="0" r="19" fill="none" stroke="#451a03" stroke-width="2"/>
+        <circle cx="0" cy="0" r="7" fill="#f59e0b" stroke="#451a03" stroke-width="2"/>
+        <line x1="-19" y1="0" x2="19" y2="0" stroke="#fef08a" stroke-width="3.5"/>
+        <line x1="0" y1="-19" x2="0" y2="19" stroke="#fef08a" stroke-width="3.5"/>
+        <line x1="-14" y1="-14" x2="14" y2="14" stroke="#fef08a" stroke-width="3.5"/>
+        <line x1="-14" y1="14" x2="14" y2="-14" stroke="#fef08a" stroke-width="3.5"/>
+      </g>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- LETTER 4: 'P' - RETRO CRT MONITOR & PCB    -->
+    <!-- ========================================== -->
+    <g id="letter-4-P">
+      <!-- Upper Monitor Casing (Forming the top loop of the P) -->
+      <rect x="436" y="26" width="144" height="124" rx="22" fill="url(#crt-yellow)" stroke="#713f12" stroke-width="4.5"/>
+      
+      <!-- Bezel & CRT Screen -->
+      <rect x="452" y="42" width="112" height="88" rx="14" fill="#022c22" stroke="#451a03" stroke-width="3"/>
+      <rect x="456" y="46" width="104" height="80" rx="10" fill="url(#crt-screen)"/>
+
+      <!-- CRT Phosphor Scanline Glow Lines -->
+      <line x1="458" y1="56" x2="558" y2="56" stroke="#052e16" stroke-width="1" opacity="0.7"/>
+      <line x1="458" y1="68" x2="558" y2="68" stroke="#052e16" stroke-width="1" opacity="0.7"/>
+      <line x1="458" y1="80" x2="558" y2="80" stroke="#052e16" stroke-width="1" opacity="0.7"/>
+      <line x1="458" y1="92" x2="558" y2="92" stroke="#052e16" stroke-width="1" opacity="0.7"/>
+      <line x1="458" y1="104" x2="558" y2="104" stroke="#052e16" stroke-width="1" opacity="0.7"/>
+      <line x1="458" y1="116" x2="558" y2="116" stroke="#052e16" stroke-width="1" opacity="0.7"/>
+
+      <!-- Retro Terminal Green Phosphor Text -->
+      <text x="470" y="68" fill="#4ade80" font-family="Courier, monospace" font-size="14" font-weight="900" filter="url(#glow-green)">&gt; SYSTEM</text>
+      <text x="484" y="88" fill="#4ade80" font-family="Courier, monospace" font-size="14" font-weight="900" filter="url(#glow-green)">INSPIRE</text>
+      <text x="484" y="108" fill="#4ade80" font-family="Courier, monospace" font-size="14" font-weight="900" filter="url(#glow-green)">READY.</text>
+
+      <!-- Monitor Chassis Screws & Knobs -->
+      <circle cx="446" cy="36" r="2.5" fill="#713f12"/>
+      <circle cx="570" cy="36" r="2.5" fill="#713f12"/>
+      <circle cx="446" cy="140" r="2.5" fill="#713f12"/>
+      <circle cx="570" cy="140" r="2.5" fill="#713f12"/>
+
+      <!-- Lower Stem of P: Green Motherboard Circuit Board -->
+      <rect x="448" y="146" width="56" height="78" rx="4" fill="#14532d" stroke="#15803d" stroke-width="2.5"/>
+      <!-- Black Square IC Chip -->
+      <rect x="460" y="160" width="32" height="32" rx="2" fill="#18181b" stroke="#3f3f46" stroke-width="1.5"/>
+      <!-- Microchip Pins -->
+      <line x1="454" y1="166" x2="460" y2="166" stroke="#eab308" stroke-width="1.5"/>
+      <line x1="454" y1="176" x2="460" y2="176" stroke="#eab308" stroke-width="1.5"/>
+      <line x1="454" y1="186" x2="460" y2="186" stroke="#eab308" stroke-width="1.5"/>
+      <line x1="492" y1="166" x2="498" y2="166" stroke="#eab308" stroke-width="1.5"/>
+      <line x1="492" y1="176" x2="498" y2="176" stroke="#eab308" stroke-width="1.5"/>
+      <line x1="492" y1="186" x2="498" y2="186" stroke="#eab308" stroke-width="1.5"/>
+      <!-- PCB Gold Bus Traces -->
+      <path d="M 464 192 L 464 214 L 476 214" fill="none" stroke="#facc15" stroke-width="1.5"/>
+      <path d="M 488 192 L 488 208 L 498 208" fill="none" stroke="#facc15" stroke-width="1.5"/>
+      <circle cx="476" cy="214" r="2" fill="#fef08a"/>
+      <circle cx="498" cy="208" r="2" fill="#fef08a"/>
+
+      <!-- Auxiliary Digital Time Counter on right -->
+      <g transform="translate(516, 186)">
+        <rect x="0" y="0" width="74" height="22" rx="3" fill="#18181b" stroke="#78350f" stroke-width="1.5"/>
+        <text x="37" y="16" fill="#22c55e" font-family="Courier, monospace" font-size="12" font-weight="bold" text-anchor="middle" filter="url(#glow-green)">0:00:00:0</text>
+      </g>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- LETTER 5: 'I' - TESLA COIL & EDISON BULB   -->
+    <!-- ========================================== -->
+    <g id="letter-5-I">
+      <!-- Top Glowing Edison Light Bulb -->
+      <g transform="translate(634, 48)">
+        <!-- Ambient Glow Aura -->
+        <circle cx="0" cy="-12" r="24" fill="#fef08a" opacity="0.2" filter="url(#glow-bulb)"/>
+        <!-- Glass Bulb Outline -->
+        <path d="M -14 -12 C -14 -28, 14 -28, 14 -12 C 14 -2, 8 6, 6 14 L -6 14 C -8 6, -14 -2, -14 -12 Z"
+              fill="#fef9c3" fill-opacity="0.35" stroke="#fef08a" stroke-width="2"/>
+        <!-- Coiled Glowing Tungsten Filament -->
+        <path d="M -4 12 L -4 -8 L -1 -16 L 2 -8 L 5 -16 L 8 -8 L 8 12" fill="none" stroke="#facc15" stroke-width="2" filter="url(#glow-bulb)"/>
+        <!-- Screw Base Brass Thread -->
+        <rect x="-7" y="14" width="14" height="8" fill="url(#brass-metal)" stroke="#78350f" stroke-width="1"/>
+      </g>
+
+      <!-- Ribbed Ceramic High-Voltage Insulator Stack Rings -->
+      <g transform="translate(608, 76)">
+        <rect x="8" y="0" width="36" height="10" rx="5" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="6" y="12" width="40" height="10" rx="5" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="8" y="24" width="36" height="10" rx="5" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="6" y="36" width="40" height="10" rx="5" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="8" y="48" width="36" height="10" rx="5" fill="url(#brass-metal)" stroke="#451a03" stroke-width="1.5"/>
+      </g>
+
+      <!-- Heavy Transformer Base Box with Lightning Symbol -->
+      <rect x="606" y="136" width="56" height="86" rx="6" fill="url(#brass-metal)" stroke="#451a03" stroke-width="3.5"/>
+      <rect x="612" y="142" width="44" height="74" rx="4" fill="url(#chassis-dark)" stroke="#78350f" stroke-width="1.5"/>
+      <!-- Lightning Bolt / High Voltage Hazard Icon -->
+      <path d="M 636 154 L 626 178 L 634 178 L 630 198 L 644 172 L 636 172 Z" fill="#facc15" stroke="#854d0e" stroke-width="1.5" filter="url(#glow-amber)"/>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- LETTER 6: 'R' - CLOCKWORK GEARS & LINKAGES -->
+    <!-- ========================================== -->
+    <g id="letter-6-R">
+      <!-- Main Upper Clockwork Gear (forming upper loop of R) -->
+      <g transform="translate(724, 76)">
+        <!-- Outer Cog Gear Ring with 12 Teeth -->
+        <circle cx="0" cy="0" r="38" fill="url(#gear-gold)" stroke="#451a03" stroke-width="3"/>
+        <!-- 12 Gear Teeth around circumference -->
+        <rect x="-6" y="-46" width="12" height="12" rx="2" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="-6" y="34" width="12" height="12" rx="2" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="-46" y="-6" width="12" height="12" rx="2" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="34" y="-6" width="12" height="12" rx="2" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="-34" y="-34" width="12" height="12" rx="2" transform="rotate(45, -28, -28)" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="22" y="-34" width="12" height="12" rx="2" transform="rotate(45, 28, -28)" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="-34" y="22" width="12" height="12" rx="2" transform="rotate(45, -28, 28)" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        <rect x="22" y="22" width="12" height="12" rx="2" transform="rotate(45, 28, 28)" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+        
+        <!-- Recessed Gear Center -->
+        <circle cx="0" cy="0" r="24" fill="#18181b" stroke="#78350f" stroke-width="2"/>
+        <!-- Brass Spoke Holes -->
+        <circle cx="0" cy="-14" r="4" fill="#fef08a"/>
+        <circle cx="14" cy="0" r="4" fill="#fef08a"/>
+        <circle cx="0" cy="14" r="4" fill="#fef08a"/>
+        <circle cx="-14" cy="0" r="4" fill="#fef08a"/>
+        <!-- Center Hub Pin -->
+        <circle cx="0" cy="0" r="6" fill="url(#gear-gold)" stroke="#451a03" stroke-width="1.5"/>
+      </g>
+
+      <!-- Smaller Interlocking Satellite Gear on Left -->
+      <g transform="translate(684, 116)">
+        <circle cx="0" cy="0" r="18" fill="url(#gear-gold)" stroke="#451a03" stroke-width="2"/>
+        <circle cx="0" cy="0" r="8" fill="#18181b" stroke="#78350f" stroke-width="1.5"/>
+        <circle cx="0" cy="0" r="3" fill="#fef08a"/>
+      </g>
+
+      <!-- Left Vertical Piston Rod / Spine of the R -->
+      <rect x="676" y="60" width="16" height="162" rx="3" fill="url(#brass-metal)" stroke="#451a03" stroke-width="2.5"/>
+      <rect x="680" y="65" width="8" height="152" fill="#fef08a" opacity="0.5"/>
+
+      <!-- Right Angled Leg of the R with Mechanical Linkage & Teeth -->
+      <path d="M 720 112 L 754 218 L 774 214 L 740 106 Z" fill="url(#gear-gold)" stroke="#451a03" stroke-width="3"/>
+      <circle cx="754" cy="214" r="7" fill="url(#brass-metal)" stroke="#451a03" stroke-width="2"/>
+      <circle cx="754" cy="214" r="3" fill="#fef08a"/>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- LETTER 7: 'E' - CONCRETE, TRIPOD & MIXER   -->
+    <!-- ========================================== -->
+    <g id="letter-7-E">
+      <!-- Main Cracked Concrete Pillar & Horizontal Bars -->
+      <!-- Vertical Spine -->
+      <rect x="808" y="32" width="34" height="190" fill="url(#concrete-rock)" stroke="#44403c" stroke-width="3"/>
+      <!-- Top Bar of E -->
+      <rect x="842" y="32" width="92" height="32" fill="url(#concrete-rock)" stroke="#44403c" stroke-width="3"/>
+      <!-- Middle Bar of E -->
+      <rect x="842" y="110" width="66" height="28" fill="url(#concrete-rock)" stroke="#44403c" stroke-width="3"/>
+      <!-- Bottom Bar of E -->
+      <rect x="842" y="190" width="92" height="32" fill="url(#concrete-rock)" stroke="#44403c" stroke-width="3"/>
+
+      <!-- Concrete Cracks & Weathered Stone Lines -->
+      <path d="M 850 42 L 862 52 L 858 60" fill="none" stroke="#292524" stroke-width="1.5"/>
+      <path d="M 890 36 L 898 48 L 915 44" fill="none" stroke="#292524" stroke-width="1.5"/>
+      <path d="M 816 60 L 824 75 L 814 90" fill="none" stroke="#292524" stroke-width="1.5"/>
+      <path d="M 818 140 L 828 152 L 820 166" fill="none" stroke="#292524" stroke-width="1.5"/>
+
+      <!-- Steel Rebar Grid on Face of Spine -->
+      <line x1="816" y1="36" x2="816" y2="218" stroke="#78350f" stroke-width="2.5"/>
+      <line x1="830" y1="36" x2="830" y2="218" stroke="#78350f" stroke-width="2.5"/>
+      <line x1="810" y1="55" x2="840" y2="55" stroke="#78350f" stroke-width="2"/>
+      <line x1="810" y1="85" x2="840" y2="85" stroke="#78350f" stroke-width="2"/>
+      <line x1="810" y1="115" x2="840" y2="115" stroke="#78350f" stroke-width="2"/>
+      <line x1="810" y1="145" x2="840" y2="145" stroke="#78350f" stroke-width="2"/>
+      <line x1="810" y1="175" x2="840" y2="175" stroke="#78350f" stroke-width="2"/>
+      <line x1="810" y1="205" x2="840" y2="205" stroke="#78350f" stroke-width="2"/>
+
+      <!-- Yellow Surveyor Theodolite on Tripod -->
+      <g transform="translate(814, 150)">
+        <!-- Theodolite Instrument Body -->
+        <rect x="-6" y="-32" width="12" height="14" rx="2" fill="#eab308" stroke="#713f12" stroke-width="1.5"/>
+        <circle cx="0" cy="-25" r="3" fill="#38bdf8"/>
+        <!-- Telescope Barrel -->
+        <rect x="-12" y="-30" width="24" height="6" rx="1" fill="#eab308" stroke="#713f12" stroke-width="1.5"/>
+        <!-- Tribrach Mount -->
+        <rect x="-8" y="-18" width="16" height="6" fill="#475569"/>
+        <!-- Aluminum Tripod Legs -->
+        <line x1="-5" y1="-12" x2="-18" y2="65" stroke="#cbd5e1" stroke-width="3"/>
+        <line x1="0" y1="-12" x2="0" y2="65" stroke="#94a3b8" stroke-width="3"/>
+        <line x1="5" y1="-12" x2="18" y2="65" stroke="#cbd5e1" stroke-width="3"/>
+      </g>
+
+      <!-- Yellow Cement Mixer Wheelbarrow at Bottom Right -->
+      <g transform="translate(896, 185)">
+        <!-- Tilting Mixer Drum (Egg-shaped cylinder) -->
+        <ellipse cx="10" cy="0" rx="22" ry="18" fill="#facc15" stroke="#713f12" stroke-width="2.5" transform="rotate(-20, 10, 0)"/>
+        <!-- Ring Opening on Drum -->
+        <ellipse cx="24" cy="-8" rx="6" ry="10" fill="#1c1917" stroke="#ca8a04" stroke-width="2" transform="rotate(-20, 24, -8)"/>
+        <!-- Wheeled Frame / Chassis -->
+        <line x1="-12" y1="10" x2="22" y2="16" stroke="#1c1917" stroke-width="3"/>
+        <line x1="-12" y1="10" x2="-18" y2="2" stroke="#1c1917" stroke-width="2.5"/>
+        <!-- Cart Wheels -->
+        <circle cx="-6" cy="22" r="8" fill="#1c1917" stroke="#78716c" stroke-width="2"/>
+        <circle cx="-6" cy="22" r="3" fill="#fef08a"/>
+        <circle cx="22" cy="24" r="8" fill="#1c1917" stroke="#78716c" stroke-width="2"/>
+        <circle cx="22" cy="24" r="3" fill="#fef08a"/>
+      </g>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- CENTRAL 2K26 & THE ARCADE ARCHIVES PLAQUE  -->
+    <!-- ========================================== -->
+    <g id="plaque-arcade-archives" transform="translate(500, 260)">
+      <!-- Upper Recessed Badge: '2K26' -->
+      <g transform="translate(0, -28)">
+        <polygon points="-70,-16 70,-16 82,14 -82,14" fill="url(#chassis-dark)" stroke="url(#brass-metal)" stroke-width="3"/>
+        <rect x="-65" y="-12" width="130" height="22" rx="3" fill="#18181b" stroke="#78350f" stroke-width="1.5"/>
+        <!-- Glowing 2K26 Typography -->
+        <text x="0" y="6" fill="url(#gold-emboss)" font-family="Impact, 'Outfit', sans-serif" font-size="24" font-weight="900" letter-spacing="6" text-anchor="middle" filter="url(#glow-amber)">
+          2K26
+        </text>
+      </g>
+
+      <!-- Main Plaque: 'THE ARCADE ARCHIVES' -->
+      <!-- Outer Hex/Octagonal Bronze Border -->
+      <polygon points="-280,0 280,0 295,20 280,40 -280,40 -295,20" fill="url(#brass-metal)" stroke="#451a03" stroke-width="3.5"/>
+      <!-- Inner Deep Metallic Texture Plate -->
+      <polygon points="-272,4 272,4 286,20 272,36 -272,36 -286,20" fill="url(#chassis-dark)" stroke="#78350f" stroke-width="2"/>
+
+      <!-- Plaque Hex Rivets along left & right edges -->
+      <circle cx="-268" cy="12" r="2.5" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+      <circle cx="-268" cy="28" r="2.5" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+      <circle cx="268" cy="12" r="2.5" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+      <circle cx="268" cy="28" r="2.5" fill="#fef08a" stroke="#451a03" stroke-width="1"/>
+
+      <!-- Embossed Stencil Letters: 'THE ARCADE ARCHIVES' -->
+      <text x="0" y="27" fill="url(#gold-emboss)" font-family="'Outfit', Impact, sans-serif" font-size="24" font-weight="900" letter-spacing="5" text-anchor="middle" filter="url(#glow-amber)">
+        THE ARCADE ARCHIVES
+      </text>
+
+      <!-- Bottom Subtitle Ribbon Banner: 'UNEARTH THE EXTRAORDINARY' -->
+      <g transform="translate(0, 48)">
+        <polygon points="-180,0 180,0 190,16 -190,16" fill="url(#chassis-dark)" stroke="url(#brass-metal)" stroke-width="2"/>
+        <!-- Little diamond accent studs -->
+        <polygon points="-160,8 -156,5 -152,8 -156,11" fill="#fef08a"/>
+        <polygon points="160,8 156,5 152,8 156,11" fill="#fef08a"/>
+        <text x="0" y="12" fill="#fef08a" font-family="'Outfit', sans-serif" font-size="11" font-weight="800" letter-spacing="3" text-anchor="middle">
+          UNEARTH THE EXTRAORDINARY
+        </text>
+      </g>
+    </g>
+  </g>
+</svg>

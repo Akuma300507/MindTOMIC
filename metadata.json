@@ -1,0 +1,6 @@
+{
+  "name": "Mind to Mic",
+  "description": "Professional event management system for Mind to Mic oratory speaking competition.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+dist
+.git
+.gitignore
+_old_phase1_scaffold
+data
+uploads
+.env.local
+.DS_Store
