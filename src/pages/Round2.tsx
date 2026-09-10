@@ -121,7 +121,13 @@ export const Round2: React.FC = () => {
       : topicsPool.filter((t) => t && t.status === 'available');
 
     if (available.length === 0) {
-      return reuseAllowed ? [...topicsPool].filter(Boolean).slice(0, wheelCount) : [];
+      return [...topicsPool].filter(Boolean).slice(0, wheelCount);
+    }
+
+    if (available.length < wheelCount && topicsPool.length >= wheelCount) {
+      const needed = wheelCount - available.length;
+      const extras = topicsPool.filter((t) => t && !available.some((a) => a.id === t.id)).slice(0, needed);
+      return [...available, ...extras].filter(Boolean);
     }
 
     return available.filter(Boolean).slice(0, wheelCount);
@@ -736,14 +742,12 @@ export const Round2: React.FC = () => {
         </div>
       </div>
 
-      {/* 3D Spin Reveal Trading Card Modal */}
+      {/* Spin Reveal Trading Card Modal */}
       <SpinRevealCardModal
         isOpen={showRevealModal}
         topic={winningTopic}
-        onClose={() => {
-          handleReplaceUsedTopic();
-          setShowRevealModal(false);
-        }}
+        onClose={() => setShowRevealModal(false)}
+        onStartTimer={() => setShowRevealModal(false)}
         participantName={activeParticipant?.name}
         participantNumber={activeParticipant?.participantNumber}
         onReplaceOnWheel={

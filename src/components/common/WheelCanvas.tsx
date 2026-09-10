@@ -39,9 +39,16 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
 
       const center = size / 2;
       const radius = center - 18;
-      const safeTopics = Array.isArray(topics) ? topics.filter(Boolean) : [];
+      const safeTopics =
+        Array.isArray(topics) && topics.filter(Boolean).length > 0
+          ? topics.filter(Boolean)
+          : Array.from({ length: 8 }, (_, i) => ({
+              id: `standby-${i + 1}`,
+              topic: `Topic ${i + 1}`,
+              status: 'available' as const,
+              category: 'General',
+            }));
       const totalSlices = safeTopics.length;
-      if (totalSlices === 0) return;
 
       const sliceAngle = (2 * Math.PI) / totalSlices;
       const hubRadius = Math.max(30, Math.round(size * 0.075));
