@@ -84,7 +84,20 @@ export const Round2: React.FC = () => {
   const [poolNotice, setPoolNotice] = useState<string | null>(null);
   const [lockedWheelTopics, setLockedWheelTopics] = useState<Topic[] | null>(null);
 
-  const topicsPool = db?.topics || [];
+  // Station-filtered topic pool: includes universal topics (stationId empty or 'all') and topics assigned to current station.
+  // Topics assigned to any other station are strictly excluded.
+  const allTopicsPool = useMemo(() => (db?.topics || []).filter(Boolean), [db?.topics]);
+  const stationTopicsPool = useMemo(() => {
+    if (!currentStationId || currentStationId === 'all') {
+      return allTopicsPool;
+    }
+    return allTopicsPool.filter((t) => {
+      if (!t.stationId || t.stationId === 'all') return true;
+      return t.stationId === currentStationId;
+    });
+  }, [allTopicsPool, currentStationId]);
+
+  const topicsPool = stationTopicsPool;
   const wheelCount = db?.settings.round2.activeWheelTopicCount ?? 20;
   const speechSeconds = db?.settings.round2.speechTimeSeconds ?? 120;
   const buzzerEnabled = db?.settings.round2.buzzerEnabled ?? true;
@@ -112,7 +125,7 @@ export const Round2: React.FC = () => {
   const unusedCount = useMemo(() => topicsPool.filter((t) => t.status === 'available').length, [topicsPool]);
   const usedCount = topicsPool.length - unusedCount;
 
-  // Compute active wheel topics when not locked - strictly available topics so no topic repeats
+  // Compute active wheel topics when not locked - strictly available topics from station pool
   const dynamicWheelTopics = useMemo(() => {
     if (!topicsPool || topicsPool.length === 0) return [];
 
@@ -162,8 +175,8 @@ export const Round2: React.FC = () => {
     unlockSound();
     setPoolNotice(null);
 
-    // Clean wheel topics before spinning: replace any topic that is already used with a fresh unused topic from the pool
-    const pool = (db?.topics || topicsPool || []).filter(Boolean);
+    // Clean wheel topics before spinning: replace any topic that is already used with a fresh unused topic from the station pool
+    const pool = topicsPool.filter(Boolean);
     const cleanedWheel = activeWheelTopics.map((sliceTopic) => {
       if (!sliceTopic) return null;
       const dbTopic = pool.find((t) => t?.id === sliceTopic.id);
@@ -314,10 +327,10 @@ export const Round2: React.FC = () => {
     requestAnimationFrame(animateSpin);
   };
 
-  // Replace used topic on wheel with next unused topic from pool
+  // Replace used topic on wheel with next unused topic from station pool
   const handleReplaceUsedTopic = useCallback(() => {
     if (!winningTopic) return;
-    const pool = (db?.topics || topicsPool || []).filter(Boolean);
+    const pool = topicsPool.filter(Boolean);
     const currentWheel = (lockedWheelTopics || activeWheelTopics || []).filter(Boolean);
     const winningId = winningTopic?.id;
     if (!winningId) return;
@@ -549,7 +562,9 @@ export const Round2: React.FC = () => {
       {/* Topic Pool Status Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs">
         <div className="flex items-center gap-2">
-          <span className="text-slate-400">Topic Pool:</span>
+          <span className="text-slate-400">
+            Topic Pool <strong className="text-purple-300">({currentStation?.name || 'All Stations'})</strong>:
+          </span>
           <span className="px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-mono font-bold text-[11px]">
             {unusedCount} Available
           </span>

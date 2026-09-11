@@ -20,13 +20,41 @@ import { excelService } from '../lib/excel';
 import type { QualificationStatus } from '../types';
 
 export const Results: React.FC = () => {
-  const { db, setCurrentPage, setQualification, batchSetQualification } = useApp();
+  const {
+    db,
+    setCurrentPage,
+    setQualification,
+    batchSetQualification,
+    moveParticipantStation,
+    batchSetStation,
+  } = useApp();
 
   const [activeTab, setActiveTab] = useState<'round1' | 'round2' | 'round3'>('round1');
   const [searchTerm, setSearchTerm] = useState('');
   const [qualificationFilter, setQualificationFilter] = useState<'all' | 'qualified' | 'disqualified' | 'pending'>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkMoveStationId, setBulkMoveStationId] = useState<string>('');
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Available Stations list
+  const availableStations = useMemo(() => {
+    if (db?.settings?.stations && db.settings.stations.length > 0) {
+      return db.settings.stations;
+    }
+    if (db?.stations && Object.keys(db.stations).length > 0) {
+      return Object.values(db.stations).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        location: s.location || '',
+      }));
+    }
+    return [
+      { id: 'station-a', name: 'Station A', location: 'Hall A' },
+      { id: 'station-b', name: 'Station B', location: 'Hall B' },
+      { id: 'station-c', name: 'Station C', location: 'Hall C' },
+      { id: 'station-d', name: 'Station D', location: 'Hall D' },
+    ];
+  }, [db?.settings?.stations, db?.stations]);
 
   const r1Results = db?.round1Results || [];
   const r2Results = db?.round2Results || [];
@@ -142,6 +170,37 @@ export const Results: React.FC = () => {
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Failed to batch update qualification');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSingleMoveStation = async (participantId: string, stationId: string, forRound: 2 | 3) => {
+    setActionLoading(true);
+    try {
+      const found = availableStations.find((s) => s.id === stationId);
+      const stationName = found ? found.name : stationId;
+      await moveParticipantStation(participantId, stationId, stationName, forRound);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Failed to move contestant to station');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleBatchMoveStation = async (forRound: 2 | 3) => {
+    if (selectedIds.length === 0 || !bulkMoveStationId) return;
+    setActionLoading(true);
+    try {
+      const found = availableStations.find((s) => s.id === bulkMoveStationId);
+      const stationName = found ? found.name : bulkMoveStationId;
+      await batchSetStation(selectedIds, bulkMoveStationId, stationName, forRound);
+      setBulkMoveStationId('');
+      setSelectedIds([]);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Failed to move contestants to station');
     } finally {
       setActionLoading(false);
     }
@@ -383,6 +442,66 @@ export const Results: React.FC = () => {
               <span>Reset</span>
             </button>
 
+            {activeTab === 'round1' && (
+              <>
+                <div className="h-4 w-[1px] bg-purple-800/60 mx-1 hidden sm:block" />
+                <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-blue-800/60 text-xs">
+                  <Radio className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="text-slate-300 font-semibold text-[11px]">R2 Station:</span>
+                  <select
+                    value={bulkMoveStationId}
+                    onChange={(e) => setBulkMoveStationId(e.target.value)}
+                    className="bg-transparent text-blue-300 font-bold focus:outline-none text-xs"
+                  >
+                    <option value="" className="bg-slate-900 text-white">Select R2 Station...</option>
+                    {availableStations.map((s) => (
+                      <option key={s.id} value={s.id} className="bg-slate-900 text-white">
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleBatchMoveStation(2)}
+                    disabled={!bulkMoveStationId || actionLoading}
+                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold transition-all disabled:opacity-50 shadow"
+                    title="Move selected contestants to chosen Round 2 station"
+                  >
+                    Move to R2
+                  </button>
+                </div>
+              </>
+            )}
+
+            {activeTab === 'round2' && (
+              <>
+                <div className="h-4 w-[1px] bg-purple-800/60 mx-1 hidden sm:block" />
+                <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-purple-800/60 text-xs">
+                  <Radio className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="text-slate-300 font-semibold text-[11px]">R3 Finals:</span>
+                  <select
+                    value={bulkMoveStationId}
+                    onChange={(e) => setBulkMoveStationId(e.target.value)}
+                    className="bg-transparent text-purple-300 font-bold focus:outline-none text-xs"
+                  >
+                    <option value="" className="bg-slate-900 text-white">Select Finals Station...</option>
+                    {availableStations.map((s) => (
+                      <option key={s.id} value={s.id} className="bg-slate-900 text-white">
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleBatchMoveStation(3)}
+                    disabled={!bulkMoveStationId || actionLoading}
+                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold transition-all disabled:opacity-50 shadow"
+                    title="Move selected contestants to chosen Finals station"
+                  >
+                    Move to Finals
+                  </button>
+                </div>
+              </>
+            )}
+
             <button
               onClick={() => setSelectedIds([])}
               className="text-xs text-slate-400 hover:text-white px-2 py-1"
@@ -420,13 +539,14 @@ export const Results: React.FC = () => {
                   <th className="py-3.5 px-4 text-center">Speech Duration</th>
                   <th className="py-3.5 px-4 text-center">Qualification Status</th>
                   <th className="py-3.5 px-4 text-center">Qualification Actions</th>
+                  <th className="py-3.5 px-4 text-center">Round 2 Station</th>
                   <th className="py-3.5 px-4 text-right">Timestamp</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {filteredR1.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <td colSpan={10} className="py-12 text-center text-slate-400">
                       No Round 1 speeches match the filter.
                     </td>
                   </tr>
@@ -521,6 +641,36 @@ export const Results: React.FC = () => {
                             )}
                           </div>
                         </td>
+                        <td className="py-3.5 px-4 text-center">
+                          {qualStatus === 'qualified' ? (
+                            <div className="inline-flex flex-col items-center gap-1">
+                              {p?.round2StationName || (p?.stationName && p?.round2StationId) ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/60 shadow-sm">
+                                  <Radio className="w-2.5 h-2.5 text-blue-400" />
+                                  <span>{p.round2StationName || p.stationName}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-amber-400 font-medium">Assign Station:</span>
+                              )}
+                              <select
+                                value={p?.round2StationId || p?.stationId || ''}
+                                onChange={(e) => handleSingleMoveStation(r.participantId, e.target.value, 2)}
+                                disabled={actionLoading}
+                                className="bg-slate-950 border border-slate-800 text-[10px] text-blue-300 hover:text-white px-1.5 py-1 rounded focus:outline-none focus:border-blue-500 cursor-pointer"
+                                title="Move qualified contestant to Round 2 station"
+                              >
+                                <option value="">Select R2 Station...</option>
+                                {availableStations.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <span className="text-slate-600 text-[11px]">—</span>
+                          )}
+                        </td>
                         <td className="py-3.5 px-4 text-right text-slate-400 font-mono text-[11px]">
                           {new Date(r.endTime).toLocaleTimeString()}
                         </td>
@@ -557,13 +707,14 @@ export const Results: React.FC = () => {
                   <th className="py-3.5 px-4 text-center">Speech Duration</th>
                   <th className="py-3.5 px-4 text-center">Qualification Status</th>
                   <th className="py-3.5 px-4 text-center">Qualification Actions</th>
+                  <th className="py-3.5 px-4 text-center">Round 3 Finals Station</th>
                   <th className="py-3.5 px-4 text-right">Timestamp</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {filteredR2.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-12 text-center text-slate-400">
+                    <td colSpan={11} className="py-12 text-center text-slate-400">
                       No Round 2 speeches match the filter.
                     </td>
                   </tr>
@@ -663,6 +814,36 @@ export const Results: React.FC = () => {
                               </button>
                             )}
                           </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          {qualStatus === 'qualified' ? (
+                            <div className="inline-flex flex-col items-center gap-1">
+                              {p?.round3StationName || (p?.stationName && p?.round3StationId) ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/60 shadow-sm">
+                                  <Radio className="w-2.5 h-2.5 text-purple-400" />
+                                  <span>{p.round3StationName || p.stationName}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-amber-400 font-medium">Assign Finals:</span>
+                              )}
+                              <select
+                                value={p?.round3StationId || p?.stationId || ''}
+                                onChange={(e) => handleSingleMoveStation(r.participantId, e.target.value, 3)}
+                                disabled={actionLoading}
+                                className="bg-slate-950 border border-slate-800 text-[10px] text-purple-300 hover:text-white px-1.5 py-1 rounded focus:outline-none focus:border-purple-500 cursor-pointer"
+                                title="Move qualified contestant to Round 3 finals station"
+                              >
+                                <option value="">Select Finals Station...</option>
+                                {availableStations.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <span className="text-slate-600 text-[11px]">—</span>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 text-right text-slate-400 font-mono text-[11px]">
                           {new Date(r.endTime).toLocaleTimeString()}

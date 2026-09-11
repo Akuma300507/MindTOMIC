@@ -22,6 +22,12 @@ export interface Participant {
   phone?: string;
   stationId?: string; // e.g., 'station-a', 'station-b'
   stationName?: string; // e.g., 'Station A'
+  round1StationId?: string;
+  round1StationName?: string;
+  round2StationId?: string;
+  round2StationName?: string;
+  round3StationId?: string;
+  round3StationName?: string;
   status: 'registered' | 'checked_in' | 'active' | 'eliminated' | 'completed' | 'qualified' | 'disqualified';
   round1Status: RoundStatus;
   round2Status: RoundStatus;
@@ -42,6 +48,8 @@ export interface Topic {
   topicId?: string; // e.g., 'TOP-001' or custom ID
   topic: string;
   category?: string;
+  stationId?: string; // e.g., 'station-a', 'station-b', or 'all'
+  stationName?: string; // e.g., 'Station A', 'Station B', or 'All Stations'
   status: 'available' | 'used';
   usedByParticipantId?: string;
   usedByParticipantName?: string;

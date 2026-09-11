@@ -248,13 +248,23 @@ export const api = {
     return res.json();
   },
 
-  async batchSetStation(participantIds: string[], stationId: string, stationName?: string): Promise<{ success: boolean; count: number; participants: Participant[] }> {
+  async batchSetStation(participantIds: string[], stationId: string, stationName?: string, forRound?: 1 | 2 | 3): Promise<{ success: boolean; count: number; participants: Participant[] }> {
     const res = await fetch('/api/participants/station/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participantIds, stationId, stationName }),
+      body: JSON.stringify({ participantIds, stationId, stationName, forRound }),
     });
     if (!res.ok) throw new Error('Failed to batch update participant station');
+    return res.json();
+  },
+
+  async moveParticipantStation(id: string, stationId: string, stationName?: string, forRound?: 1 | 2 | 3): Promise<{ success: boolean; participant: Participant }> {
+    const res = await fetch(`/api/participants/${id}/move-station`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stationId, stationName, forRound }),
+    });
+    if (!res.ok) throw new Error('Failed to move participant station');
     return res.json();
   },
 
@@ -298,7 +308,7 @@ export const api = {
     return res.json();
   },
 
-  async addTopic(t: { topic: string; category?: string; topicId?: string }): Promise<Topic> {
+  async addTopic(t: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }): Promise<Topic> {
     const res = await fetch('/api/topics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -323,13 +333,27 @@ export const api = {
     if (!res.ok) throw new Error('Failed to delete topic');
   },
 
-  async batchAddTopics(topics: { topic: string; category?: string; topicId?: string }[]): Promise<{ count: number; topics: Topic[] }> {
+  async batchAddTopics(topics: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[], stationId?: string): Promise<{ count: number; topics: Topic[] }> {
     const res = await fetch('/api/topics/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topics }),
+      body: JSON.stringify({ topics, stationId }),
     });
     if (!res.ok) throw new Error('Failed to batch import topics');
+    return res.json();
+  },
+
+  async batchUpdateTopicStations(
+    topicIds: string[],
+    stationId?: string,
+    stationName?: string
+  ): Promise<{ success: boolean; count: number; topics: Topic[]; allTopics: Topic[] }> {
+    const res = await fetch('/api/topics/batch-station', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topicIds, stationId, stationName }),
+    });
+    if (!res.ok) throw new Error('Failed to update topic stations');
     return res.json();
   },
 

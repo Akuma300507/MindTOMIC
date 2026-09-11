@@ -1004,10 +1004,31 @@ app.post('/api/round1/assign-image', (req: Request, res: Response) => {
 app.post('/api/round2/spin-topic', (req: Request, res: Response) => {
   const { participantId, participantName, stationId, wheelTopicIds } = req.body;
 
-  // Pool of available topics
-  let pool = db.topics.filter((t) => t.status === 'available');
+  // Pool of available topics strictly isolated for station if specified
+  let pool: Topic[] = [];
+  if (stationId && stationId !== 'all') {
+    const stationCandidates = db.topics.filter((t) => t.stationId === stationId);
+    if (stationCandidates.length > 0) {
+      pool = stationCandidates.filter((t) => t.status === 'available');
+      if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
+        pool = stationCandidates;
+      }
+    }
+  }
+
   if (pool.length === 0) {
-    if (db.settings.round2.topicReuseAllowed) {
+    const otherStationTopics = stationId && stationId !== 'all'
+      ? db.topics.filter((t) => t.stationId && t.stationId !== 'all' && t.stationId !== stationId)
+      : [];
+    const availablePool = db.topics.filter((t) => !otherStationTopics.includes(t));
+    pool = availablePool.filter((t) => t.status === 'available');
+    if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
+      pool = availablePool.length > 0 ? availablePool : db.topics;
+    }
+  }
+
+  if (pool.length === 0) {
+    if (db.settings.round2.topicReuseAllowed && db.topics.length > 0) {
       pool = db.topics;
     } else {
       return res.status(409).json({
@@ -1455,14 +1476,36 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     station.activeParticipant = db.participants.find((p) => p.id === participantId) || station.activeParticipant;
   }
 
-  // Pool of available topics globally
-  let pool = db.topics.filter((t) => t.status === 'available');
+  // Filter available topics strictly for THIS station to prevent repeating across stations
+  const stationId = station.id;
+  const otherStationTopics = db.topics.filter(
+    (t) => t.stationId && t.stationId !== 'all' && t.stationId !== stationId && t.stationId !== station.name
+  );
+  const stationCandidates = db.topics.filter(
+    (t) => t.stationId === stationId || t.stationId === station.name
+  );
+
+  let pool: Topic[] = [];
+  if (stationCandidates.length > 0) {
+    pool = stationCandidates.filter((t) => t.status === 'available');
+    if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
+      pool = stationCandidates;
+    }
+  } else {
+    // Unassigned or universal topics, strictly excluding other stations' topics
+    const availablePool = db.topics.filter((t) => !otherStationTopics.includes(t));
+    pool = availablePool.filter((t) => t.status === 'available');
+    if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
+      pool = availablePool.length > 0 ? availablePool : db.topics;
+    }
+  }
+
   if (pool.length === 0) {
-    if (db.settings.round2.topicReuseAllowed) {
-      pool = db.topics;
+    if (db.settings.round2.topicReuseAllowed && db.topics.length > 0) {
+      pool = stationCandidates.length > 0 ? stationCandidates : db.topics;
     } else {
       return res.status(409).json({
-        error: 'No unused topics left in the pool. Reset topic pool or allow topic reuse in settings.',
+        error: `No unused topics available for ${station.name}. Please upload topics assigned to ${station.name} or allow topic reuse in settings.`,
       });
     }
   }
@@ -2126,29 +2169,76 @@ app.post('/api/participants/batch', (req: Request, res: Response) => {
 });
 
 app.post('/api/participants/station/batch', (req: Request, res: Response) => {
-  const { participantIds, stationId, stationName } = req.body;
+  const { participantIds, stationId, stationName, forRound } = req.body;
   if (!Array.isArray(participantIds)) {
     return res.status(400).json({ error: 'participantIds array is required' });
   }
+
+  const targetStationId = stationId === 'unassign' || stationId === 'all' || !stationId ? '' : stationId;
+  const targetStationName = targetStationId ? (stationName || resolveStationName(targetStationId) || '') : '';
 
   const updated: Participant[] = [];
   participantIds.forEach((id) => {
     const idx = db.participants.findIndex((p) => p.id === id);
     if (idx !== -1) {
-      db.participants[idx].stationId = stationId || '';
-      db.participants[idx].stationName = stationName || '';
-      db.participants[idx].updatedAt = new Date().toISOString();
-      updated.push(db.participants[idx]);
+      const p = db.participants[idx];
+      p.stationId = targetStationId;
+      p.stationName = targetStationName;
+      if (forRound === 1) {
+        p.round1StationId = targetStationId;
+        p.round1StationName = targetStationName;
+      } else if (forRound === 2) {
+        p.round2StationId = targetStationId;
+        p.round2StationName = targetStationName;
+      } else if (forRound === 3) {
+        p.round3StationId = targetStationId;
+        p.round3StationName = targetStationName;
+      }
+      p.updatedAt = new Date().toISOString();
+      updated.push(p);
     }
   });
 
   persistDB();
   logAction(
     'Batch Station Assignment',
-    `Assigned ${updated.length} participants to station: ${stationName || stationId || 'Unassigned'}`
+    `Assigned ${updated.length} participants to station: ${targetStationName || 'Unassigned'}${forRound ? ` for Round ${forRound}` : ''}`
   );
   broadcastSSE('participants_batch_updated', updated);
   res.json({ success: true, count: updated.length, participants: updated });
+});
+
+// Single participant move station (with round tracking)
+app.post('/api/participants/:id/move-station', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { stationId, stationName, forRound } = req.body;
+  const idx = db.participants.findIndex((p) => p.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Participant not found' });
+  }
+
+  const targetStationId = stationId === 'unassign' || stationId === 'all' || !stationId ? '' : stationId;
+  const targetStationName = targetStationId ? (stationName || resolveStationName(targetStationId) || '') : '';
+
+  const p = db.participants[idx];
+  p.stationId = targetStationId;
+  p.stationName = targetStationName;
+  if (forRound === 1) {
+    p.round1StationId = targetStationId;
+    p.round1StationName = targetStationName;
+  } else if (forRound === 2) {
+    p.round2StationId = targetStationId;
+    p.round2StationName = targetStationName;
+  } else if (forRound === 3) {
+    p.round3StationId = targetStationId;
+    p.round3StationName = targetStationName;
+  }
+  p.updatedAt = new Date().toISOString();
+
+  persistDB();
+  logAction('Participant Station Moved', `Moved ${p.name} (${p.participantNumber}) to ${targetStationName || 'Unassigned'}${forRound ? ` for Round ${forRound}` : ''}`);
+  broadcastSSE('participant_updated', p);
+  res.json({ success: true, participant: p });
 });
 
 // Custom Fields
@@ -2214,20 +2304,26 @@ app.get('/api/topics', (req: Request, res: Response) => {
 });
 
 app.post('/api/topics', (req: Request, res: Response) => {
-  const { topic, category, topicId } = req.body;
+  const { topic, category, topicId, stationId, stationName } = req.body;
   if (!topic) return res.status(400).json({ error: 'Topic text is required' });
+
+  const finalStId = !stationId || stationId === 'all' || stationId === 'universal' ? undefined : stationId;
+  const finalStName = finalStId ? (stationName || resolveStationName(finalStId)) : undefined;
 
   const newTopic: Topic = {
     id: `top-${Date.now()}`,
     topicId: topicId?.trim() || `TOP-${String(db.topics.length + 1).padStart(3, '0')}`,
     topic: topic.trim(),
     category: category?.trim() || 'General',
+    stationId: finalStId,
+    stationName: finalStName,
     status: 'available',
   };
 
   db.topics.push(newTopic);
   persistDB();
-  logAction('Topic Created', `Added topic [${newTopic.topicId}]: "${newTopic.topic.substring(0, 40)}..."`);
+  logAction('Topic Created', `Added topic [${newTopic.topicId}]: "${newTopic.topic.substring(0, 40)}..." (${newTopic.stationName || 'Universal'})`);
+  broadcastSSE('topics_updated', db.topics);
   res.json(newTopic);
 });
 
@@ -2236,35 +2332,87 @@ app.put('/api/topics/:id', (req: Request, res: Response) => {
   const idx = db.topics.findIndex((t) => t.id === id);
   if (idx === -1) return res.status(404).json({ error: 'Topic not found' });
 
+  const bodyStationId = req.body.stationId;
+  let finalStId = db.topics[idx].stationId;
+  let finalStName = db.topics[idx].stationName;
+
+  if (bodyStationId !== undefined) {
+    if (!bodyStationId || bodyStationId === 'all' || bodyStationId === 'universal') {
+      finalStId = undefined;
+      finalStName = undefined;
+    } else {
+      finalStId = bodyStationId;
+      finalStName = req.body.stationName || resolveStationName(bodyStationId);
+    }
+  }
+
   db.topics[idx] = {
     ...db.topics[idx],
     ...req.body,
+    stationId: finalStId,
+    stationName: finalStName,
     id: db.topics[idx].id,
   };
 
   persistDB();
+  broadcastSSE('topics_updated', db.topics);
   res.json(db.topics[idx]);
+});
+
+// Bulk update topic stations
+app.post('/api/topics/batch-station', (req: Request, res: Response) => {
+  const { topicIds, stationId, stationName } = req.body;
+  if (!Array.isArray(topicIds)) {
+    return res.status(400).json({ error: 'topicIds array is required' });
+  }
+
+  const targetStationId = !stationId || stationId === 'all' || stationId === 'universal' ? undefined : stationId;
+  const targetStationName = targetStationId ? (stationName || resolveStationName(targetStationId)) : undefined;
+
+  const updated: Topic[] = [];
+  topicIds.forEach((id) => {
+    const t = db.topics.find((item) => item.id === id);
+    if (t) {
+      t.stationId = targetStationId;
+      t.stationName = targetStationName;
+      updated.push(t);
+    }
+  });
+
+  persistDB();
+  logAction('Batch Topic Station Assignment', `Assigned ${updated.length} topics to ${targetStationName || 'Universal / All Stations'}`);
+  broadcastSSE('topics_updated', db.topics);
+  res.json({ success: true, count: updated.length, topics: updated, allTopics: db.topics });
 });
 
 app.delete('/api/topics/:id', (req: Request, res: Response) => {
   const { id } = req.params;
   db.topics = db.topics.filter((t) => t.id !== id);
   persistDB();
+  broadcastSSE('topics_updated', db.topics);
   res.json({ success: true, id });
 });
 
 app.post('/api/topics/batch', (req: Request, res: Response) => {
-  const items: { topic: string; category?: string; topicId?: string }[] = req.body.topics || [];
+  const items: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[] = req.body.topics || [];
+  const defaultStationId = req.body.stationId === 'all' || !req.body.stationId ? undefined : req.body.stationId;
+  const defaultStationName = defaultStationId ? (req.body.stationName || resolveStationName(defaultStationId)) : undefined;
+
   const added: Topic[] = [];
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (!item.topic) continue;
+    const stId = item.stationId === 'all' ? undefined : (item.stationId || defaultStationId);
+    const stName = stId ? (item.stationName || resolveStationName(stId)) : undefined;
+
     const t: Topic = {
       id: `top-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       topicId: item.topicId?.trim() || `TOP-${String(db.topics.length + i + 1).padStart(3, '0')}`,
       topic: item.topic.trim(),
       category: item.category?.trim() || 'General',
+      stationId: stId,
+      stationName: stName,
       status: 'available',
     };
     db.topics.push(t);
@@ -2273,6 +2421,7 @@ app.post('/api/topics/batch', (req: Request, res: Response) => {
 
   persistDB();
   logAction('Batch Topics Import', `Imported ${added.length} topics into topic repository`);
+  broadcastSSE('topics_updated', db.topics);
   res.json({ success: true, count: added.length, topics: added });
 });
 

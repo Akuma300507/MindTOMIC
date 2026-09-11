@@ -96,16 +96,22 @@ interface AppContextType {
   updateParticipant: (id: string, p: Partial<Participant>) => Promise<Participant>;
   deleteParticipant: (id: string) => Promise<void>;
   importParticipants: (list: Partial<Participant>[]) => Promise<number>;
-  batchSetStation: (participantIds: string[], stationId: string, stationName?: string) => Promise<any>;
+  batchSetStation: (participantIds: string[], stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => Promise<any>;
+  moveParticipantStation: (participantId: string, stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => Promise<Participant>;
   // Custom Fields
   addCustomField: (field: Partial<CustomFieldDefinition>) => Promise<CustomFieldDefinition>;
   updateCustomField: (id: string, field: Partial<CustomFieldDefinition>) => Promise<CustomFieldDefinition>;
   deleteCustomField: (id: string) => Promise<void>;
   // Topics
-  addTopic: (topic: string, category?: string, topicId?: string) => Promise<Topic>;
+  addTopic: (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => Promise<Topic>;
   updateTopic: (id: string, updates: Partial<Topic>) => Promise<Topic>;
   deleteTopic: (id: string) => Promise<void>;
-  importTopics: (list: { topic: string; category?: string; topicId?: string }[]) => Promise<number>;
+  importTopics: (list: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[], defaultStationId?: string) => Promise<number>;
+  batchUpdateTopicStations: (
+    topicIds: string[],
+    stationId?: string,
+    stationName?: string
+  ) => Promise<{ success: boolean; count: number; topics: Topic[]; allTopics: Topic[] }>;
   resetTopicsStatus: () => Promise<void>;
   // Images
   addImage: (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => Promise<EventImage>;
@@ -1283,8 +1289,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [reloadState]);
 
   const batchSetStation = useCallback(
-    async (participantIds: string[], stationId: string, stationName?: string) => {
-      const res = await api.batchSetStation(participantIds, stationId, stationName);
+    async (participantIds: string[], stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => {
+      const res = await api.batchSetStation(participantIds, stationId, stationName, forRound);
       setDb((prev) => {
         if (!prev) return prev;
         const map = new Map(res.participants.map((p) => [p.id, p]));
@@ -1294,6 +1300,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       });
       return res;
+    },
+    []
+  );
+
+  const moveParticipantStation = useCallback(
+    async (participantId: string, stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => {
+      const res = await api.moveParticipantStation(participantId, stationId, stationName, forRound);
+      setDb((prev) =>
+        prev
+          ? {
+              ...prev,
+              participants: prev.participants.map((p) => (p.id === participantId ? res.participant : p)),
+            }
+          : prev
+      );
+      return res.participant;
     },
     []
   );
@@ -1331,8 +1353,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // Topics
-  const addTopic = useCallback(async (topic: string, category?: string, topicId?: string) => {
-    const created = await api.addTopic({ topic, category, topicId });
+  const addTopic = useCallback(async (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => {
+    const created = await api.addTopic({ topic, category, topicId, stationId, stationName });
     setDb((prev) => (prev ? { ...prev, topics: [...prev.topics, created] } : prev));
     return created;
   }, []);
@@ -1355,11 +1377,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDb((prev) => (prev ? { ...prev, topics: prev.topics.filter((t) => t.id !== id) } : prev));
   }, []);
 
-  const importTopics = useCallback(async (list: { topic: string; category?: string; topicId?: string }[]) => {
-    const res = await api.batchAddTopics(list);
+  const importTopics = useCallback(async (list: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[], defaultStationId?: string) => {
+    const res = await api.batchAddTopics(list, defaultStationId);
     await reloadState();
     return res.count;
   }, [reloadState]);
+
+  const batchUpdateTopicStations = useCallback(
+    async (topicIds: string[], stationId?: string, stationName?: string) => {
+      const res = await api.batchUpdateTopicStations(topicIds, stationId, stationName);
+      setDb((prev) => (prev ? { ...prev, topics: res.allTopics } : prev));
+      return res;
+    },
+    []
+  );
 
   const resetTopicsStatus = useCallback(async () => {
     await api.resetTopicsStatus();
@@ -1592,6 +1623,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateTopic,
         deleteTopic,
         importTopics,
+        batchUpdateTopicStations,
+        moveParticipantStation,
         resetTopicsStatus,
         addImage,
         updateImage,

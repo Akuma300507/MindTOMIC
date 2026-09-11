@@ -66,6 +66,12 @@ export const Participants: React.FC = () => {
     mobile?: string;
     stationId?: string;
     stationName?: string;
+    round1StationId?: string;
+    round1StationName?: string;
+    round2StationId?: string;
+    round2StationName?: string;
+    round3StationId?: string;
+    round3StationName?: string;
     status: Participant['status'];
     round1Qualified: QualificationStatus;
     round2Qualified: QualificationStatus;
@@ -77,6 +83,12 @@ export const Participants: React.FC = () => {
     mobile: '',
     stationId: '',
     stationName: '',
+    round1StationId: '',
+    round1StationName: '',
+    round2StationId: '',
+    round2StationName: '',
+    round3StationId: '',
+    round3StationName: '',
     status: 'active',
     round1Qualified: 'pending',
     round2Qualified: 'pending',
@@ -139,41 +151,37 @@ export const Participants: React.FC = () => {
           (p.stationName && p.stationName.toLowerCase().includes(searchTerm.toLowerCase())) ||
           (p.stationId && p.stationId.toLowerCase().includes(searchTerm.toLowerCase()));
 
-        let matchesStatus = true;
-        if (statusFilter === 'all') {
-          matchesStatus = true;
-        } else if (statusFilter === 'r1_qualified') {
-          matchesStatus = p.round1Qualified === 'qualified';
-        } else if (statusFilter === 'r2_qualified') {
-          matchesStatus = p.round2Qualified === 'qualified';
-        } else if (statusFilter === 'r3_qualified') {
-          matchesStatus = p.round3Qualified === 'qualified';
-        } else if (statusFilter === 'disqualified') {
-          matchesStatus =
+        if (!matchesSearch) return false;
+
+        if (statusFilter === 'r1_qualified') return p.round1Qualified === 'qualified';
+        if (statusFilter === 'r2_qualified') return p.round2Qualified === 'qualified';
+        if (statusFilter === 'r3_qualified') return p.round3Qualified === 'qualified';
+        if (statusFilter === 'disqualified')
+          return (
             p.round1Qualified === 'disqualified' ||
             p.round2Qualified === 'disqualified' ||
-            p.round3Qualified === 'disqualified' ||
-            p.status === 'eliminated';
-        } else {
-          matchesStatus = p.status === statusFilter;
-        }
+            p.round3Qualified === 'disqualified'
+          );
+        if (statusFilter !== 'all') return p.status === statusFilter;
 
-        let matchesStation = true;
-        if (stationFilter === 'unassigned') {
-          matchesStation = !p.stationId;
-        } else if (stationFilter !== 'all') {
-          matchesStation = p.stationId === stationFilter;
-        }
-
-        return matchesSearch && matchesStatus && matchesStation;
+        return true;
+      })
+      .filter((p) => {
+        if (stationFilter === 'all') return true;
+        if (stationFilter === 'unassigned') return !p.stationId;
+        return p.stationId === stationFilter;
       })
       .sort((a, b) => {
-        let cmp = 0;
-        if (sortBy === 'number') cmp = a.participantNumber.localeCompare(b.participantNumber);
-        else if (sortBy === 'name') cmp = a.name.localeCompare(b.name);
-        else if (sortBy === 'status') cmp = a.status.localeCompare(b.status);
-        else if (sortBy === 'station') cmp = (a.stationName || 'zzz').localeCompare(b.stationName || 'zzz');
-        return sortOrder === 'asc' ? cmp : -cmp;
+        let comp = 0;
+        if (sortBy === 'number') comp = a.participantNumber.localeCompare(b.participantNumber);
+        if (sortBy === 'name') comp = a.name.localeCompare(b.name);
+        if (sortBy === 'status') comp = a.status.localeCompare(b.status);
+        if (sortBy === 'station') {
+          const stA = a.stationName || a.stationId || 'zzz';
+          const stB = b.stationName || b.stationId || 'zzz';
+          comp = stA.localeCompare(stB);
+        }
+        return sortOrder === 'asc' ? comp : -comp;
       });
   }, [db?.participants, searchTerm, statusFilter, stationFilter, sortBy, sortOrder]);
 
@@ -186,6 +194,12 @@ export const Participants: React.FC = () => {
       mobile: '',
       stationId: '',
       stationName: '',
+      round1StationId: '',
+      round1StationName: '',
+      round2StationId: '',
+      round2StationName: '',
+      round3StationId: '',
+      round3StationName: '',
       status: 'active',
       round1Qualified: 'pending',
       round2Qualified: 'pending',
@@ -203,6 +217,12 @@ export const Participants: React.FC = () => {
       mobile: p.mobile || p.phone || p.customData?.mobile || p.customData?.phone || '',
       stationId: p.stationId || '',
       stationName: p.stationName || '',
+      round1StationId: p.round1StationId || '',
+      round1StationName: p.round1StationName || '',
+      round2StationId: p.round2StationId || '',
+      round2StationName: p.round2StationName || '',
+      round3StationId: p.round3StationId || '',
+      round3StationName: p.round3StationName || '',
       status: p.status,
       round1Qualified: p.round1Qualified || 'pending',
       round2Qualified: p.round2Qualified || 'pending',
@@ -225,6 +245,12 @@ export const Participants: React.FC = () => {
         phone: mobileClean,
         stationId: formData.stationId ? formData.stationId : undefined,
         stationName: formData.stationName ? formData.stationName : undefined,
+        round1StationId: formData.round1StationId ? formData.round1StationId : undefined,
+        round1StationName: formData.round1StationName ? formData.round1StationName : undefined,
+        round2StationId: formData.round2StationId ? formData.round2StationId : undefined,
+        round2StationName: formData.round2StationName ? formData.round2StationName : undefined,
+        round3StationId: formData.round3StationId ? formData.round3StationId : undefined,
+        round3StationName: formData.round3StationName ? formData.round3StationName : undefined,
         status: formData.status,
         round1Qualified: formData.round1Qualified,
         round2Qualified: formData.round2Qualified,
@@ -243,6 +269,12 @@ export const Participants: React.FC = () => {
         phone: mobileClean,
         stationId: formData.stationId ? formData.stationId : undefined,
         stationName: formData.stationName ? formData.stationName : undefined,
+        round1StationId: formData.round1StationId ? formData.round1StationId : undefined,
+        round1StationName: formData.round1StationName ? formData.round1StationName : undefined,
+        round2StationId: formData.round2StationId ? formData.round2StationId : undefined,
+        round2StationName: formData.round2StationName ? formData.round2StationName : undefined,
+        round3StationId: formData.round3StationId ? formData.round3StationId : undefined,
+        round3StationName: formData.round3StationName ? formData.round3StationName : undefined,
         status: formData.status,
         round1Qualified: formData.round1Qualified,
         round2Qualified: formData.round2Qualified,
@@ -276,10 +308,10 @@ export const Participants: React.FC = () => {
     setBatchLoading(true);
     try {
       if (batchStationId === 'unassign') {
-        await batchSetStation(selectedIds, '', '');
+        await batchSetStation(selectedIds, '', '', batchRound);
       } else {
         const found = availableStations.find((s) => s.id === batchStationId);
-        await batchSetStation(selectedIds, batchStationId, found ? found.name : batchStationId);
+        await batchSetStation(selectedIds, batchStationId, found ? found.name : batchStationId, batchRound);
       }
       setSelectedIds([]);
       setBatchStationId('');
@@ -845,32 +877,54 @@ export const Participants: React.FC = () => {
 
                       {/* Station Badge & Quick Changer */}
                       <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-2">
-                          {p.stationId ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-purple-950/70 text-purple-300 border border-purple-800/60 shadow-sm whitespace-nowrap">
-                              <Radio className="w-3 h-3 text-purple-400" />
-                              <span>{p.stationName || p.stationId.toUpperCase()}</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-slate-500 bg-slate-950 border border-slate-800 whitespace-nowrap">
-                              Unassigned
-                            </span>
-                          )}
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            {p.stationId ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-purple-950/70 text-purple-300 border border-purple-800/60 shadow-sm whitespace-nowrap">
+                                <Radio className="w-3 h-3 text-purple-400" />
+                                <span>{p.stationName || p.stationId.toUpperCase()}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-slate-500 bg-slate-950 border border-slate-800 whitespace-nowrap">
+                                Unassigned
+                              </span>
+                            )}
 
-                          {/* Quick station reassignment dropdown */}
-                          <select
-                            value={p.stationId || ''}
-                            onChange={(e) => handleQuickStationChange(p, e.target.value)}
-                            className="bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 hover:text-white px-1.5 py-1 rounded focus:outline-none focus:border-purple-500 cursor-pointer"
-                            title="Quick change station"
-                          >
-                            <option value="">No Station</option>
-                            {availableStations.map((stn) => (
-                              <option key={stn.id} value={stn.id}>
-                                {stn.name}
-                              </option>
-                            ))}
-                          </select>
+                            {/* Quick station reassignment dropdown */}
+                            <select
+                              value={p.stationId || ''}
+                              onChange={(e) => handleQuickStationChange(p, e.target.value)}
+                              className="bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400 hover:text-white px-1.5 py-1 rounded focus:outline-none focus:border-purple-500 cursor-pointer"
+                              title="Quick change station"
+                            >
+                              <option value="">No Station</option>
+                              {availableStations.map((stn) => (
+                                <option key={stn.id} value={stn.id}>
+                                  {stn.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {(p.round1StationName || p.round2StationName || p.round3StationName) && (
+                            <div className="flex flex-wrap items-center gap-1 text-[9px] font-mono">
+                              {p.round1StationName && (
+                                <span className="px-1.5 py-0.5 rounded bg-blue-950/60 border border-blue-800/40 text-blue-300" title="Round 1 Station">
+                                  R1: {p.round1StationName}
+                                </span>
+                              )}
+                              {p.round2StationName && (
+                                <span className="px-1.5 py-0.5 rounded bg-purple-950/60 border border-purple-800/40 text-purple-300" title="Round 2 Station">
+                                  R2: {p.round2StationName}
+                                </span>
+                              )}
+                              {p.round3StationName && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40 text-emerald-300" title="Round 3 Station">
+                                  R3: {p.round3StationName}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -1031,49 +1085,130 @@ export const Participants: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-slate-400 text-xs font-semibold mb-1">Round 1</label>
+                  {/* Round 1 */}
+                  <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <label className="block text-slate-300 text-xs font-bold">Round 1 (3 Places)</label>
                     <select
                       value={formData.round1Qualified}
                       onChange={(e) =>
                         setFormData({ ...formData, round1Qualified: e.target.value as QualificationStatus })
                       }
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:border-purple-500 focus:outline-none"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:border-purple-500 focus:outline-none"
                     >
                       <option value="pending">Pending</option>
                       <option value="qualified">Qualified</option>
                       <option value="disqualified">Disqualified</option>
                     </select>
+
+                    <div>
+                      <span className="text-[10px] text-slate-400">R1 Station:</span>
+                      <select
+                        value={formData.round1StationId || ''}
+                        onChange={(e) => {
+                          const sid = e.target.value;
+                          const stn = availableStations.find((s) => s.id === sid);
+                          setFormData({
+                            ...formData,
+                            round1StationId: sid,
+                            round1StationName: stn ? stn.name : sid,
+                          });
+                        }}
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-blue-300 focus:outline-none mt-0.5"
+                      >
+                        <option value="">Default Station</option>
+                        {availableStations.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-slate-400 text-xs font-semibold mb-1">Round 2</label>
+                  {/* Round 2 */}
+                  <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <label className="block text-slate-300 text-xs font-bold">Round 2 (2 Places)</label>
                     <select
                       value={formData.round2Qualified}
                       onChange={(e) =>
                         setFormData({ ...formData, round2Qualified: e.target.value as QualificationStatus })
                       }
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:border-purple-500 focus:outline-none"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:border-purple-500 focus:outline-none"
                     >
                       <option value="pending">Pending</option>
                       <option value="qualified">Qualified</option>
                       <option value="disqualified">Disqualified</option>
                     </select>
+
+                    <div>
+                      <span className="text-[10px] text-slate-400">R2 Station:</span>
+                      <select
+                        value={formData.round2StationId || ''}
+                        onChange={(e) => {
+                          const sid = e.target.value;
+                          const stn = availableStations.find((s) => s.id === sid);
+                          setFormData({
+                            ...formData,
+                            round2StationId: sid,
+                            round2StationName: stn ? stn.name : sid,
+                            // If user is currently setting Round 2 station, also set current stationId
+                            stationId: sid || formData.stationId,
+                            stationName: stn ? stn.name : formData.stationName,
+                          });
+                        }}
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-purple-300 focus:outline-none mt-0.5"
+                      >
+                        <option value="">Choose R2 Station...</option>
+                        {availableStations.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-slate-400 text-xs font-semibold mb-1">Round 3</label>
+                  {/* Round 3 */}
+                  <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <label className="block text-slate-300 text-xs font-bold">Round 3 Finals (1 Place)</label>
                     <select
                       value={formData.round3Qualified}
                       onChange={(e) =>
                         setFormData({ ...formData, round3Qualified: e.target.value as QualificationStatus })
                       }
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:border-purple-500 focus:outline-none"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:border-purple-500 focus:outline-none"
                     >
                       <option value="pending">Pending</option>
-                      <option value="qualified">Qualified</option>
+                      <option value="qualified">Qualified / Champion</option>
                       <option value="disqualified">Disqualified</option>
                     </select>
+
+                    <div>
+                      <span className="text-[10px] text-slate-400">R3 Finals Station:</span>
+                      <select
+                        value={formData.round3StationId || ''}
+                        onChange={(e) => {
+                          const sid = e.target.value;
+                          const stn = availableStations.find((s) => s.id === sid);
+                          setFormData({
+                            ...formData,
+                            round3StationId: sid,
+                            round3StationName: stn ? stn.name : sid,
+                            // If setting Round 3 station, also set current stationId
+                            stationId: sid || formData.stationId,
+                            stationName: stn ? stn.name : formData.stationName,
+                          });
+                        }}
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-emerald-300 focus:outline-none mt-0.5"
+                      >
+                        <option value="">Choose Finals Station...</option>
+                        {availableStations.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
