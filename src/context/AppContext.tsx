@@ -19,6 +19,9 @@ import type {
 import { api } from '../lib/api';
 import { soundEngine } from '../lib/audio';
 import { getServerNow, recordServerTimestamp } from '../lib/timeSync';
+import { generateUUID, getDeviceId } from '../lib/offline/device';
+import { syncEngine, type SyncEngineState } from '../lib/offline/syncEngine';
+import { saveCachedDb, getCachedDb } from '../lib/offline/offlineDb';
 
 export interface TakeoverModalInfo {
   stationId: string;
@@ -44,6 +47,10 @@ interface AppContextType {
   unlockSound: () => void;
   isFullscreen: boolean;
   toggleFullscreen: () => void;
+
+  // Offline & Synchronization State
+  syncState: SyncEngineState;
+  syncNow: () => Promise<void>;
 
   // Station & Device Management
   deviceId: string;
@@ -207,19 +214,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [db, setDb] = useState<AppDatabase | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Stable Device Identification
-  const [deviceId] = useState<string>(() => {
-    try {
-      let id = localStorage.getItem('m2m_device_id');
-      if (!id) {
-        id = `dev-${Math.random().toString(36).substring(2, 9)}`;
-        localStorage.setItem('m2m_device_id', id);
-      }
-      return id;
-    } catch {
-      return `dev-${Date.now()}`;
-    }
-  });
+  // Stable Persistent Device Identification
+  const [deviceId] = useState<string>(() => getDeviceId());
+
+  // Offline Synchronization State
+  const [syncState, setSyncState] = useState<SyncEngineState>(() => syncEngine.getState());
+
+  useEffect(() => {
+    const unsubscribe = syncEngine.subscribe((newSyncState) => {
+      setSyncState(newSyncState);
+    });
+
+    const unsubscribeServerState = syncEngine.onServerState((freshDb) => {
+      setDb(freshDb);
+      saveCachedDb(freshDb).catch(() => {});
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeServerState();
+    };
+  }, []);
+
+  const syncNow = useCallback(async () => {
+    await syncEngine.syncNow();
+  }, []);
 
   // Unique Projector Device ID (User requirement: Check localStorage for 'projector_device_id', if absent generate and save)
   const [projectorDeviceId] = useState<string>(() => {
@@ -446,6 +465,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const state = await api.getState();
       setDb(state);
+      saveCachedDb(state).catch(() => {});
       // If no active participant yet and participants exist, set first active safely (respecting current station)
       setActiveParticipant((current) => {
         if (current) return current;
@@ -457,13 +477,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return state.participants[0] ?? null;
       });
     } catch (err) {
-      console.error('Failed to load initial state:', err);
+      console.warn('[AppContext] Network offline or fetch failed, restoring from IndexedDB cache:', err);
+      const cached = await getCachedDb();
+      if (cached) {
+        setDb(cached);
+        setActiveParticipant((current) => {
+          if (current) return current;
+          if (!cached.participants || cached.participants.length === 0) return null;
+          if (currentStationId && currentStationId !== 'all') {
+            const stationMatch = cached.participants.find((p) => p.stationId === currentStationId);
+            if (stationMatch) return stationMatch;
+          }
+          return cached.participants[0] ?? null;
+        });
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentStationId]);
 
   useEffect(() => {
+    // Immediate optimistic boot from IndexedDB cache so page loads instantly offline
+    getCachedDb().then((cached) => {
+      if (cached) {
+        setDb((curr) => curr || cached);
+        setLoading(false);
+      }
+    }).catch(() => {});
+
     reloadState();
     refreshConnectedProjectors();
   }, [reloadState, refreshConnectedProjectors]);
@@ -1389,40 +1430,116 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [triggerBuzzer, toggleFullscreen, selectNextParticipant]);
 
-  // Participants actions
+  // Participants actions (Offline-First: Save locally to IndexedDB first, then sync)
   const addParticipant = useCallback(async (p: Partial<Participant>) => {
-    const created = await api.addParticipant(p);
-    setDb((prev) => (prev ? { ...prev, participants: [...prev.participants, created] } : prev));
-    setActiveParticipant((curr) => curr || created);
-    return created;
-  }, []);
+    const recordId = p.id || generateUUID();
+    const nowIso = new Date().toISOString();
+    const count = (db?.participants.length || 0) + 1;
+    const participantNumber = p.participantNumber || `M2M-${String(count).padStart(3, '0')}`;
+
+    const newParticipant: Participant = {
+      id: recordId,
+      participantNumber,
+      name: p.name?.trim() || 'New Participant',
+      mobile: p.mobile?.trim() || p.phone?.trim() || (p.customData as any)?.phone || (p.customData as any)?.mobile || '',
+      phone: p.phone?.trim() || p.mobile?.trim() || (p.customData as any)?.phone || (p.customData as any)?.mobile || '',
+      stationId: p.stationId || '',
+      stationName: p.stationName || '',
+      status: p.status || 'active',
+      round1Status: p.round1Status || 'pending',
+      round2Status: p.round2Status || 'pending',
+      round3Status: p.round3Status || 'pending',
+      customData: p.customData || {},
+      createdAt: p.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+
+    // 1. Save locally to IndexedDB queue first
+    await syncEngine.enqueue({
+      id: recordId,
+      entityType: 'participant',
+      action: 'create',
+      deviceId,
+      data: newParticipant,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      syncStatus: 'pending',
+      syncAttempts: 0,
+    });
+
+    // 2. Optimistically update local React state and IndexedDB cache
+    setDb((prev) => {
+      if (!prev) return prev;
+      const nextDb: AppDatabase = {
+        ...prev,
+        participants: [...prev.participants.filter((item) => item.id !== recordId), newParticipant],
+      };
+      saveCachedDb(nextDb).catch(() => {});
+      return nextDb;
+    });
+
+    setActiveParticipant((curr) => curr || newParticipant);
+    return newParticipant;
+  }, [db?.participants?.length, deviceId]);
 
   const updateParticipant = useCallback(async (id: string, p: Partial<Participant>) => {
-    const updated = await api.updateParticipant(id, p);
-    setDb((prev) =>
-      prev
-        ? {
-            ...prev,
-            participants: prev.participants.map((item) => (item.id === id ? updated : item)),
-          }
-        : prev
-    );
-    setActiveParticipant((curr) => (curr?.id === id ? updated : curr));
-    return updated;
-  }, []);
+    const nowIso = new Date().toISOString();
+    const updatedData = { ...p, id, updatedAt: nowIso };
+
+    // 1. Save locally to IndexedDB queue first
+    await syncEngine.enqueue({
+      id,
+      entityType: 'participant',
+      action: 'update',
+      deviceId,
+      data: updatedData,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      syncStatus: 'pending',
+      syncAttempts: 0,
+    });
+
+    // 2. Optimistically update local React state and IndexedDB cache
+    setDb((prev) => {
+      if (!prev) return prev;
+      const nextDb: AppDatabase = {
+        ...prev,
+        participants: prev.participants.map((item) => (item.id === id ? { ...item, ...updatedData } : item)),
+      };
+      saveCachedDb(nextDb).catch(() => {});
+      return nextDb;
+    });
+
+    setActiveParticipant((curr) => (curr?.id === id ? ({ ...curr, ...updatedData } as Participant) : curr));
+    return updatedData as Participant;
+  }, [deviceId]);
 
   const deleteParticipant = useCallback(async (id: string) => {
-    await api.deleteParticipant(id);
-    setDb((prev) =>
-      prev
-        ? {
-            ...prev,
-            participants: prev.participants.filter((item) => item.id !== id),
-          }
-        : prev
-    );
+    const nowIso = new Date().toISOString();
+    await syncEngine.enqueue({
+      id,
+      entityType: 'participant',
+      action: 'delete',
+      deviceId,
+      data: { id },
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      syncStatus: 'pending',
+      syncAttempts: 0,
+    });
+
+    setDb((prev) => {
+      if (!prev) return prev;
+      const nextDb: AppDatabase = {
+        ...prev,
+        participants: prev.participants.filter((item) => item.id !== id),
+      };
+      saveCachedDb(nextDb).catch(() => {});
+      return nextDb;
+    });
+
     setActiveParticipant((curr) => (curr?.id === id ? null : curr));
-  }, []);
+  }, [deviceId]);
 
   const importParticipants = useCallback(async (list: Partial<Participant>[]) => {
     const res = await api.batchAddParticipants(list);
@@ -1494,25 +1611,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, []);
 
-  // Topics
-  const addTopic = useCallback(async (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => {
-    const created = await api.addTopic({ topic, category, topicId, stationId, stationName });
-    setDb((prev) => (prev ? { ...prev, topics: [...prev.topics, created] } : prev));
-    return created;
-  }, []);
+  // Topics (Offline-First)
+  const addTopic = useCallback(
+    async (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => {
+      const recordId = generateUUID();
+      const nowIso = new Date().toISOString();
+      const count = (db?.topics.length || 0) + 1;
+      const resolvedTopicId = topicId || `TOP-${String(count).padStart(3, '0')}`;
 
-  const updateTopic = useCallback(async (id: string, updates: Partial<Topic>) => {
-    const updated = await api.updateTopic(id, updates);
-    setDb((prev) =>
-      prev
-        ? {
-            ...prev,
-            topics: prev.topics.map((t) => (t.id === id ? updated : t)),
-          }
-        : prev
-    );
-    return updated;
-  }, []);
+      const newTopic: Topic = {
+        id: recordId,
+        topicId: resolvedTopicId,
+        topic,
+        category,
+        stationId,
+        stationName,
+        status: 'available',
+      };
+
+      await syncEngine.enqueue({
+        id: recordId,
+        entityType: 'topic',
+        action: 'create',
+        deviceId,
+        data: newTopic,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
+
+      setDb((prev) => {
+        if (!prev) return prev;
+        const nextDb = { ...prev, topics: [...prev.topics.filter((t) => t.id !== recordId), newTopic] };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
+      });
+
+      return newTopic;
+    },
+    [db?.topics?.length, deviceId]
+  );
+
+  const updateTopic = useCallback(
+    async (id: string, updates: Partial<Topic>) => {
+      const nowIso = new Date().toISOString();
+      const updatedData = { ...updates, id };
+
+      await syncEngine.enqueue({
+        id,
+        entityType: 'topic',
+        action: 'update',
+        deviceId,
+        data: updatedData,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
+
+      setDb((prev) => {
+        if (!prev) return prev;
+        const nextDb = {
+          ...prev,
+          topics: prev.topics.map((t) => (t.id === id ? { ...t, ...updatedData } : t)),
+        };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
+      });
+
+      return updatedData as Topic;
+    },
+    [deviceId]
+  );
 
   const deleteTopic = useCallback(async (id: string) => {
     await api.deleteTopic(id);
@@ -1539,25 +1710,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await reloadState();
   }, [reloadState]);
 
-  // Images
-  const addImage = useCallback(async (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => {
-    const created = await api.addImage({ imageId: imageIdOrName, name: imageIdOrName, url, stationId, stationName });
-    setDb((prev) => (prev ? { ...prev, images: [...prev.images, created] } : prev));
-    return created;
-  }, []);
+  // Images (Offline-First)
+  const addImage = useCallback(
+    async (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => {
+      const recordId = generateUUID();
+      const nowIso = new Date().toISOString();
+      const count = (db?.images.length || 0) + 1;
+      const resolvedImageId = imageIdOrName || `IMG-${String(count).padStart(3, '0')}`;
 
-  const updateImage = useCallback(async (id: string, updates: Partial<EventImage>) => {
-    const updated = await api.updateImage(id, updates);
-    setDb((prev) =>
-      prev
-        ? {
-            ...prev,
-            images: prev.images.map((img) => (img.id === id ? updated : img)),
-          }
-        : prev
-    );
-    return updated;
-  }, []);
+      const newImage: EventImage = {
+        id: recordId,
+        imageId: resolvedImageId,
+        name: resolvedImageId,
+        url,
+        stationId,
+        stationName,
+        status: 'available',
+      };
+
+      await syncEngine.enqueue({
+        id: recordId,
+        entityType: 'image',
+        action: 'create',
+        deviceId,
+        data: newImage,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
+
+      setDb((prev) => {
+        if (!prev) return prev;
+        const nextDb = { ...prev, images: [...prev.images.filter((i) => i.id !== recordId), newImage] };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
+      });
+
+      return newImage;
+    },
+    [db?.images?.length, deviceId]
+  );
+
+  const updateImage = useCallback(
+    async (id: string, updates: Partial<EventImage>) => {
+      const nowIso = new Date().toISOString();
+      const updatedData = { ...updates, id };
+
+      await syncEngine.enqueue({
+        id,
+        entityType: 'image',
+        action: 'update',
+        deviceId,
+        data: updatedData,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
+
+      setDb((prev) => {
+        if (!prev) return prev;
+        const nextDb = {
+          ...prev,
+          images: prev.images.map((img) => (img.id === id ? { ...img, ...updatedData } : img)),
+        };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
+      });
+
+      return updatedData as EventImage;
+    },
+    [deviceId]
+  );
 
   const uploadImages = useCallback(
     async (payload: {
@@ -1601,26 +1826,225 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return updated;
   }, []);
 
-  // Results
-  const saveRound1Result = useCallback(async (res: Omit<Round1Result, 'id'>) => {
-    const saved = await api.saveRound1Result(res);
-    await reloadState();
-    return saved;
-  }, [reloadState]);
+  // Results (Offline-First: Save locally to IndexedDB first, then sync)
+  const saveRound1Result = useCallback(
+    async (res: Omit<Round1Result, 'id'>) => {
+      const recordId = (res as any).id || generateUUID();
+      const nowIso = new Date().toISOString();
+      const fullResult: Round1Result = {
+        ...res,
+        id: recordId,
+        startTime: res.startTime || nowIso,
+        endTime: res.endTime || nowIso,
+        deviceId,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+      };
 
-  const saveRound2Result = useCallback(async (res: Omit<Round2Result, 'id'>) => {
-    const saved = await api.saveRound2Result(res);
-    await reloadState();
-    return saved;
-  }, [reloadState]);
+      // 1. Save locally to IndexedDB queue first
+      await syncEngine.enqueue({
+        id: recordId,
+        entityType: 'round1Result',
+        action: 'create',
+        deviceId,
+        data: fullResult,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
 
-  const saveRound3Result = useCallback(async (res: Omit<Round3Result, 'id'>) => {
-    const saved = await api.saveRound3Result(res);
-    await reloadState();
-    return saved;
-  }, [reloadState]);
+      // 2. Optimistically update local React state and IndexedDB cache
+      setDb((prev) => {
+        if (!prev) return prev;
+        const updatedP = prev.participants.map((p) => {
+          if (p.id === fullResult.participantId) {
+            return {
+              ...p,
+              round1Status: fullResult.status,
+              round1ImageId: fullResult.imageId || fullResult.imageName,
+              round1Qualified: fullResult.qualification || p.round1Qualified,
+              status:
+                fullResult.qualification === 'disqualified'
+                  ? 'eliminated'
+                  : fullResult.qualification === 'qualified' && p.status === 'eliminated'
+                  ? 'active'
+                  : p.status,
+              updatedAt: nowIso,
+            };
+          }
+          return p;
+        });
 
-  // Qualification methods
+        const updatedImages = !prev.settings.round1.allowImageReuse
+          ? prev.images.map((img) =>
+              img.id === fullResult.imageId || img.imageId === fullResult.imageId
+                ? {
+                    ...img,
+                    status: 'used' as const,
+                    usedByParticipantId: fullResult.participantId,
+                    usedByParticipantName: fullResult.participantName,
+                    usedAt: nowIso,
+                  }
+                : img
+            )
+          : prev.images;
+
+        const nextDb: AppDatabase = {
+          ...prev,
+          round1Results: [...prev.round1Results.filter((r) => r.id !== recordId), fullResult],
+          participants: updatedP,
+          images: updatedImages,
+        };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
+      });
+
+      return fullResult;
+    },
+    [deviceId]
+  );
+
+  const saveRound2Result = useCallback(
+    async (res: Omit<Round2Result, 'id'>) => {
+      const recordId = (res as any).id || generateUUID();
+      const nowIso = new Date().toISOString();
+      const fullResult: Round2Result = {
+        ...res,
+        id: recordId,
+        startTime: res.startTime || nowIso,
+        endTime: res.endTime || nowIso,
+        deviceId,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+      };
+
+      await syncEngine.enqueue({
+        id: recordId,
+        entityType: 'round2Result',
+        action: 'create',
+        deviceId,
+        data: fullResult,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
+
+      setDb((prev) => {
+        if (!prev) return prev;
+        const updatedP = prev.participants.map((p) => {
+          if (p.id === fullResult.participantId) {
+            return {
+              ...p,
+              round2Status: fullResult.status,
+              round2TopicId: fullResult.topicId,
+              round2Qualified: fullResult.qualification || p.round2Qualified,
+              status:
+                fullResult.qualification === 'disqualified'
+                  ? 'eliminated'
+                  : fullResult.qualification === 'qualified' && p.status === 'eliminated'
+                  ? 'active'
+                  : p.status,
+              updatedAt: nowIso,
+            };
+          }
+          return p;
+        });
+
+        const updatedTopics = !prev.settings.round2.topicReuseAllowed
+          ? prev.topics.map((top) =>
+              top.id === fullResult.topicId || top.topicId === fullResult.topicId
+                ? {
+                    ...top,
+                    status: 'used' as const,
+                    usedByParticipantId: fullResult.participantId,
+                    usedByParticipantName: fullResult.participantName,
+                    usedAt: nowIso,
+                  }
+                : top
+            )
+          : prev.topics;
+
+        const nextDb: AppDatabase = {
+          ...prev,
+          round2Results: [...prev.round2Results.filter((r) => r.id !== recordId), fullResult],
+          participants: updatedP,
+          topics: updatedTopics,
+        };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
+      });
+
+      return fullResult;
+    },
+    [deviceId]
+  );
+
+  const saveRound3Result = useCallback(
+    async (res: Omit<Round3Result, 'id'>) => {
+      const recordId = (res as any).id || generateUUID();
+      const nowIso = new Date().toISOString();
+      const fullResult: Round3Result = {
+        ...res,
+        id: recordId,
+        startTime: res.startTime || nowIso,
+        endTime: res.endTime || nowIso,
+        deviceId,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+      };
+
+      await syncEngine.enqueue({
+        id: recordId,
+        entityType: 'round3Result',
+        action: 'create',
+        deviceId,
+        data: fullResult,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
+
+      setDb((prev) => {
+        if (!prev) return prev;
+        const updatedP = prev.participants.map((p) => {
+          if (p.id === fullResult.participantId) {
+            return {
+              ...p,
+              round3Status: fullResult.status,
+              round3Qualified: fullResult.qualification || p.round3Qualified,
+              status:
+                fullResult.qualification === 'disqualified'
+                  ? 'eliminated'
+                  : fullResult.qualification === 'qualified' && p.status === 'eliminated'
+                  ? 'active'
+                  : p.status,
+              updatedAt: nowIso,
+            };
+          }
+          return p;
+        });
+
+        const nextDb: AppDatabase = {
+          ...prev,
+          round3Results: [...prev.round3Results.filter((r) => r.id !== recordId), fullResult],
+          participants: updatedP,
+        };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
+      });
+
+      return fullResult;
+    },
+    [deviceId]
+  );
+
+  // Qualification methods (Offline-First)
   const setQualification = useCallback(
     async (
       participantId: string,
@@ -1628,12 +2052,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'qualified' | 'disqualified' | 'pending',
       reason?: string
     ) => {
-      const res = await api.updateQualification({ participantId, round, status, reason });
+      const nowIso = new Date().toISOString();
+      const queueId = generateUUID();
+
+      // 1. Save to local IndexedDB queue first
+      await syncEngine.enqueue({
+        id: queueId,
+        entityType: 'qualification',
+        action: 'update',
+        deviceId,
+        data: { participantId, round, status, reason },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        syncStatus: 'pending',
+        syncAttempts: 0,
+      });
+
+      // 2. Optimistically update local React state and IndexedDB cache
+      let updatedParticipantObj: Participant | null = null;
       setDb((prev) => {
         if (!prev) return prev;
-        const updatedParticipants = prev.participants.map((p) =>
-          p.id === participantId ? res.participant : p
-        );
+        const updatedParticipants = prev.participants.map((p) => {
+          if (p.id === participantId) {
+            const up: Participant = {
+              ...p,
+              ...(round === 1 ? { round1Qualified: status } : {}),
+              ...(round === 2 ? { round2Qualified: status } : {}),
+              ...(round === 3 ? { round3Qualified: status } : {}),
+              status:
+                status === 'disqualified'
+                  ? 'eliminated'
+                  : status === 'qualified' && p.status === 'eliminated'
+                  ? 'active'
+                  : p.status,
+              qualificationReason: reason,
+              updatedAt: nowIso,
+            };
+            updatedParticipantObj = up;
+            return up;
+          }
+          return p;
+        });
         const updatedR1 =
           round === 1
             ? prev.round1Results.map((r) =>
@@ -1658,18 +2117,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   : r
               )
             : prev.round3Results;
-        return {
+
+        const nextDb: AppDatabase = {
           ...prev,
           participants: updatedParticipants,
           round1Results: updatedR1,
           round2Results: updatedR2,
           round3Results: updatedR3,
         };
+        saveCachedDb(nextDb).catch(() => {});
+        return nextDb;
       });
-      setActiveParticipant((curr) => (curr?.id === participantId ? res.participant : curr));
-      return res.participant;
+
+      if (updatedParticipantObj) {
+        setActiveParticipant((curr) => (curr?.id === participantId ? updatedParticipantObj : curr));
+      }
+      return updatedParticipantObj as any;
     },
-    []
+    [deviceId]
   );
 
   const batchSetQualification = useCallback(
@@ -1720,6 +2185,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         unlockSound,
         isFullscreen,
         toggleFullscreen,
+
+        // Offline & Synchronization State
+        syncState,
+        syncNow,
 
         // Station & Device Management
         deviceId,

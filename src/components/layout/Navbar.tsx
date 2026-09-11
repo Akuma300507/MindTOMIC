@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MindToMicLogo } from '../common/MindToMicLogo';
+import { SyncStatusIndicator } from '../common/SyncStatusIndicator';
 
 export const Navbar: React.FC = () => {
   const {
@@ -85,31 +86,36 @@ export const Navbar: React.FC = () => {
           </button>
         </div>
 
-        {/* Station Selector & Claim Status */}
-        <div className="flex items-center gap-2 bg-slate-950/80 border border-purple-900/40 px-2.5 py-1 rounded-xl text-xs">
-          <Radio className={`w-3.5 h-3.5 ${isControlling ? 'text-emerald-400' : 'text-purple-400'}`} />
-          <span className="text-slate-400 font-medium hidden md:inline">Station:</span>
-          <select
-            id="station-selector-dropdown"
-            value={currentStationId || ''}
-            onChange={(e) => handleStationChange(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-xs font-bold text-white rounded-lg px-2 py-1 focus:outline-none focus:border-purple-500"
-          >
-            {allStations.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} (R{s.currentRound})
-              </option>
-            ))}
-          </select>
-          <span
-            className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider hidden sm:inline ${
-              isControlling
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                : 'bg-slate-800 text-slate-400'
-            }`}
-          >
-            {isControlling ? 'Locked' : 'Available'}
-          </span>
+        {/* Center: Station Selector & Offline Sync Status */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-slate-950/80 border border-purple-900/40 px-2.5 py-1 rounded-xl text-xs">
+            <Radio className={`w-3.5 h-3.5 ${isControlling ? 'text-emerald-400' : 'text-purple-400'}`} />
+            <span className="text-slate-400 font-medium hidden md:inline">Station:</span>
+            <select
+              id="station-selector-dropdown"
+              value={currentStationId || ''}
+              onChange={(e) => handleStationChange(e.target.value)}
+              className="bg-slate-900 border border-slate-700 text-xs font-bold text-white rounded-lg px-2 py-1 focus:outline-none focus:border-purple-500"
+            >
+              {allStations.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} (R{s.currentRound})
+                </option>
+              ))}
+            </select>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider hidden sm:inline ${
+                isControlling
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              {isControlling ? 'Locked' : 'Available'}
+            </span>
+          </div>
+
+          {/* Clean Offline / Sync Status Indicator */}
+          <SyncStatusIndicator />
         </div>
 
         {/* Action Controls */}

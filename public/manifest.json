@@ -1,0 +1,24 @@
+{
+  "name": "Mind to Mic - Event Management Platform",
+  "short_name": "MindToMic",
+  "description": "Professional event management and offline data collection platform for Mind to Mic oratory speaking competition.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/inspire-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

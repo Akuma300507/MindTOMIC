@@ -9,6 +9,8 @@ import type {
   LiveSyncState,
   StationState,
   ProjectorDevice,
+  SyncBatchRequest,
+  SyncBatchResponse,
 } from '../types';
 import { getServerNow, recordServerTimestamp } from './timeSync';
 
@@ -747,6 +749,20 @@ export const api = {
       body: JSON.stringify({ message }),
     });
     if (!res.ok) throw new Error('Failed to ping projector');
+    return res.json();
+  },
+
+  // Batch Offline Sync
+  async syncBatch(payload: SyncBatchRequest): Promise<SyncBatchResponse> {
+    const res = await fetch('/api/sync/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || err.error || `Failed to sync batch (HTTP ${res.status})`);
+    }
     return res.json();
   },
 };
