@@ -606,7 +606,14 @@ function broadcastStationUpdate(stationId: string, event: string, data: any) {
       return;
     }
 
-    if (client.channels.has(targetChannel) || client.channels.has('master') || client.type === 'master') {
+    // State, timer, and metadata updates: broadcast to station subscribers, master supervisors, and organizer consoles
+    if (
+      client.channels.has(targetChannel) ||
+      client.channels.has('master') ||
+      client.type === 'master' ||
+      client.type === 'organizer' ||
+      client.channels.has('global')
+    ) {
       try {
         client.res.write(payload);
       } catch {
@@ -634,7 +641,12 @@ function broadcastProjectorsList() {
   const list = Array.from(activeProjectors.values());
   const payload = `event: projectors_updated\ndata: ${JSON.stringify({ projectors: list })}\n\n`;
   sseClients.forEach((client) => {
-    if (client.channels.has('master') || client.type === 'master' || client.type === 'organizer') {
+    if (
+      client.channels.has('master') ||
+      client.type === 'master' ||
+      client.type === 'organizer' ||
+      client.channels.has('global')
+    ) {
       try {
         client.res.write(payload);
       } catch {}
@@ -772,7 +784,7 @@ app.get('/api/events', (req: Request, res: Response) => {
   const channels = new Set<string>();
   channels.add('global');
 
-  if (type === 'master' || (type === 'organizer' && (!stationId || stationId === 'all'))) {
+  if (type === 'master' || type === 'organizer' || !stationId || stationId === 'all') {
     channels.add('master');
   }
 
@@ -1396,6 +1408,8 @@ app.post('/api/stations/:id/claim', (req: Request, res: Response) => {
 
   station.controllerDeviceId = deviceId;
   station.controllerDeviceName = deviceName || `Device ${deviceId.slice(-4)}`;
+  station.claimedByDeviceId = deviceId;
+  station.claimedByDeviceName = deviceName || `Device ${deviceId.slice(-4)}`;
   station.lastHeartbeat = now;
   if (station.status === 'DISCONNECTED') {
     station.status = 'WAITING';
@@ -1413,9 +1427,11 @@ app.post('/api/stations/:id/heartbeat', (req: Request, res: Response) => {
   const { deviceId, deviceName } = req.body;
 
   if (deviceId) {
-    if (!station.controllerDeviceId || station.controllerDeviceId === deviceId) {
+    if (!station.controllerDeviceId || station.controllerDeviceId === deviceId || station.claimedByDeviceId === deviceId) {
       station.controllerDeviceId = deviceId;
       if (deviceName) station.controllerDeviceName = deviceName;
+      station.claimedByDeviceId = deviceId;
+      if (deviceName) station.claimedByDeviceName = deviceName;
       station.lastHeartbeat = Date.now();
     }
   }
@@ -1429,9 +1445,11 @@ app.post('/api/stations/:id/release', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
   const { deviceId } = req.body;
 
-  if (station.controllerDeviceId === deviceId) {
+  if (station.controllerDeviceId === deviceId || station.claimedByDeviceId === deviceId) {
     station.controllerDeviceId = null;
     station.controllerDeviceName = null;
+    station.claimedByDeviceId = null;
+    station.claimedByDeviceName = null;
     station.lastHeartbeat = 0;
     persistDB();
     broadcastStationUpdate(station.id, 'station_updated', station);
@@ -1899,7 +1917,7 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     station.timerStatus = 'running';
     station.timerStartTime = effectiveStart;
     station.timerStartedAt = effectiveStart;
-    station.timerAccumulatedMs = 0;
+    station.timerAccumulatedMs = rem < duration ? Math.max(0, (duration - rem) * 1000) : 0;
     station.timerEndsAt = typeof endsAt === 'number' ? endsAt : effectiveStart + rem * 1000;
     station.timerStopTime = null;
     station.status = station.timerMode === 'prep' ? 'PREPARING' : 'SPEAKING';

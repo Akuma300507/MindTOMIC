@@ -61,7 +61,11 @@ const AppContent: React.FC = () => {
         {/* Dynamic Page Stage Container */}
         <main className="flex-1 overflow-y-auto relative bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.15),rgba(255,255,255,0))]">
           {currentPage === 'dashboard' && <Dashboard />}
-          {currentPage === 'master' && <Master />}
+          {currentPage === 'master' && (
+            <ErrorBoundary fallbackTitle="Master Monitor Dashboard Error">
+              <Master />
+            </ErrorBoundary>
+          )}
           {currentPage === 'participants' && <Participants />}
           {currentPage === 'topics' && <TopicsManager />}
           {currentPage === 'images' && <ImagesManager />}

@@ -788,7 +788,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             timerStatus: 'running',
             timerStartTime: finalPayload.startedAt,
             timerStartedAt: finalPayload.startedAt,
-            timerAccumulatedMs: 0,
+            timerAccumulatedMs: rem < duration ? Math.max(0, (duration - rem) * 1000) : 0,
             timerEndsAt: (finalPayload.startedAt || serverNow) + rem * 1000,
             timerStopTime: null,
             status: (payload.phase || targetStation.timerMode) === 'prep' ? 'PREPARING' : 'SPEAKING',
@@ -855,11 +855,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (projectorDeviceId) {
         sseUrl.searchParams.set('projector_device_id', projectorDeviceId);
       }
-      if (currentStationId && currentStationId !== 'all') {
-        sseUrl.searchParams.set('station', currentStationId);
-      }
-      if (deviceRole) {
-        sseUrl.searchParams.set('type', deviceRole);
+      const effectiveRole = currentPage === 'master' ? 'master' : deviceRole;
+      if (effectiveRole === 'master') {
+        sseUrl.searchParams.set('type', 'master');
+      } else {
+        if (currentStationId && currentStationId !== 'all') {
+          sseUrl.searchParams.set('station', currentStationId);
+        }
+        if (deviceRole) {
+          sseUrl.searchParams.set('type', deviceRole);
+        }
       }
 
       eventSource = new EventSource(sseUrl.toString());
@@ -1162,7 +1167,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       eventSource?.close();
     };
-  }, [playBuzzerWithDebounce, currentStationId, deviceRole, projectorDeviceId]);
+  }, [playBuzzerWithDebounce, currentStationId, deviceRole, projectorDeviceId, currentPage]);
 
   // Fullscreen helper
   const toggleFullscreen = useCallback(() => {

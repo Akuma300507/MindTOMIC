@@ -55,7 +55,10 @@ export const Navbar: React.FC = () => {
   const mobileBuzzerUrl = `${appUrl}/?page=buzzer&mode=mobile`;
 
   const activeStation = allStations.find((s) => s.id === currentStationId);
-  const isControlling = activeStation?.claimedByDeviceId === deviceId;
+  const isControlling = Boolean(
+    (activeStation?.claimedByDeviceId && activeStation.claimedByDeviceId === deviceId) ||
+    (activeStation?.controllerDeviceId && activeStation.controllerDeviceId === deviceId)
+  );
 
   return (
     <>

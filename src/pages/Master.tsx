@@ -55,6 +55,7 @@ export const Master: React.FC = () => {
     assignProjectorStation,
     pingProjectorDevice,
     refreshConnectedProjectors,
+    reloadState,
   } = useApp();
 
   const [selectedRoundFilter, setSelectedRoundFilter] = useState<'all' | '1' | '2' | '3'>('all');
@@ -80,6 +81,12 @@ export const Master: React.FC = () => {
     handlerStatus: 'ready' as 'ready' | 'active' | 'on_break' | 'busy' | 'away',
     handlerNotes: '',
   });
+
+  // Ensure fresh state and projector list on mount
+  useEffect(() => {
+    reloadState?.();
+    refreshConnectedProjectors?.();
+  }, [reloadState, refreshConnectedProjectors]);
 
   // Live millisecond reference synchronized with projector & backend (clock-synced)
   const [nowMs, setNowMs] = useState<number>(() => getServerNow());
@@ -124,7 +131,7 @@ export const Master: React.FC = () => {
       case 'PREPARING':
         return 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse';
       case 'SPINNING':
-        return 'bg-purple-500/20 text-purple-300 border-purple-500/40 animate-spin';
+        return 'bg-purple-500/20 text-purple-300 border-purple-500/40 animate-pulse';
       case 'TIME_UP':
         return 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-bounce';
       case 'PAUSED':
@@ -149,7 +156,8 @@ export const Master: React.FC = () => {
     (s) => s.status === 'SPEAKING' || s.status === 'PREPARING'
   ).length;
   const onlineStationsCount = allStations.filter((s) => {
-    if (!s.claimedByDeviceId) return false;
+    const isClaimed = s.claimedByDeviceId || s.controllerDeviceId;
+    if (!isClaimed) return false;
     return Date.now() - (s.lastHeartbeat || 0) < 25000;
   }).length;
 
@@ -336,7 +344,10 @@ export const Master: React.FC = () => {
       {/* Station Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {filteredStations.map((station) => {
-          const isOnline = station.claimedByDeviceId && Date.now() - (station.lastHeartbeat || 0) < 25000;
+          const isOnline = Boolean(
+            (station.claimedByDeviceId || station.controllerDeviceId) &&
+            Date.now() - (station.lastHeartbeat || 0) < 25000
+          );
           const computedTimer = computeStationTimer(station, nowMs);
           const isRunning = computedTimer.isRunning;
           const remainingSecs = computedTimer.remainingSeconds;
@@ -350,17 +361,20 @@ export const Master: React.FC = () => {
           const isOverridden = !!overrideFilter[station.id];
           const stationParticipants = (db?.participants || []).filter((p) => {
             if (isOverridden) return true;
-            if (p.stationId && p.stationId.toLowerCase().trim() === station.id.toLowerCase().trim()) return true;
-            if (p.stationName && p.stationName.toLowerCase().trim() === station.name.toLowerCase().trim()) return true;
+            if (p.stationId && station.id && p.stationId.toLowerCase().trim() === station.id.toLowerCase().trim()) return true;
+            if (p.stationName && station.name && p.stationName.toLowerCase().trim() === station.name.toLowerCase().trim()) return true;
             return false;
           });
 
           // Next pending contestant for this station
           const nextPendingContestant = stationParticipants.find((p) => {
-            if (station.currentRound === 1) return p.round1Status === 'waiting' || p.round1Status === 'not_started';
-            if (station.currentRound === 2) return p.round2Status === 'waiting' || p.round2Status === 'not_started';
-            return p.round3Status === 'waiting' || p.round3Status === 'not_started';
+            if (station.currentRound === 1) return p.round1Status === 'waiting' || p.round1Status === 'not_started' || p.round1Status === 'pending';
+            if (station.currentRound === 2) return p.round2Status === 'waiting' || p.round2Status === 'not_started' || p.round2Status === 'pending';
+            return p.round3Status === 'waiting' || p.round3Status === 'not_started' || p.round3Status === 'pending';
           }) || stationParticipants[0];
+
+          const stationInitial = (station.name || 'Station').substring((station.name || 'Station').length - 1) || 'S';
+          const activeDeviceName = station.claimedByDeviceName || station.controllerDeviceName;
 
           return (
             <div
@@ -372,15 +386,15 @@ export const Master: React.FC = () => {
               <div className="flex items-start justify-between gap-3 border-b border-purple-900/20 pb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-purple-950 border border-purple-800/40 flex items-center justify-center text-purple-300 font-bold text-sm">
-                    {station.name.substring(station.name.length - 1) || 'S'}
+                    {stationInitial}
                   </div>
                   <div>
-                    <h3 className="font-black text-lg text-white font-['Outfit']">{station.name}</h3>
+                    <h3 className="font-black text-lg text-white font-['Outfit']">{station.name || 'Station'}</h3>
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="text-slate-400">{station.location}</span>
+                      <span className="text-slate-400">{station.location || 'Stage'}</span>
                       <span className="text-slate-600">•</span>
                       <span className="text-purple-300 font-semibold font-mono">
-                        Round {station.currentRound}
+                        Round {station.currentRound || 1}
                       </span>
                     </div>
                   </div>
@@ -402,7 +416,7 @@ export const Master: React.FC = () => {
                       }`}
                     />
                     <span className="text-slate-400 font-mono">
-                      {station.claimedByDeviceName ? station.claimedByDeviceName : 'Unclaimed'}
+                      {activeDeviceName ? activeDeviceName : 'Unclaimed'}
                     </span>
                   </div>
                 </div>
@@ -691,14 +705,16 @@ export const Master: React.FC = () => {
                 {/* Quick Skip Prep to Speech Button if station is in prep */}
                 {timerPhase === 'prep' && (
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      const roundSettings = (db?.settings as any)?.[`round${station.currentRound}`] || db?.settings?.round1;
+                      const speechSec = roundSettings?.speechTimeSeconds || 120;
                       sendStationTimerAction(station.id, {
                         action: 'transition_to_speech',
                         phase: 'speech',
-                        totalSeconds: 120,
-                        remainingSeconds: 120,
-                      })
-                    }
+                        totalSeconds: speechSec,
+                        remainingSeconds: speechSec,
+                      });
+                    }}
                     className="w-full py-1.5 px-3 rounded-xl bg-purple-600/90 hover:bg-purple-600 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-purple-950 border border-purple-400/40"
                   >
                     <Zap className="w-3.5 h-3.5" />
@@ -709,14 +725,23 @@ export const Master: React.FC = () => {
                 {/* Master Quick Timer Controls for Station */}
                 <div className="grid grid-cols-4 gap-2 pt-1">
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      const roundSettings = (db?.settings as any)?.[`round${station.currentRound}`] || db?.settings?.round1;
+                      const isIdle = timerPhase === 'idle';
+                      const targetPhase = isIdle ? (station.currentRound === 1 && roundSettings?.prepEnabled ? 'prep' : 'speech') : timerPhase;
+                      const defaultDuration = targetPhase === 'prep'
+                        ? (roundSettings?.prepTimeSeconds || 30)
+                        : (roundSettings?.speechTimeSeconds || 120);
+                      const duration = isIdle ? defaultDuration : totalSecs;
+                      const rem = isIdle ? defaultDuration : remainingSecs;
+
                       sendStationTimerAction(station.id, {
                         action: isRunning ? 'pause' : 'start',
-                        phase: timerPhase === 'idle' ? (station.currentRound === 1 ? 'prep' : 'speech') : timerPhase,
-                        remainingSeconds: remainingSecs,
-                        totalSeconds: totalSecs,
-                      })
-                    }
+                        phase: targetPhase,
+                        remainingSeconds: rem,
+                        totalSeconds: duration,
+                      });
+                    }}
                     className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
                       isRunning
                         ? 'bg-amber-600 hover:bg-amber-500 text-white'
@@ -743,14 +768,18 @@ export const Master: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      const roundSettings = (db?.settings as any)?.[`round${station.currentRound}`] || db?.settings?.round1;
+                      const defaultDuration = station.currentRound === 1 && roundSettings?.prepEnabled
+                        ? (roundSettings?.prepTimeSeconds || 30)
+                        : (roundSettings?.speechTimeSeconds || 120);
                       sendStationTimerAction(station.id, {
                         action: 'reset',
                         phase: 'idle',
-                        totalSeconds: totalSecs,
-                        remainingSeconds: totalSecs,
-                      })
-                    }
+                        totalSeconds: defaultDuration,
+                        remainingSeconds: defaultDuration,
+                      });
+                    }}
                     className="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
