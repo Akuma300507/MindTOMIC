@@ -244,10 +244,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const refreshConnectedProjectors = useCallback(async () => {
     try {
-      const list = await api.getConnectedProjectors();
+      const data = await api.getConnectedProjectors();
+      const list = Array.isArray(data) ? data : ((data as any)?.projectors || []);
       setConnectedProjectors(list);
     } catch (err) {
       console.error('Failed to fetch connected projectors:', err);
+      setConnectedProjectors([]);
     }
   }, []);
 
@@ -1116,7 +1118,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       eventSource.addEventListener('projectors_updated', (e) => {
         try {
-          const list = JSON.parse(e.data);
+          const payload = JSON.parse(e.data);
+          const list = Array.isArray(payload) ? payload : (payload?.projectors || []);
           if (Array.isArray(list)) {
             setConnectedProjectors(list);
           }

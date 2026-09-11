@@ -726,7 +726,8 @@ export const api = {
   async getConnectedProjectors(): Promise<ProjectorDevice[]> {
     const res = await fetch('/api/projectors');
     if (!res.ok) throw new Error('Failed to fetch connected projectors');
-    return res.json();
+    const data = await res.json();
+    return Array.isArray(data) ? data : (data?.projectors || []);
   },
 
   async assignProjectorStation(deviceId: string, stationId: string): Promise<{ success: boolean; projector?: ProjectorDevice }> {
