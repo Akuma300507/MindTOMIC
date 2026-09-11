@@ -215,6 +215,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [db, setDb] = useState<AppDatabase | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Synchronous Database Reference for instant zero-latency offline operations
+  const dbRef = useRef<AppDatabase | null>(null);
+  useEffect(() => {
+    dbRef.current = db;
+  }, [db]);
+
   // Stable Persistent Device Identification
   const [deviceId] = useState<string>(() => getDeviceId());
 
@@ -768,7 +774,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const claimStation = useCallback(
     async (stationId: string, force: boolean = false): Promise<boolean> => {
       try {
-        const station = db?.stations?.[stationId];
+        const station = (dbRef.current || db)?.stations?.[stationId];
         const res = await api.claimStation(
           stationId,
           deviceId,
@@ -791,20 +797,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setCurrentStationId(stationId);
           setDb((prev) => {
             if (!prev) return prev;
-            return {
-              ...prev,
-              stations: { ...(prev.stations || {}), [stationId]: res.station! },
-            };
+            const stations = { ...(prev.stations || {}), [stationId]: res.station! };
+            const nextDb = { ...prev, stations };
+            dbRef.current = nextDb;
+            return nextDb;
           });
           return true;
         }
         return false;
       } catch (err) {
-        console.error('Failed to claim station:', err);
-        return false;
+        console.warn('[Offline] Network offline, claiming station locally:', err);
+        setCurrentStationId(stationId);
+        setDb((prev) => {
+          if (!prev) return prev;
+          const current = prev.stations?.[stationId] || {
+            id: stationId,
+            name: `Station ${stationId.replace('station-', '').toUpperCase()}`,
+            currentRound: 1,
+            activeParticipantId: null,
+            activeParticipant: null,
+            status: 'WAITING',
+          };
+          const updated: StationState = {
+            ...current,
+            currentDevice: deviceId,
+            currentDeviceName: `${current.name || 'Station'} Operator`,
+            claimedAt: Date.now(),
+          };
+          const stations = { ...(prev.stations || {}), [stationId]: updated };
+          const nextDb = { ...prev, stations };
+          dbRef.current = nextDb;
+          saveCachedDb(nextDb).catch(() => {});
+          broadcastStationLocal('station_updated', { station: updated });
+          return nextDb;
+        });
+        return true;
       }
     },
-    [db?.stations, deviceId, setCurrentStationId]
+    [db, deviceId, setCurrentStationId, broadcastStationLocal]
   );
 
   const closeTakeoverModal = useCallback(
@@ -826,7 +856,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (stationId?: string) => {
       const targetId = stationId || currentStationId;
       if (targetId) {
-        await api.releaseStation(targetId, deviceId);
+        try {
+          await api.releaseStation(targetId, deviceId);
+        } catch (err) {
+          console.warn('[Offline] releaseStation ignored offline error:', err);
+        }
       }
     },
     [currentStationId, deviceId]
@@ -969,102 +1003,135 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const assignStationImage = useCallback(
     async (stationId: string) => {
-      let chosenImage: EventImage | null = null;
-      setDb((prev) => {
-        if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
-        if (!targetStation) return prev;
-
-        const availableImages = prev.images.filter((i) => i.status === 'available');
-        const pool = availableImages.length > 0 ? availableImages : prev.images;
-        if (pool.length === 0) return prev;
-
-        const chosen = pool[Math.floor(Math.random() * pool.length)];
-        chosenImage = chosen;
-
-        const allowReuse = prev.settings?.round1?.allowImageReuse;
-        const updatedImages = allowReuse
-          ? prev.images
-          : prev.images.map((img) =>
-              img.id === chosen.id
-                ? {
-                    ...img,
-                    status: 'used' as const,
-                    usedByParticipantId: targetStation.activeParticipantId || undefined,
-                    usedByParticipantName: targetStation.activeParticipant?.name || undefined,
-                    usedAt: new Date().toISOString(),
-                  }
-                : img
-            );
-
-        const updatedStation: StationState = {
-          ...targetStation,
-          selectedImage: chosen,
-          selectedImageId: chosen.id,
-          imageRotation: 0,
-          currentRound: 1,
-        };
-
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
-        const updatedDb = { ...prev, images: updatedImages, stations };
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
-      });
-
-      try {
-        const station = db?.stations?.[stationId];
-        const res = await api.assignStationImage(
-          stationId,
-          station?.activeParticipantId || undefined,
-          station?.activeParticipant?.name || undefined
-        );
-        return res.image;
-      } catch (err) {
-        console.warn('[Offline] assignStationImage processed locally:', err);
-        if (chosenImage) return chosenImage;
-        throw err;
+      const currentDb = dbRef.current || db;
+      if (!currentDb) {
+        throw new Error('Database not loaded yet');
       }
+
+      const stId = stationId && stationId !== 'all' ? stationId : (currentDb.settings?.stations?.[0]?.id || 'station-a');
+      const targetStation = currentDb.stations?.[stId] || {
+        id: stId,
+        name: `Station ${stId.replace('station-', '').toUpperCase()}`,
+        currentRound: 1,
+        activeParticipantId: null,
+        activeParticipant: null,
+        status: 'WAITING',
+      };
+
+      // Filter available images strictly for THIS station to prevent repeating across stations
+      const stationCandidates = currentDb.images.filter(
+        (img) => img.stationId === stId || (targetStation.name && img.stationId === targetStation.name)
+      );
+      let candidates: EventImage[] = [];
+      if (stationCandidates.length > 0) {
+        const available = stationCandidates.filter((img) => img.status === 'available');
+        candidates = available.length > 0 ? available : (currentDb.settings?.round1?.allowImageReuse ? stationCandidates : []);
+      } else {
+        const otherStationImages = currentDb.images.filter(
+          (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stId && img.stationId !== targetStation.name
+        );
+        const universalPool = currentDb.images.filter((img) => !otherStationImages.includes(img));
+        const available = universalPool.filter((img) => img.status === 'available');
+        candidates = available.length > 0 ? available : (currentDb.settings?.round1?.allowImageReuse ? universalPool : []);
+      }
+
+      if (candidates.length === 0) {
+        throw new Error('No unused images remaining for this station. Reset pool or enable reuse in settings.');
+      }
+
+      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+      const allowReuse = currentDb.settings?.round1?.allowImageReuse;
+      const updatedImages = allowReuse
+        ? currentDb.images
+        : currentDb.images.map((img) =>
+            img.id === chosen.id
+              ? {
+                  ...img,
+                  status: 'used' as const,
+                  usedByParticipantId: targetStation.activeParticipantId || undefined,
+                  usedByParticipantName: targetStation.activeParticipant?.name || undefined,
+                  usedAt: new Date().toISOString(),
+                }
+              : img
+          );
+
+      const updatedStation: StationState = {
+        ...targetStation,
+        selectedImage: chosen,
+        selectedImageId: chosen.id,
+        imageRotation: 0,
+        currentRound: 1,
+      };
+
+      const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
+      const updatedDb: AppDatabase = { ...currentDb, images: updatedImages, stations };
+      dbRef.current = updatedDb;
+      setDb(updatedDb);
+      saveCachedDb(updatedDb).catch(() => {});
+      broadcastStationLocal('station_updated', { station: updatedStation });
+      broadcastStationLocal('images_updated', { images: updatedImages });
+
+      // Synchronize with server if online; gracefully ignore network error if offline!
+      try {
+        await api.assignStationImage(
+          stId,
+          targetStation.activeParticipantId || undefined,
+          targetStation.activeParticipant?.name || undefined
+        );
+      } catch (err) {
+        console.warn('[Offline] assignStationImage processed offline locally:', err);
+      }
+
+      return chosen;
     },
-    [db?.stations, broadcastStationLocal]
+    [db, broadcastStationLocal]
   );
 
   const setStationImage = useCallback(
     async (stationId: string, image: EventImage) => {
-      setDb((prev) => {
-        if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
-        if (!targetStation) return prev;
+      const currentDb = dbRef.current || db;
+      if (!currentDb) return;
+      const stId = stationId && stationId !== 'all' ? stationId : (currentDb.settings?.stations?.[0]?.id || 'station-a');
+      const targetStation = currentDb.stations?.[stId] || {
+        id: stId,
+        name: `Station ${stId.replace('station-', '').toUpperCase()}`,
+        currentRound: 1,
+        activeParticipantId: null,
+        activeParticipant: null,
+        status: 'WAITING',
+      };
 
-        const updatedStation: StationState = {
-          ...targetStation,
-          selectedImage: image,
-          selectedImageId: image.id,
-          imageRotation: 0,
-          currentRound: 1,
-        };
+      const updatedStation: StationState = {
+        ...targetStation,
+        selectedImage: image,
+        selectedImageId: image.id,
+        imageRotation: 0,
+        currentRound: 1,
+      };
 
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
-      });
+      const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
+      const updatedDb: AppDatabase = { ...currentDb, stations };
+      dbRef.current = updatedDb;
+      setDb(updatedDb);
+      saveCachedDb(updatedDb).catch(() => {});
+      broadcastStationLocal('station_updated', { station: updatedStation });
 
       try {
-        await api.assignStationImage(stationId, undefined, undefined);
+        await api.assignStationImage(stId, undefined, undefined);
       } catch (err) {
         console.warn('[Offline] setStationImage processed locally:', err);
       }
     },
-    [broadcastStationLocal]
+    [db, broadcastStationLocal]
   );
 
   const rotateStationImage = useCallback(
     async (stationId: string, rotation?: number) => {
+      const currentDb = dbRef.current || db;
+      const stId = stationId && stationId !== 'all' ? stationId : (currentDb?.settings?.stations?.[0]?.id || 'station-a');
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
+        const targetStation = prev.stations?.[stId];
         if (!targetStation) return prev;
         const currentRot = targetStation.imageRotation || 0;
         const newRot = typeof rotation === 'number' ? rotation : (currentRot + 90) % 360;
@@ -1072,139 +1139,161 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...targetStation,
           imageRotation: newRot,
         };
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const stations = { ...(prev.stations || {}), [stId]: updatedStation };
         const updatedDb = { ...prev, stations };
+        dbRef.current = updatedDb;
         saveCachedDb(updatedDb).catch(() => {});
         broadcastStationLocal('station_updated', { station: updatedStation });
         return updatedDb;
       });
 
       try {
-        await api.rotateStationImage(stationId, rotation);
+        await api.rotateStationImage(stId, rotation);
       } catch (err) {
         console.warn('[Offline] rotateStationImage saved locally:', err);
       }
     },
-    [broadcastStationLocal]
+    [db, broadcastStationLocal]
   );
 
   const spinStationTopic = useCallback(
     async (stationId: string, wheelTopicIds?: string[]) => {
-      let localSpinResult: any = null;
+      const currentDb = dbRef.current || db;
+      if (!currentDb) {
+        throw new Error('Database not loaded yet');
+      }
+      const stId = stationId && stationId !== 'all' ? stationId : (currentDb.settings?.stations?.[0]?.id || 'station-a');
+      const targetStation = currentDb.stations?.[stId] || {
+        id: stId,
+        name: `Station ${stId.replace('station-', '').toUpperCase()}`,
+        currentRound: 2,
+        activeParticipantId: null,
+        activeParticipant: null,
+        status: 'WAITING',
+      };
 
-      setDb((prev) => {
-        if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
-        if (!targetStation) return prev;
+      const wheelCount = currentDb.settings?.round2?.activeWheelTopicCount || 20;
+      let candidates: Topic[] = [];
 
-        const wheelCount = prev.settings?.round2?.activeWheelTopicCount || 20;
-        let candidates: Topic[] = [];
+      if (Array.isArray(wheelTopicIds) && wheelTopicIds.length > 0) {
+        candidates = wheelTopicIds
+          .map((id) => currentDb.topics.find((t) => t.id === id))
+          .filter(Boolean) as Topic[];
+      }
 
-        if (Array.isArray(wheelTopicIds) && wheelTopicIds.length > 0) {
-          candidates = wheelTopicIds
-            .map((id) => prev.topics.find((t) => t.id === id))
-            .filter(Boolean) as Topic[];
+      if (candidates.length === 0) {
+        const dedicated = currentDb.topics.filter(
+          (t) => t.stationId === stId || (targetStation.name && t.stationId === targetStation.name)
+        );
+        if (dedicated.length > 0) {
+          const available = dedicated.filter((t) => t.status === 'available');
+          candidates = (available.length > 0 ? available : dedicated).slice(0, wheelCount);
+        } else {
+          const otherStationTopics = currentDb.topics.filter(
+            (t) => t.stationId && t.stationId !== 'all' && t.stationId !== stId && t.stationId !== targetStation.name
+          );
+          const universal = currentDb.topics.filter((t) => !otherStationTopics.includes(t));
+          const available = universal.filter((t) => t.status === 'available');
+          candidates = (available.length > 0 ? available : universal).slice(0, wheelCount);
         }
+      }
 
-        if (candidates.length === 0) {
-          const available = prev.topics.filter((t) => t.status === 'available');
-          candidates = (available.length > 0 ? available : prev.topics).slice(0, wheelCount);
-        }
+      if (candidates.length === 0) {
+        throw new Error('No unused topics remaining. Please reset topic pool or allow reuse.');
+      }
 
-        if (candidates.length === 0) return prev;
+      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+      const targetIndex = candidates.findIndex((t) => t.id === chosen.id);
+      const spinDurationMs = 4800;
+      const startedAt = Date.now();
 
-        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-        const targetIndex = candidates.findIndex((t) => t.id === chosen.id);
-        const spinDurationMs = 4800;
-        const startedAt = Date.now();
+      const allowReuse = currentDb.settings?.round2?.topicReuseAllowed;
+      const updatedTopics = allowReuse
+        ? currentDb.topics
+        : currentDb.topics.map((t) =>
+            t.id === chosen.id
+              ? {
+                  ...t,
+                  status: 'used' as const,
+                  usedByParticipantId: targetStation.activeParticipantId || undefined,
+                  usedByParticipantName: targetStation.activeParticipant?.name || undefined,
+                  usedAt: new Date().toISOString(),
+                }
+              : t
+          );
 
-        const allowReuse = prev.settings?.round2?.topicReuseAllowed;
-        const updatedTopics = allowReuse
-          ? prev.topics
-          : prev.topics.map((t) =>
-              t.id === chosen.id
-                ? {
-                    ...t,
-                    status: 'used' as const,
-                    usedByParticipantId: targetStation.activeParticipantId || undefined,
-                    usedByParticipantName: targetStation.activeParticipant?.name || undefined,
-                    usedAt: new Date().toISOString(),
-                  }
-                : t
-            );
-
-        const updatedStation: StationState = {
-          ...targetStation,
-          currentRound: 2,
-          selectedTopicId: null,
-          selectedTopic: null,
-          pendingTopic: chosen,
-          status: 'SPINNING',
-          activeWheelTopics: candidates,
-          wheelSpin: {
-            isSpinning: true,
-            targetTopicId: chosen.id,
-            targetTopicTitle: chosen.topic,
-            targetTopicCategory: chosen.category,
-            targetSliceIndex: targetIndex >= 0 ? targetIndex : 0,
-            wheelTopics: candidates,
-            startedAt,
-            durationMs: spinDurationMs,
-          },
-        };
-
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
-        const updatedDb = { ...prev, topics: updatedTopics, stations };
-        saveCachedDb(updatedDb).catch(() => {});
-
-        const spinData = {
-          stationId,
-          topic: chosen,
+      const updatedStation: StationState = {
+        ...targetStation,
+        currentRound: 2,
+        selectedTopicId: null,
+        selectedTopic: null,
+        pendingTopic: chosen,
+        status: 'SPINNING',
+        activeWheelTopics: candidates,
+        wheelSpin: {
+          isSpinning: true,
           targetTopicId: chosen.id,
-          targetIndex: targetIndex >= 0 ? targetIndex : 0,
+          targetTopicTitle: chosen.topic,
+          targetTopicCategory: chosen.category,
+          targetSliceIndex: targetIndex >= 0 ? targetIndex : 0,
           wheelTopics: candidates,
           startedAt,
           durationMs: spinDurationMs,
-        };
+        },
+      };
 
-        broadcastStationLocal('wheel_spin_started', { spinData });
-        broadcastStationLocal('station_updated', { station: updatedStation });
+      const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
+      const updatedDb: AppDatabase = { ...currentDb, topics: updatedTopics, stations };
+      dbRef.current = updatedDb;
+      setDb(updatedDb);
+      saveCachedDb(updatedDb).catch(() => {});
 
-        localSpinResult = {
-          topic: chosen,
-          targetIndex: targetIndex >= 0 ? targetIndex : 0,
-          wheelTopics: candidates,
-          startedAt,
-          durationMs: spinDurationMs,
-          station: updatedStation,
-        };
+      const spinData = {
+        stationId: stId,
+        topic: chosen,
+        targetTopicId: chosen.id,
+        targetIndex: targetIndex >= 0 ? targetIndex : 0,
+        wheelTopics: candidates,
+        startedAt,
+        durationMs: spinDurationMs,
+      };
 
-        return updatedDb;
-      });
+      broadcastStationLocal('wheel_spin_started', { spinData });
+      broadcastStationLocal('station_updated', { station: updatedStation });
+      broadcastStationLocal('topics_updated', { topics: updatedTopics });
+
+      const localSpinResult = {
+        topic: chosen,
+        targetIndex: targetIndex >= 0 ? targetIndex : 0,
+        wheelTopics: candidates,
+        startedAt,
+        durationMs: spinDurationMs,
+        station: updatedStation,
+      };
 
       try {
-        const station = db?.stations?.[stationId];
         const res = await api.spinStationTopic(
-          stationId,
-          station?.activeParticipantId || undefined,
-          station?.activeParticipant?.name || undefined,
+          stId,
+          targetStation.activeParticipantId || undefined,
+          targetStation.activeParticipant?.name || undefined,
           wheelTopicIds
         );
         return res;
       } catch (err) {
-        console.warn('[Offline] spinStationTopic processed locally:', err);
-        if (localSpinResult) return localSpinResult;
-        throw err;
+        console.warn('[Offline] spinStationTopic processed offline locally:', err);
+        return localSpinResult;
       }
     },
-    [db?.stations, broadcastStationLocal]
+    [db, broadcastStationLocal]
   );
 
   const completeStationSpin = useCallback(
     async (stationId: string) => {
+      const currentDb = dbRef.current || db;
+      const stId = stationId && stationId !== 'all' ? stationId : (currentDb?.settings?.stations?.[0]?.id || 'station-a');
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
+        const targetStation = prev.stations?.[stId];
         if (!targetStation) return prev;
 
         const winningTopic =
@@ -1234,30 +1323,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           wheelSpin: null,
         };
 
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const stations = { ...(prev.stations || {}), [stId]: updatedStation };
         const updatedDb = { ...prev, stations };
+        dbRef.current = updatedDb;
         saveCachedDb(updatedDb).catch(() => {});
         broadcastStationLocal('station_updated', { station: updatedStation });
         return updatedDb;
       });
 
       try {
-        await api.completeStationSpin(stationId);
+        await api.completeStationSpin(stId);
       } catch (err) {
         console.warn('[Offline] completeStationSpin processed locally:', err);
       }
     },
-    [broadcastStationLocal]
+    [db, broadcastStationLocal]
   );
 
   const replaceStationWheelTopic = useCallback(
     async (stationId: string, usedTopicId: string, replacementTopicId?: string) => {
+      const currentDb = dbRef.current || db;
+      const stId = stationId && stationId !== 'all' ? stationId : (currentDb?.settings?.stations?.[0]?.id || 'station-a');
       let localStation: StationState | null = null;
       let activeWheelTopics: Topic[] = [];
 
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
+        const targetStation = prev.stations?.[stId];
         if (!targetStation) return prev;
 
         let wheel = [...(targetStation.activeWheelTopics || [])];
@@ -1278,22 +1370,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStation = updatedStation;
         activeWheelTopics = wheel;
 
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const stations = { ...(prev.stations || {}), [stId]: updatedStation };
         const updatedDb = { ...prev, stations };
+        dbRef.current = updatedDb;
         saveCachedDb(updatedDb).catch(() => {});
         broadcastStationLocal('station_updated', { station: updatedStation });
         return updatedDb;
       });
 
       try {
-        const res = await api.replaceStationWheelTopic(stationId, usedTopicId, replacementTopicId);
+        const res = await api.replaceStationWheelTopic(stId, usedTopicId, replacementTopicId);
         return res;
       } catch (err) {
         console.warn('[Offline] replaceStationWheelTopic processed locally:', err);
         return { success: true, station: localStation!, activeWheelTopics };
       }
     },
-    [broadcastStationLocal]
+    [db, broadcastStationLocal]
   );
 
   const sendStationTimerAction = useCallback(
@@ -1488,10 +1581,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [resetStatusesModal]);
 
   const executeResetAllStatuses = useCallback(async () => {
-    const res = await api.resetAllStatuses();
-    setDb(res.db);
+    setDb((prev) => {
+      if (!prev) return prev;
+      const participants = prev.participants.map((p) => ({
+        ...p,
+        round1Qualified: 'pending' as const,
+        round2Qualified: 'pending' as const,
+        round3Qualified: 'pending' as const,
+      }));
+      const images = prev.images.map((img) => ({
+        ...img,
+        status: 'available' as const,
+        usedByParticipantId: undefined,
+        usedByParticipantName: undefined,
+        usedAt: undefined,
+      }));
+      const topics = prev.topics.map((t) => ({
+        ...t,
+        status: 'available' as const,
+        usedByParticipantId: undefined,
+        usedByParticipantName: undefined,
+        usedAt: undefined,
+      }));
+      const updatedStations = { ...prev.stations };
+      Object.keys(updatedStations).forEach((key) => {
+        const s = updatedStations[key];
+        updatedStations[key] = {
+          ...s,
+          selectedImageId: null,
+          selectedImage: null,
+          selectedTopicId: null,
+          selectedTopic: null,
+          activeParticipantId: null,
+          activeParticipant: null,
+          status: 'WAITING',
+          wheelSpin: null,
+        };
+      });
+      const updatedDb = { ...prev, participants, images, topics, stations: updatedStations };
+      dbRef.current = updatedDb;
+      saveCachedDb(updatedDb).catch(() => {});
+      broadcastStationLocal('db_sync', { db: updatedDb });
+      return updatedDb;
+    });
     setActiveParticipant(null);
-  }, []);
+
+    try {
+      const res = await api.resetAllStatuses();
+      if (res?.db) {
+        setDb(res.db);
+        dbRef.current = res.db;
+        saveCachedDb(res.db).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[Offline] resetAllStatuses processed locally:', err);
+    }
+  }, [broadcastStationLocal]);
 
   // Real-time SSE Connection
   useEffect(() => {
@@ -2103,42 +2248,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Atomic Round 1 image assignment
   const assignRound1Image = useCallback(
     async (stationId?: string) => {
-      const res = await api.assignRound1Image({
-        participantId: activeParticipant?.id,
-        participantName: activeParticipant?.name,
-        stationId,
-      });
-      setDb((prev) => {
-        if (!prev) return prev;
-        const updatedImages = prev.images.map((img) => (img.id === res.image.id ? res.image : img));
-        return { ...prev, images: updatedImages, liveSync: res.liveSync };
-      });
-      return res.image;
+      const stId = stationId || currentStationId || 'station-a';
+      return assignStationImage(stId);
     },
-    [activeParticipant?.id, activeParticipant?.name]
+    [assignStationImage, currentStationId]
   );
 
   // Atomic Round 2 topic spin
   const spinRound2Topic = useCallback(
     async (stationId?: string) => {
-      const res = await api.spinRound2Topic({
-        participantId: activeParticipant?.id,
-        participantName: activeParticipant?.name,
-        stationId,
-      });
-      setDb((prev) => {
-        if (!prev) return prev;
-        const updatedTopics = prev.topics.map((t) => (t.id === res.topic.id ? res.topic : t));
-        return { ...prev, topics: updatedTopics, liveSync: res.liveSync };
-      });
-      return res;
+      const stId = stationId || currentStationId || 'station-a';
+      const res = await spinStationTopic(stId);
+      return { topic: res.topic, startedAt: res.startedAt, durationMs: res.durationMs };
     },
-    [activeParticipant?.id, activeParticipant?.name]
+    [spinStationTopic, currentStationId]
   );
 
   // Start fresh event
   const startNewEvent = useCallback(async () => {
-    await api.startNewEvent();
+    try {
+      await api.startNewEvent();
+    } catch (err) {
+      console.warn('[Offline] startNewEvent ignored error:', err);
+    }
     await reloadState();
   }, [reloadState]);
 
@@ -2147,13 +2279,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (reason: string = 'Manual Buzzer', round: string = 'General') => {
       unlockSound();
       playBuzzerLocal();
-      await api.triggerBuzzer({
-        source: 'organizer',
-        reason,
-        round,
-        participantName: activeParticipant?.name,
-        stationId: currentStationId || undefined,
-      });
+      try {
+        await api.triggerBuzzer({
+          source: 'organizer',
+          reason,
+          round,
+          participantName: activeParticipant?.name,
+          stationId: currentStationId || undefined,
+        });
+      } catch (err) {
+        console.warn('[Offline] triggerBuzzer handled locally:', err);
+      }
     },
     [activeParticipant?.name, currentStationId, unlockSound, playBuzzerLocal]
   );
@@ -2476,9 +2612,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const resetTopicsStatus = useCallback(async () => {
-    await api.resetTopicsStatus();
-    await reloadState();
-  }, [reloadState]);
+    setDb((prev) => {
+      if (!prev) return prev;
+      const topics = prev.topics.map((t) => ({
+        ...t,
+        status: 'available' as const,
+        usedByParticipantId: undefined,
+        usedByParticipantName: undefined,
+        usedAt: undefined,
+      }));
+      const updatedDb = { ...prev, topics };
+      dbRef.current = updatedDb;
+      saveCachedDb(updatedDb).catch(() => {});
+      broadcastStationLocal('topics_updated', { topics });
+      return updatedDb;
+    });
+
+    try {
+      await api.resetTopicsStatus();
+    } catch (err) {
+      console.warn('[Offline] resetTopicsStatus processed locally:', err);
+    }
+  }, [broadcastStationLocal]);
 
   // Images (Offline-First)
   const addImage = useCallback(
@@ -2596,9 +2751,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [broadcastStationLocal]);
 
   const resetImagesStatus = useCallback(async () => {
-    await api.resetImagesStatus();
-    await reloadState();
-  }, [reloadState]);
+    setDb((prev) => {
+      if (!prev) return prev;
+      const images = prev.images.map((img) => ({
+        ...img,
+        status: 'available' as const,
+        usedByParticipantId: undefined,
+        usedByParticipantName: undefined,
+        usedAt: undefined,
+      }));
+      const updatedDb = { ...prev, images };
+      dbRef.current = updatedDb;
+      saveCachedDb(updatedDb).catch(() => {});
+      broadcastStationLocal('images_updated', { images });
+      return updatedDb;
+    });
+
+    try {
+      await api.resetImagesStatus();
+    } catch (err) {
+      console.warn('[Offline] resetImagesStatus processed locally:', err);
+    }
+  }, [broadcastStationLocal]);
 
   // Settings
   const updateSettings = useCallback(async (updates: Partial<EventSettings>) => {
@@ -2946,11 +3120,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       round: 1 | 2 | 3,
       status: 'qualified' | 'disqualified' | 'pending'
     ) => {
-      const res = await api.batchUpdateQualification({ participantIds, round, status });
-      await reloadState();
-      return res.participants;
+      let updatedParticipants: Participant[] = [];
+      const field = round === 1 ? 'round1Qualified' : round === 2 ? 'round2Qualified' : 'round3Qualified';
+
+      setDb((prev) => {
+        if (!prev) return prev;
+        const nextParticipants = prev.participants.map((p) => {
+          if (participantIds.includes(p.id)) {
+            return {
+              ...p,
+              [field]: status,
+              status:
+                status === 'disqualified'
+                  ? 'eliminated'
+                  : status === 'qualified' && p.status === 'eliminated'
+                  ? 'active'
+                  : p.status,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return p;
+        });
+        updatedParticipants = nextParticipants;
+        const nextDb = { ...prev, participants: nextParticipants };
+        dbRef.current = nextDb;
+        saveCachedDb(nextDb).catch(() => {});
+        broadcastStationLocal('participants_batch_updated', { participants: nextParticipants });
+        return nextDb;
+      });
+
+      try {
+        const res = await api.batchUpdateQualification({ participantIds, round, status });
+        return res.participants;
+      } catch (err) {
+        console.warn('[Offline] batchSetQualification applied locally:', err);
+        return updatedParticipants;
+      }
     },
-    [reloadState]
+    [broadcastStationLocal]
   );
 
   // Live Sync

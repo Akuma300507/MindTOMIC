@@ -103,10 +103,14 @@ export const Round1: React.FC = () => {
   const handleRandomImage = useCallback(async () => {
     try {
       setPoolNotice(null);
-      const chosen = await assignStationImage(currentStationId);
-      setSelectedImage(chosen);
+      const chosen = await assignStationImage(currentStationId || 'station-a');
+      if (chosen) setSelectedImage(chosen);
     } catch (err: any) {
-      setPoolNotice(err.message || 'No unused images remaining. Reset pool or enable reuse in settings.');
+      if (err?.message && !err.message.includes('fetch') && !err.message.includes('Network') && !err.message.includes('Failed')) {
+        setPoolNotice(err.message);
+      } else {
+        console.warn('Random image assignment warning:', err);
+      }
     }
   }, [assignStationImage, currentStationId]);
 
