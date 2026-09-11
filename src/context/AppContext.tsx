@@ -461,6 +461,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     playBuzzerLocal();
   }, [playBuzzerLocal]);
 
+  // Offline Cross-Tab & Cross-Window Synchronization via BroadcastChannel
+  // Synchronizes Projector Displays, Station Controllers, and Master Monitors across windows without network
+  const stationChannelRef = useRef<BroadcastChannel | null>(null);
+
+  const broadcastStationLocal = useCallback((type: string, data: any) => {
+    try {
+      stationChannelRef.current?.postMessage({ type, ...data });
+    } catch {
+      // BroadcastChannel optional fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+
+    const channel = new BroadcastChannel('mindtomic_station_sync');
+    stationChannelRef.current = channel;
+
+    channel.onmessage = (event) => {
+      const msg = event.data;
+      if (!msg || !msg.type) return;
+
+      if (msg.type === 'station_updated' && msg.station) {
+        setDb((prev) => {
+          if (!prev) return prev;
+          const stations = { ...(prev.stations || {}), [msg.station.id]: msg.station };
+          const updated: AppDatabase = {
+            ...prev,
+            stations,
+            liveSync: {
+              ...prev.liveSync,
+              stationStates: stations,
+            },
+          };
+          saveCachedDb(updated).catch(() => {});
+          return updated;
+        });
+      } else if (msg.type === 'wheel_spin_started' && msg.spinData) {
+        const { spinData } = msg;
+        setDb((prev) => {
+          if (!prev) return prev;
+          const targetStation = prev.stations?.[spinData.stationId];
+          if (!targetStation) return prev;
+          const updatedStation: StationState = {
+            ...targetStation,
+            status: 'SPINNING',
+            wheelSpin: {
+              isSpinning: true,
+              targetTopicId: spinData.topic.id,
+              targetTopicTitle: spinData.topic.topic,
+              targetTopicCategory: spinData.topic.category,
+              targetSliceIndex: spinData.targetIndex ?? 0,
+              wheelTopics: spinData.wheelTopics,
+              startedAt: spinData.startedAt,
+              durationMs: spinData.durationMs,
+            },
+          };
+          const stations = { ...prev.stations, [spinData.stationId]: updatedStation };
+          const updated: AppDatabase = {
+            ...prev,
+            stations,
+            liveSync: {
+              ...prev.liveSync,
+              stationStates: stations,
+            },
+          };
+          saveCachedDb(updated).catch(() => {});
+          return updated;
+        });
+      } else if (msg.type === 'buzzer_trigger') {
+        const { payload } = msg;
+        const devStation = currentStationIdRef.current;
+        if (payload?.stationId && devStation && devStation !== 'all' && payload.stationId !== devStation) {
+          return;
+        }
+        playBuzzerWithDebounce(payload?.eventId);
+      }
+    };
+
+    return () => {
+      channel.close();
+      stationChannelRef.current = null;
+    };
+  }, [playBuzzerWithDebounce]);
+
   const reloadState = useCallback(async () => {
     try {
       const state = await api.getState();
@@ -622,30 +707,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Station Actions
   const setStationRound = useCallback(
     async (stationId: string, round: 1 | 2 | 3) => {
-      const res = await api.setStationRound(stationId, round);
       setDb((prev) => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+        const updatedStation: StationState = {
+          ...targetStation,
+          currentRound: round,
+          status: 'WAITING',
+          timerMode: 'idle',
+          isTimerRunning: false,
+          timerStatus: 'idle',
         };
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
       });
+
+      try {
+        await api.setStationRound(stationId, round);
+      } catch (err) {
+        console.warn('[Offline] setStationRound saved locally:', err);
+      }
     },
-    []
+    [broadcastStationLocal]
   );
 
   const setStationParticipant = useCallback(
     async (stationId: string, participantId: string | null) => {
-      const res = await api.setStationParticipant(stationId, participantId);
       setDb((prev) => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+        const participant =
+          participantId && prev.participants ? prev.participants.find((p) => p.id === participantId) || null : null;
+        const updatedStation: StationState = {
+          ...targetStation,
+          activeParticipantId: participantId,
+          activeParticipant: participant,
         };
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
       });
+
+      try {
+        await api.setStationParticipant(stationId, participantId);
+      } catch (err) {
+        console.warn('[Offline] setStationParticipant saved locally:', err);
+      }
     },
-    []
+    [broadcastStationLocal]
   );
 
   const updateStationHandler = useCallback(
@@ -661,10 +777,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         location?: string;
       }
     ) => {
-      const res = await api.updateStationHandler(stationId, data);
       setDb((prev) => {
         if (!prev) return prev;
-        const updatedStations = { ...(prev.stations || {}), [stationId]: res.station };
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+        const updatedStation: StationState = {
+          ...targetStation,
+          ...(data.name ? { name: data.name } : {}),
+          ...(data.location ? { location: data.location } : {}),
+          handlerName: data.handlerName !== undefined ? data.handlerName : targetStation.handlerName,
+          handlerPhone: data.handlerPhone !== undefined ? data.handlerPhone : targetStation.handlerPhone,
+          handlerRole: data.handlerRole !== undefined ? data.handlerRole : targetStation.handlerRole,
+          handlerStatus: data.handlerStatus !== undefined ? data.handlerStatus : targetStation.handlerStatus,
+          handlerNotes: data.handlerNotes !== undefined ? data.handlerNotes : targetStation.handlerNotes,
+        };
+        const updatedStations = { ...(prev.stations || {}), [stationId]: updatedStation };
         const updatedSettingsStations = (prev.settings.stations || []).map((s) =>
           s.id === stationId
             ? {
@@ -679,7 +806,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               }
             : s
         );
-        return {
+        const updatedDb = {
           ...prev,
           stations: updatedStations,
           settings: {
@@ -687,101 +814,327 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stations: updatedSettingsStations,
           },
         };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
       });
+
+      try {
+        await api.updateStationHandler(stationId, data);
+      } catch (err) {
+        console.warn('[Offline] updateStationHandler saved locally:', err);
+      }
     },
-    []
+    [broadcastStationLocal]
   );
 
   const pingStation = useCallback(
     async (stationId: string, senderName?: string, message?: string) => {
-      await api.pingStation(stationId, senderName, message);
+      try {
+        await api.pingStation(stationId, senderName, message);
+      } catch (err) {
+        console.warn('[Offline] pingStation skipped offline:', err);
+      }
     },
     []
   );
 
   const assignStationImage = useCallback(
     async (stationId: string) => {
-      const station = db?.stations?.[stationId];
-      const res = await api.assignStationImage(
-        stationId,
-        station?.activeParticipantId || undefined,
-        station?.activeParticipant?.name || undefined
-      );
+      let chosenImage: EventImage | null = null;
       setDb((prev) => {
         if (!prev) return prev;
-        const updatedImages = prev.images.map((img) => (img.id === res.image.id ? res.image : img));
-        return {
-          ...prev,
-          images: updatedImages,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+
+        const availableImages = prev.images.filter((i) => i.status === 'available');
+        const pool = availableImages.length > 0 ? availableImages : prev.images;
+        if (pool.length === 0) return prev;
+
+        const chosen = pool[Math.floor(Math.random() * pool.length)];
+        chosenImage = chosen;
+
+        const allowReuse = prev.settings?.round1?.allowImageReuse;
+        const updatedImages = allowReuse
+          ? prev.images
+          : prev.images.map((img) =>
+              img.id === chosen.id
+                ? {
+                    ...img,
+                    status: 'used' as const,
+                    usedByParticipantId: targetStation.activeParticipantId || undefined,
+                    usedByParticipantName: targetStation.activeParticipant?.name || undefined,
+                    usedAt: new Date().toISOString(),
+                  }
+                : img
+            );
+
+        const updatedStation: StationState = {
+          ...targetStation,
+          selectedImage: chosen,
+          selectedImageId: chosen.id,
+          imageRotation: 0,
+          currentRound: 1,
         };
+
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, images: updatedImages, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
       });
-      return res.image;
+
+      try {
+        const station = db?.stations?.[stationId];
+        const res = await api.assignStationImage(
+          stationId,
+          station?.activeParticipantId || undefined,
+          station?.activeParticipant?.name || undefined
+        );
+        return res.image;
+      } catch (err) {
+        console.warn('[Offline] assignStationImage processed locally:', err);
+        if (chosenImage) return chosenImage;
+        throw err;
+      }
     },
-    [db?.stations]
+    [db?.stations, broadcastStationLocal]
   );
 
   const rotateStationImage = useCallback(
     async (stationId: string, rotation?: number) => {
-      const res = await api.rotateStationImage(stationId, rotation);
       setDb((prev) => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+        const currentRot = targetStation.imageRotation || 0;
+        const newRot = typeof rotation === 'number' ? rotation : (currentRot + 90) % 360;
+        const updatedStation: StationState = {
+          ...targetStation,
+          imageRotation: newRot,
         };
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
       });
+
+      try {
+        await api.rotateStationImage(stationId, rotation);
+      } catch (err) {
+        console.warn('[Offline] rotateStationImage saved locally:', err);
+      }
     },
-    []
+    [broadcastStationLocal]
   );
 
   const spinStationTopic = useCallback(
     async (stationId: string, wheelTopicIds?: string[]) => {
-      const station = db?.stations?.[stationId];
-      const res = await api.spinStationTopic(
-        stationId,
-        station?.activeParticipantId || undefined,
-        station?.activeParticipant?.name || undefined,
-        wheelTopicIds
-      );
+      let localSpinResult: any = null;
+
       setDb((prev) => {
         if (!prev) return prev;
-        const updatedTopics = prev.topics.map((t) => (t.id === res.topic.id ? res.topic : t));
-        return {
-          ...prev,
-          topics: updatedTopics,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+
+        const wheelCount = prev.settings?.round2?.activeWheelTopicCount || 20;
+        let candidates: Topic[] = [];
+
+        if (Array.isArray(wheelTopicIds) && wheelTopicIds.length > 0) {
+          candidates = wheelTopicIds
+            .map((id) => prev.topics.find((t) => t.id === id))
+            .filter(Boolean) as Topic[];
+        }
+
+        if (candidates.length === 0) {
+          const available = prev.topics.filter((t) => t.status === 'available');
+          candidates = (available.length > 0 ? available : prev.topics).slice(0, wheelCount);
+        }
+
+        if (candidates.length === 0) return prev;
+
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        const targetIndex = candidates.findIndex((t) => t.id === chosen.id);
+        const spinDurationMs = 4800;
+        const startedAt = Date.now();
+
+        const allowReuse = prev.settings?.round2?.topicReuseAllowed;
+        const updatedTopics = allowReuse
+          ? prev.topics
+          : prev.topics.map((t) =>
+              t.id === chosen.id
+                ? {
+                    ...t,
+                    status: 'used' as const,
+                    usedByParticipantId: targetStation.activeParticipantId || undefined,
+                    usedByParticipantName: targetStation.activeParticipant?.name || undefined,
+                    usedAt: new Date().toISOString(),
+                  }
+                : t
+            );
+
+        const updatedStation: StationState = {
+          ...targetStation,
+          currentRound: 2,
+          selectedTopicId: null,
+          selectedTopic: null,
+          pendingTopic: chosen,
+          status: 'SPINNING',
+          activeWheelTopics: candidates,
+          wheelSpin: {
+            isSpinning: true,
+            targetTopicId: chosen.id,
+            targetTopicTitle: chosen.topic,
+            targetTopicCategory: chosen.category,
+            targetSliceIndex: targetIndex >= 0 ? targetIndex : 0,
+            wheelTopics: candidates,
+            startedAt,
+            durationMs: spinDurationMs,
+          },
         };
+
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, topics: updatedTopics, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+
+        const spinData = {
+          stationId,
+          topic: chosen,
+          targetTopicId: chosen.id,
+          targetIndex: targetIndex >= 0 ? targetIndex : 0,
+          wheelTopics: candidates,
+          startedAt,
+          durationMs: spinDurationMs,
+        };
+
+        broadcastStationLocal('wheel_spin_started', { spinData });
+        broadcastStationLocal('station_updated', { station: updatedStation });
+
+        localSpinResult = {
+          topic: chosen,
+          targetIndex: targetIndex >= 0 ? targetIndex : 0,
+          wheelTopics: candidates,
+          startedAt,
+          durationMs: spinDurationMs,
+          station: updatedStation,
+        };
+
+        return updatedDb;
       });
-      return res;
+
+      try {
+        const station = db?.stations?.[stationId];
+        const res = await api.spinStationTopic(
+          stationId,
+          station?.activeParticipantId || undefined,
+          station?.activeParticipant?.name || undefined,
+          wheelTopicIds
+        );
+        return res;
+      } catch (err) {
+        console.warn('[Offline] spinStationTopic processed locally:', err);
+        if (localSpinResult) return localSpinResult;
+        throw err;
+      }
     },
-    [db?.stations]
+    [db?.stations, broadcastStationLocal]
   );
 
-  const completeStationSpin = useCallback(async (stationId: string) => {
-    const res = await api.completeStationSpin(stationId);
-    setDb((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        stations: { ...(prev.stations || {}), [stationId]: res.station },
-      };
-    });
-  }, []);
+  const completeStationSpin = useCallback(
+    async (stationId: string) => {
+      setDb((prev) => {
+        if (!prev) return prev;
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+
+        const winningTopic =
+          targetStation.pendingTopic ||
+          targetStation.selectedTopic ||
+          prev.topics.find((t) => t.id === targetStation.wheelSpin?.targetTopicId);
+
+        if (!winningTopic) return prev;
+
+        let currentWheel = (targetStation.activeWheelTopics || targetStation.wheelSpin?.wheelTopics || []).filter(Boolean);
+        const targetIdx = currentWheel.findIndex((t) => t && t.id === winningTopic.id);
+        if (targetIdx !== -1) {
+          const replacement = prev.topics.find(
+            (t) => t && t.status === 'available' && t.id !== winningTopic.id && !currentWheel.some((w) => w && w.id === t.id)
+          );
+          if (replacement) {
+            currentWheel[targetIdx] = replacement;
+          }
+        }
+
+        const updatedStation: StationState = {
+          ...targetStation,
+          status: 'SPEAKING',
+          selectedTopic: winningTopic,
+          selectedTopicId: winningTopic.id,
+          activeWheelTopics: currentWheel,
+          wheelSpin: null,
+        };
+
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
+      });
+
+      try {
+        await api.completeStationSpin(stationId);
+      } catch (err) {
+        console.warn('[Offline] completeStationSpin processed locally:', err);
+      }
+    },
+    [broadcastStationLocal]
+  );
 
   const replaceStationWheelTopic = useCallback(
     async (stationId: string, usedTopicId: string, replacementTopicId?: string) => {
-      const res = await api.replaceStationWheelTopic(stationId, usedTopicId, replacementTopicId);
+      let localStation: StationState | null = null;
+      let activeWheelTopics: Topic[] = [];
+
       setDb((prev) => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+
+        let wheel = [...(targetStation.activeWheelTopics || [])];
+        const idx = wheel.findIndex((t) => t.id === usedTopicId);
+        if (idx !== -1) {
+          const replacement = replacementTopicId
+            ? prev.topics.find((t) => t.id === replacementTopicId)
+            : prev.topics.find((t) => t.status === 'available' && !wheel.some((w) => w.id === t.id));
+          if (replacement) {
+            wheel[idx] = replacement;
+          }
+        }
+
+        const updatedStation: StationState = {
+          ...targetStation,
+          activeWheelTopics: wheel,
         };
+        localStation = updatedStation;
+        activeWheelTopics = wheel;
+
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
       });
-      return res;
+
+      try {
+        const res = await api.replaceStationWheelTopic(stationId, usedTopicId, replacementTopicId);
+        return res;
+      } catch (err) {
+        console.warn('[Offline] replaceStationWheelTopic processed locally:', err);
+        return { success: true, station: localStation!, activeWheelTopics };
+      }
     },
-    []
+    [broadcastStationLocal]
   );
 
   const sendStationTimerAction = useCallback(
@@ -797,33 +1150,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         startedAt?: number;
       }
     ) => {
-      const serverNow = getServerNow();
+      const now = getServerNow();
       const finalPayload = {
         ...payload,
-        startedAt: payload.action === 'start' ? (payload.startedAt || serverNow) : payload.startedAt,
+        startedAt: payload.action === 'start' ? (payload.startedAt || now) : payload.startedAt,
       };
 
-      // Immediate local zero-delay buzzer trigger ONLY on natural Time Up (Stop button must NOT play buzzer)
+      // Natural Time Up buzzer
       if (payload.action === 'time_up') {
         const roundNum = db?.stations?.[stationId]?.currentRound || 1;
         const roundSettings = (db?.settings as any)?.[`round${roundNum}`] || db?.settings?.round1;
         if (roundSettings?.buzzerEnabled !== false) {
           const localEventId = `buzzer-${Date.now()}-${stationId}`;
           playBuzzerWithDebounce(localEventId);
+          broadcastStationLocal('buzzer_trigger', { payload: { stationId, eventId: localEventId } });
         }
       }
 
-      // Optimistic local state update for instant zero-lag response
-      if (payload.action === 'start') {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const targetStation = prev.stations?.[stationId];
-          if (!targetStation) return prev;
-          const duration = payload.totalSeconds || targetStation.timerDuration || 120;
+      // Optimistic & offline-first local state update
+      setDb((prev) => {
+        if (!prev) return prev;
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+
+        const roundNum = targetStation.currentRound || 1;
+        const roundSettings = (prev.settings as any)?.[`round${roundNum}`] || prev.settings?.round1;
+        let updated: StationState = { ...targetStation };
+
+        if (payload.action === 'start') {
+          const activePhase = payload.phase || targetStation.timerMode || (roundSettings?.prepEnabled ? 'prep' : 'speech');
+          const defaultSec = activePhase === 'prep' ? (roundSettings?.prepTimeSeconds || 30) : (roundSettings?.speechTimeSeconds || 120);
+          const duration = payload.totalSeconds || targetStation.timerDuration || defaultSec;
           const rem = typeof payload.remainingSeconds === 'number' ? payload.remainingSeconds : duration;
-          const updated: StationState = {
+
+          updated = {
             ...targetStation,
-            timerMode: payload.phase || targetStation.timerMode || 'speech',
+            timerMode: activePhase,
             timerDuration: duration,
             timerTotalSeconds: duration,
             timerRemainingSeconds: rem,
@@ -832,31 +1194,103 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             timerStartTime: finalPayload.startedAt,
             timerStartedAt: finalPayload.startedAt,
             timerAccumulatedMs: rem < duration ? Math.max(0, (duration - rem) * 1000) : 0,
-            timerEndsAt: (finalPayload.startedAt || serverNow) + rem * 1000,
+            timerEndsAt: (finalPayload.startedAt || now) + rem * 1000,
             timerStopTime: null,
-            status: (payload.phase || targetStation.timerMode) === 'prep' ? 'PREPARING' : 'SPEAKING',
+            status: activePhase === 'prep' ? 'PREPARING' : 'SPEAKING',
             buzzerPlayed: false,
             isOvertime: false,
             overtimeSeconds: 0,
           };
-          const stations = { ...(prev.stations || {}), [stationId]: updated };
-          return {
-            ...prev,
-            stations,
-            liveSync: {
-              ...prev.liveSync,
-              stationStates: stations,
-            },
-          };
-        });
-      }
+        } else if (payload.action === 'pause') {
+          const runMs = targetStation.timerStartTime ? now - targetStation.timerStartTime : 0;
+          const accum = (targetStation.timerAccumulatedMs || 0) + runMs;
+          const totalElapsedSec = Math.floor(accum / 1000);
+          const rem = Math.max(0, (targetStation.timerDuration || 120) - totalElapsedSec);
 
-      const res = await api.sendStationTimerAction(stationId, finalPayload);
-      if (res.serverTime) recordServerTimestamp(res.serverTime);
-      setDb((prev) => {
-        if (!prev) return prev;
-        const stations = { ...(prev.stations || {}), [stationId]: res.station };
-        return {
+          updated = {
+            ...targetStation,
+            timerAccumulatedMs: accum,
+            timerStartTime: null,
+            timerStartedAt: null,
+            timerEndsAt: null,
+            timerStatus: 'paused',
+            isTimerRunning: false,
+            status: 'PAUSED',
+            timerRemainingSeconds: rem,
+          };
+        } else if (payload.action === 'stop' || payload.action === 'stop_with_buzzer') {
+          const runMs = targetStation.timerStartTime ? now - targetStation.timerStartTime : 0;
+          const accum = (targetStation.timerAccumulatedMs || 0) + runMs;
+          const totalElapsedSec = Math.floor(accum / 1000);
+          const duration = targetStation.timerDuration || 120;
+          const isOver = totalElapsedSec > duration;
+
+          updated = {
+            ...targetStation,
+            timerAccumulatedMs: accum,
+            timerStartTime: null,
+            timerStartedAt: null,
+            timerStopTime: now,
+            timerEndsAt: null,
+            isTimerRunning: false,
+            timerStatus: 'stopped',
+            status: 'TIME_UP',
+            isOvertime: isOver,
+            overtimeSeconds: isOver ? totalElapsedSec - duration : 0,
+          };
+        } else if (payload.action === 'reset') {
+          const initSec = (roundSettings?.prepEnabled && (roundSettings?.prepTimeSeconds || 0) > 0)
+            ? roundSettings.prepTimeSeconds
+            : (roundSettings?.speechTimeSeconds || 120);
+
+          updated = {
+            ...targetStation,
+            isTimerRunning: false,
+            timerStatus: 'idle',
+            status: 'WAITING',
+            timerMode: 'idle',
+            timerDuration: initSec,
+            timerTotalSeconds: initSec,
+            timerRemainingSeconds: initSec,
+            timerAccumulatedMs: 0,
+            timerStartTime: null,
+            timerStartedAt: null,
+            timerEndsAt: null,
+            timerStopTime: null,
+            buzzerPlayed: false,
+            isOvertime: false,
+            overtimeSeconds: 0,
+          };
+        } else if (payload.action === 'transition_to_speech') {
+          const speechSec = roundSettings?.speechTimeSeconds || 120;
+          updated = {
+            ...targetStation,
+            timerMode: 'speech',
+            timerDuration: speechSec,
+            timerTotalSeconds: speechSec,
+            timerRemainingSeconds: speechSec,
+            isTimerRunning: true,
+            timerStatus: 'running',
+            timerStartTime: now,
+            timerStartedAt: now,
+            timerAccumulatedMs: 0,
+            timerEndsAt: now + speechSec * 1000,
+            timerStopTime: null,
+            status: 'SPEAKING',
+            buzzerPlayed: false,
+            isOvertime: false,
+            overtimeSeconds: 0,
+          };
+        } else if (payload.action === 'time_up') {
+          updated = {
+            ...targetStation,
+            buzzerPlayed: true,
+            isOvertime: true,
+          };
+        }
+
+        const stations = { ...(prev.stations || {}), [stationId]: updated };
+        const updatedDb = {
           ...prev,
           stations,
           liveSync: {
@@ -864,9 +1298,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stationStates: stations,
           },
         };
+
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updated });
+        return updatedDb;
       });
+
+      try {
+        const res = await api.sendStationTimerAction(stationId, finalPayload);
+        if (res.serverTime) recordServerTimestamp(res.serverTime);
+      } catch (err) {
+        console.warn('[Offline] sendStationTimerAction processed locally:', err);
+      }
     },
-    [playBuzzerWithDebounce]
+    [db?.stations, db?.settings, playBuzzerWithDebounce, broadcastStationLocal]
   );
 
   // RESET ALL STATUSES (Master / Admin)
