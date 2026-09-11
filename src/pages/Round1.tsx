@@ -43,8 +43,26 @@ export const Round1: React.FC = () => {
   const speechSeconds = db?.settings.round1.speechTimeSeconds ?? 120;
   const buzzerEnabled = db?.settings.round1.buzzerEnabled ?? true;
 
-  const unusedCount = useMemo(() => images.filter((i) => i.status === 'available').length, [images]);
-  const usedCount = images.length - unusedCount;
+  // Filter images eligible for the active station (never include images assigned to other stations)
+  const stationImages = useMemo(() => {
+    if (!currentStationId || currentStationId === 'all') {
+      return images;
+    }
+    // Strict isolation: candidate must either belong to this station OR be universal (no station assigned)
+    const eligible = images.filter((img) => {
+      if (img.stationId && img.stationId !== 'all' && img.stationId !== currentStationId) {
+        return false; // Assigned to a different station!
+      }
+      return true;
+    });
+
+    // If there are images specifically assigned to this station, isolate strictly to them
+    const dedicated = eligible.filter((img) => img.stationId === currentStationId);
+    return dedicated.length > 0 ? dedicated : eligible;
+  }, [images, currentStationId]);
+
+  const unusedCount = useMemo(() => stationImages.filter((i) => i.status === 'available').length, [stationImages]);
+  const usedCount = stationImages.length - unusedCount;
 
   // Filter participants for active station
   const stationParticipants = useMemo(() => {
@@ -74,11 +92,11 @@ export const Round1: React.FC = () => {
   // Available images based on reuse policy
   const availableImages = useMemo(() => {
     if (db?.settings.round1.allowImageReuse) {
-      return images;
+      return stationImages;
     }
-    const filtered = images.filter((img) => img.status === 'available');
-    return filtered.length > 0 ? filtered : images;
-  }, [images, db?.settings.round1.allowImageReuse]);
+    const filtered = stationImages.filter((img) => img.status === 'available');
+    return filtered.length > 0 ? filtered : stationImages;
+  }, [stationImages, db?.settings.round1.allowImageReuse]);
 
   // Atomic Random image selector
   const handleRandomImage = useCallback(async () => {
@@ -264,12 +282,17 @@ export const Round1: React.FC = () => {
       {/* Pool Status & Alerts */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs">
         <div className="flex items-center gap-2">
-          <span className="text-slate-400">Image Pool:</span>
+          <span className="text-slate-400 font-semibold">
+            {currentStation ? `${currentStation.name} Image Pool:` : 'Image Pool:'}
+          </span>
           <span className="px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-mono font-bold text-[11px]">
             {unusedCount} Available
           </span>
           <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[11px]">
             {usedCount} Used
+          </span>
+          <span className="text-[11px] text-purple-300 bg-purple-950/50 border border-purple-800/40 px-2 py-0.5 rounded-full font-semibold">
+            {stationImages.length} In Pool
           </span>
           {db?.settings.round1.allowImageReuse && (
             <span className="text-[10px] text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40">
@@ -373,6 +396,15 @@ export const Round1: React.FC = () => {
                     <span className="text-xs font-mono font-bold text-blue-300 px-2.5 py-1 rounded-lg bg-blue-950/90 border border-blue-700 shadow-md">
                       IMAGE ID: {selectedImage.imageId || selectedImage.name}
                     </span>
+                    {selectedImage.stationName ? (
+                      <span className="text-xs font-semibold text-purple-300 px-2.5 py-1 rounded-lg bg-purple-950/90 border border-purple-700 shadow-md">
+                        📍 {selectedImage.stationName}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-semibold text-slate-400 px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-700 shadow-md">
+                        Universal Pool
+                      </span>
+                    )}
                   </div>
                 </div>
               </>
@@ -423,12 +455,15 @@ export const Round1: React.FC = () => {
       {showImagePicker && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-purple-500/30 rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[85vh] overflow-y-auto">
-            <h3 className="text-lg font-bold text-white mb-3 font-['Outfit'] flex items-center gap-2">
+            <h3 className="text-lg font-bold text-white mb-1 font-['Outfit'] flex items-center gap-2">
               <FolderOpen className="w-5 h-5 text-purple-400" />
-              Select Round 1 Image Prompt
+              Select Round 1 Image Prompt ({currentStation ? currentStation.name : 'Station'} Pool)
             </h3>
+            <p className="text-xs text-slate-400 mb-3">
+              Showing images eligible for this station. Images assigned to other stations are strictly excluded.
+            </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {images.map((img) => (
+              {stationImages.map((img) => (
                 <div
                   key={img.id}
                   onClick={() => {
@@ -443,19 +478,26 @@ export const Round1: React.FC = () => {
                     className="w-full h-28 object-cover"
                     referrerPolicy="no-referrer"
                   />
-                  <div className="p-2 flex items-center justify-between">
-                    <p className="text-[11px] font-mono font-bold text-blue-300 truncate">
-                      ID: {img.imageId || img.name}
-                    </p>
-                    <span
-                      className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                        img.status === 'available'
-                          ? 'bg-emerald-950 text-emerald-300'
-                          : 'bg-rose-950 text-rose-300'
-                      }`}
-                    >
-                      {img.status}
-                    </span>
+                  <div className="p-2 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-mono font-bold text-blue-300 truncate">
+                        ID: {img.imageId || img.name}
+                      </p>
+                      <span
+                        className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                          img.status === 'available'
+                            ? 'bg-emerald-950 text-emerald-300'
+                            : 'bg-rose-950 text-rose-300'
+                        }`}
+                      >
+                        {img.status}
+                      </span>
+                    </div>
+                    {img.stationName && (
+                      <span className="inline-block text-[9px] font-semibold text-purple-300 bg-purple-950/80 px-1.5 py-0.2 rounded border border-purple-800/60 truncate max-w-full">
+                        {img.stationName}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}

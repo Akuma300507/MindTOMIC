@@ -53,6 +53,8 @@ export interface EventImage {
   imageId?: string; // e.g., 'IMG-001' or custom ID
   name: string;
   url: string;
+  stationId?: string; // e.g., 'station-a', 'station-b', or 'all'
+  stationName?: string; // e.g., 'Station A', 'Station B', or 'All Stations'
   status: 'available' | 'used';
   usedByParticipantId?: string;
   usedByParticipantName?: string;

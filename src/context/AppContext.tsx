@@ -108,14 +108,21 @@ interface AppContextType {
   importTopics: (list: { topic: string; category?: string; topicId?: string }[]) => Promise<number>;
   resetTopicsStatus: () => Promise<void>;
   // Images
-  addImage: (imageIdOrName: string, url: string) => Promise<EventImage>;
+  addImage: (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => Promise<EventImage>;
   updateImage: (id: string, updates: Partial<EventImage>) => Promise<EventImage>;
   uploadImages: (payload: {
-    images?: Array<{ imageId?: string; name?: string; base64: string }>;
+    images?: Array<{ imageId?: string; name?: string; base64: string; stationId?: string; stationName?: string }>;
     name?: string;
     base64?: string;
     imageId?: string;
+    stationId?: string;
+    stationName?: string;
   }) => Promise<{ success: boolean; count: number; images: EventImage[]; allImages: EventImage[] }>;
+  batchUpdateImageStations: (
+    imageIds: string[],
+    stationId?: string,
+    stationName?: string
+  ) => Promise<{ success: boolean; count: number; images: EventImage[]; allImages: EventImage[] }>;
   deleteImage: (id: string) => Promise<void>;
   resetImagesStatus: () => Promise<void>;
   // Settings
@@ -1360,8 +1367,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [reloadState]);
 
   // Images
-  const addImage = useCallback(async (imageIdOrName: string, url: string) => {
-    const created = await api.addImage({ imageId: imageIdOrName, name: imageIdOrName, url });
+  const addImage = useCallback(async (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => {
+    const created = await api.addImage({ imageId: imageIdOrName, name: imageIdOrName, url, stationId, stationName });
     setDb((prev) => (prev ? { ...prev, images: [...prev.images, created] } : prev));
     return created;
   }, []);
@@ -1380,8 +1387,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const uploadImages = useCallback(
-    async (payload: { images?: Array<{ imageId?: string; name?: string; base64: string }>; name?: string; base64?: string; imageId?: string }) => {
+    async (payload: {
+      images?: Array<{ imageId?: string; name?: string; base64: string; stationId?: string; stationName?: string }>;
+      name?: string;
+      base64?: string;
+      imageId?: string;
+      stationId?: string;
+      stationName?: string;
+    }) => {
       const res = await api.uploadImages(payload);
+      setDb((prev) => (prev ? { ...prev, images: res.allImages } : prev));
+      return res;
+    },
+    []
+  );
+
+  const batchUpdateImageStations = useCallback(
+    async (imageIds: string[], stationId?: string, stationName?: string) => {
+      const res = await api.batchUpdateImageStations(imageIds, stationId, stationName);
       setDb((prev) => (prev ? { ...prev, images: res.allImages } : prev));
       return res;
     },
@@ -1573,6 +1596,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addImage,
         updateImage,
         uploadImages,
+        batchUpdateImageStations,
         deleteImage,
         resetImagesStatus,
         updateSettings,

@@ -344,7 +344,7 @@ export const api = {
     return res.json();
   },
 
-  async addImage(img: { name?: string; imageId?: string; url: string }): Promise<EventImage> {
+  async addImage(img: { name?: string; imageId?: string; url: string; stationId?: string; stationName?: string }): Promise<EventImage> {
     const res = await fetch('/api/images', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -364,7 +364,14 @@ export const api = {
     return res.json();
   },
 
-  async uploadImages(payload: { images?: Array<{ imageId?: string; name?: string; base64: string }>; name?: string; base64?: string; imageId?: string }): Promise<{ success: boolean; count: number; images: EventImage[]; allImages: EventImage[] }> {
+  async uploadImages(payload: {
+    images?: Array<{ imageId?: string; name?: string; base64: string; stationId?: string; stationName?: string }>;
+    name?: string;
+    base64?: string;
+    imageId?: string;
+    stationId?: string;
+    stationName?: string;
+  }): Promise<{ success: boolean; count: number; images: EventImage[]; allImages: EventImage[] }> {
     const res = await fetch('/api/images/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -373,6 +380,23 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to upload image(s)');
+    }
+    return res.json();
+  },
+
+  async batchUpdateImageStations(
+    imageIds: string[],
+    stationId?: string,
+    stationName?: string
+  ): Promise<{ success: boolean; count: number; images: EventImage[]; allImages: EventImage[] }> {
+    const res = await fetch('/api/images/batch-station', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageIds, stationId, stationName }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to reassign images');
     }
     return res.json();
   },

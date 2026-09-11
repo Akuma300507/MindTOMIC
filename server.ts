@@ -929,14 +929,38 @@ app.post('/api/timer/action', (req: Request, res: Response) => {
 app.post('/api/round1/assign-image', (req: Request, res: Response) => {
   const { participantId, participantName, stationId } = req.body;
 
-  // Filter available images
-  let candidates = db.images.filter((img) => img.status === 'available');
+  // Filter available images (respecting station-specific images if stationId is provided)
+  let candidates: EventImage[] = [];
+  if (stationId && stationId !== 'all') {
+    const stationCandidates = db.images.filter(
+      (img) => img.stationId === stationId || img.stationId === resolveStationName(stationId)
+    );
+    if (stationCandidates.length > 0) {
+      candidates = stationCandidates.filter((img) => img.status === 'available');
+      if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+        candidates = stationCandidates;
+      }
+    }
+  }
+
   if (candidates.length === 0) {
-    if (db.settings.round1.allowImageReuse) {
+    // Exclude images explicitly assigned to other stations!
+    const otherStationImages = db.images.filter(
+      (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stationId
+    );
+    const availablePool = db.images.filter((img) => !otherStationImages.includes(img));
+    candidates = availablePool.filter((img) => img.status === 'available');
+    if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+      candidates = availablePool.length > 0 ? availablePool : db.images;
+    }
+  }
+
+  if (candidates.length === 0) {
+    if (db.settings.round1.allowImageReuse && db.images.length > 0) {
       candidates = db.images;
     } else {
       return res.status(409).json({
-        error: 'No unused images left in the pool. Reset image pool or allow image reuse in settings.',
+        error: 'No unused images left in the pool for this station. Reset image pool or allow image reuse in settings.',
       });
     }
   }
@@ -1321,14 +1345,37 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
     station.activeParticipant = db.participants.find((p) => p.id === participantId) || station.activeParticipant;
   }
 
-  // Filter available images globally
-  let candidates = db.images.filter((img) => img.status === 'available');
+  // Filter available images strictly for THIS station to prevent repeating across stations
+  const stationId = station.id;
+  const stationCandidates = db.images.filter(
+    (img) => img.stationId === stationId || img.stationId === station.name
+  );
+
+  let candidates: EventImage[] = [];
+  if (stationCandidates.length > 0) {
+    candidates = stationCandidates.filter((img) => img.status === 'available');
+    if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+      candidates = stationCandidates;
+    }
+  } else {
+    // If no images are assigned specifically to this station, use unassigned or all-station images
+    // Strictly exclude images that belong to other stations!
+    const otherStationImages = db.images.filter(
+      (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stationId && img.stationId !== station.name
+    );
+    const availablePool = db.images.filter((img) => !otherStationImages.includes(img));
+    candidates = availablePool.filter((img) => img.status === 'available');
+    if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+      candidates = availablePool.length > 0 ? availablePool : db.images;
+    }
+  }
+
   if (candidates.length === 0) {
-    if (db.settings.round1.allowImageReuse) {
-      candidates = db.images;
+    if (db.settings.round1.allowImageReuse && db.images.length > 0) {
+      candidates = stationCandidates.length > 0 ? stationCandidates : db.images;
     } else {
       return res.status(409).json({
-        error: 'No unused images left in the pool. Reset image pool or allow image reuse in settings.',
+        error: `No unused images available for ${station.name}. Please upload images assigned to ${station.name} or allow image reuse in settings.`,
       });
     }
   }
@@ -2241,27 +2288,39 @@ app.post('/api/topics/reset-status', (req: Request, res: Response) => {
   res.json({ success: true, message: 'All topics reset to available' });
 });
 
+// Helper to resolve station name from stationId
+function resolveStationName(stationId?: string): string | undefined {
+  if (!stationId || stationId === 'all') return undefined;
+  const match = (db.settings.stations || []).find((s) => s.id === stationId) || (db.stations && db.stations[stationId]);
+  return match?.name || (stationId.startsWith('station-') ? `Station ${stationId.replace('station-', '').toUpperCase()}` : stationId);
+}
+
 // Images CRUD
 app.get('/api/images', (req: Request, res: Response) => {
   res.json(db.images);
 });
 
 app.post('/api/images', (req: Request, res: Response) => {
-  const { name, url, imageId } = req.body;
+  const { name, url, imageId, stationId, stationName } = req.body;
   if (!url) return res.status(400).json({ error: 'Image URL is required' });
 
   const finalImageId = (imageId?.trim() || name?.trim() || `IMG-${String(db.images.length + 1).padStart(3, '0')}`).toUpperCase();
+  const assignedStationId = stationId && stationId !== 'all' ? stationId : undefined;
+  const assignedStationName = stationName || resolveStationName(assignedStationId);
+
   const newImg: EventImage = {
     id: `img-${Date.now()}`,
     imageId: finalImageId,
     name: finalImageId,
     url: url.trim(),
+    stationId: assignedStationId,
+    stationName: assignedStationName,
     status: 'available',
   };
 
   db.images.push(newImg);
   persistDB();
-  logAction('Image Added', `Added image with ID: "${newImg.imageId}"`);
+  logAction('Image Added', `Added image with ID: "${newImg.imageId}"${assignedStationName ? ' for ' + assignedStationName : ''}`);
   broadcastSSE('images_updated', db.images);
   res.json(newImg);
 });
@@ -2271,7 +2330,7 @@ app.put('/api/images/:id', (req: Request, res: Response) => {
   const img = db.images.find((i) => i.id === id);
   if (!img) return res.status(404).json({ error: 'Image not found' });
 
-  const { imageId, name, status, url } = req.body;
+  const { imageId, name, status, url, stationId, stationName } = req.body;
   if (imageId !== undefined) {
     img.imageId = imageId.trim().toUpperCase();
     img.name = img.imageId;
@@ -2282,23 +2341,52 @@ app.put('/api/images/:id', (req: Request, res: Response) => {
   }
   if (status !== undefined) img.status = status;
   if (url !== undefined) img.url = url.trim();
+  if (stationId !== undefined) {
+    img.stationId = stationId && stationId !== 'all' ? stationId : undefined;
+    img.stationName = stationName || resolveStationName(img.stationId);
+  }
 
   persistDB();
-  logAction('Image Updated', `Updated image ID to "${img.imageId}"`);
+  logAction('Image Updated', `Updated image ID "${img.imageId}" (${img.stationName || 'All Stations'})`);
   broadcastSSE('images_updated', db.images);
   res.json(img);
+});
+
+// Batch update image stations
+app.post('/api/images/batch-station', (req: Request, res: Response) => {
+  const { imageIds, stationId, stationName } = req.body;
+  if (!Array.isArray(imageIds) || imageIds.length === 0) {
+    return res.status(400).json({ error: 'imageIds array is required' });
+  }
+
+  const assignedStationId = stationId && stationId !== 'all' ? stationId : undefined;
+  const assignedStationName = stationName || resolveStationName(assignedStationId);
+
+  const updated: EventImage[] = [];
+  db.images.forEach((img) => {
+    if (imageIds.includes(img.id)) {
+      img.stationId = assignedStationId;
+      img.stationName = assignedStationName;
+      updated.push(img);
+    }
+  });
+
+  persistDB();
+  logAction('Images Reassigned', `Assigned ${updated.length} image(s) to ${assignedStationName || 'All Stations'}`);
+  broadcastSSE('images_updated', db.images);
+  res.json({ success: true, count: updated.length, images: updated, allImages: db.images });
 });
 
 // Laptop Image Upload Endpoint (Saves to persistent online uploads directory or Cloudinary)
 app.post('/api/images/upload', async (req: Request, res: Response) => {
   try {
-    const { images, name, base64, imageId } = req.body;
-    const itemsToProcess: Array<{ name?: string; imageId?: string; base64: string }> = [];
+    const { images, name, base64, imageId, stationId, stationName } = req.body;
+    const itemsToProcess: Array<{ name?: string; imageId?: string; base64: string; stationId?: string; stationName?: string }> = [];
 
     if (Array.isArray(images)) {
       itemsToProcess.push(...images);
     } else if (base64) {
-      itemsToProcess.push({ name: name || 'Uploaded Image', imageId, base64 });
+      itemsToProcess.push({ name: name || 'Uploaded Image', imageId, base64, stationId, stationName });
     }
 
     if (itemsToProcess.length === 0) {
@@ -2351,12 +2439,17 @@ app.post('/api/images/upload', async (req: Request, res: Response) => {
         fs.writeFileSync(filePath, buffer);
       }
 
+      const itemStationId = (item.stationId && item.stationId !== 'all') ? item.stationId : (stationId && stationId !== 'all' ? stationId : undefined);
+      const itemStationName = item.stationName || stationName || resolveStationName(itemStationId);
+
       const assignedId = (item.imageId?.trim() || `IMG-${String(db.images.length + 1).padStart(3, '0')}`).toUpperCase();
       const newImg: EventImage = {
         id: `img-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         imageId: assignedId,
         name: assignedId,
         url: imageUrl,
+        stationId: itemStationId,
+        stationName: itemStationName,
         status: 'available',
       };
 
