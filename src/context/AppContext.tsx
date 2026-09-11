@@ -401,7 +401,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return 'dashboard';
   });
-  const [activeParticipant, setActiveParticipant] = useState<Participant | null>(null);
+  const [activeParticipant, setActiveParticipantState] = useState<Participant | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [soundUnlocked, setSoundUnlocked] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -479,6 +479,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // BroadcastChannel optional fallback
     }
   }, []);
+
+  const setActiveParticipant = useCallback(
+    (participantOrFn: Participant | null | ((prev: Participant | null) => Participant | null)) => {
+      setActiveParticipantState((prev) => {
+        const next = typeof participantOrFn === 'function' ? participantOrFn(prev) : participantOrFn;
+        const stId = currentStationIdRef.current;
+        if (stId && stId !== 'all') {
+          setDb((currentDb) => {
+            if (!currentDb) return currentDb;
+            const targetStation = currentDb.stations?.[stId];
+            if (!targetStation) return currentDb;
+            if (
+              targetStation.activeParticipantId === (next?.id || null) &&
+              targetStation.activeParticipant?.id === (next?.id || null)
+            ) {
+              return currentDb;
+            }
+            const updatedStation: StationState = {
+              ...targetStation,
+              activeParticipantId: next?.id || null,
+              activeParticipant: next,
+            };
+            const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
+            const updatedDb = { ...currentDb, stations };
+            dbRef.current = updatedDb;
+            saveCachedDb(updatedDb).catch(() => {});
+            broadcastStationLocal('station_updated', { station: updatedStation });
+            return updatedDb;
+          });
+          api.setStationParticipant(stId, next?.id || null).catch(() => {});
+        }
+        return next;
+      });
+    },
+    [broadcastStationLocal]
+  );
 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
@@ -641,6 +677,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [playBuzzerWithDebounce]);
 
+  // Cross-Tab & Cross-Window Instant Synchronization via Storage Events
+  // When ANY tab or window writes to IndexedDB cache, this guarantees other windows (like Projector)
+  // pick up the change immediately in 0ms without requiring F5.
+  useEffect(() => {
+    const handleStorageEvent = async (e: StorageEvent) => {
+      if (e.key === 'm2m_offline_sync_pulse' || e.key === 'm2m_last_sync_time') {
+        try {
+          const cached = await getCachedDb();
+          if (cached && cached.stations) {
+            setDb((prev) => {
+              if (!prev) return cached;
+              if (JSON.stringify(prev) === JSON.stringify(cached)) return prev;
+              return cached;
+            });
+            dbRef.current = cached;
+          }
+        } catch {}
+      } else if (e.key === 'm2m_current_station_id' && e.newValue) {
+        if (e.newValue !== currentStationIdRef.current) {
+          setCurrentStationIdState(e.newValue);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageEvent);
+    return () => window.removeEventListener('storage', handleStorageEvent);
+  }, []);
+
   const reloadState = useCallback(async () => {
     try {
       const state = await api.getState();
@@ -649,6 +713,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (JSON.stringify(prev) === JSON.stringify(state)) return prev;
         return state;
       });
+      dbRef.current = state;
       saveCachedDb(state).catch(() => {});
       // If no active participant yet and participants exist, set first active safely (respecting current station)
       setActiveParticipant((current) => {
@@ -660,11 +725,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         return state.participants[0] ?? null;
       });
-    } catch (err) {
-      console.warn('[AppContext] Network offline or fetch failed, restoring from IndexedDB cache:', err);
+    } catch {
+      // Offline fallback: restore and sync from IndexedDB
       const cached = await getCachedDb();
       if (cached) {
-        setDb(cached);
+        setDb((prev) => {
+          if (!prev) return cached;
+          if (JSON.stringify(prev) === JSON.stringify(cached)) return prev;
+          return cached;
+        });
+        dbRef.current = cached;
         setActiveParticipant((current) => {
           if (current) return current;
           if (!cached.participants || cached.participants.length === 0) return null;
@@ -678,7 +748,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } finally {
       setLoading(false);
     }
-  }, [currentStationId]);
+  }, [currentStationId, setActiveParticipant]);
 
   useEffect(() => {
     // Immediate optimistic boot from IndexedDB cache so page loads instantly offline
@@ -1727,7 +1797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setDb((prev) => {
             if (!prev) return prev;
             const stations = { ...(prev.stations || {}), [updatedStation.id]: updatedStation };
-            return {
+            const updated = {
               ...prev,
               stations,
               liveSync: {
@@ -1735,6 +1805,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 stationStates: stations,
               },
             };
+            dbRef.current = updated;
+            saveCachedDb(updated).catch(() => {});
+            return updated;
           });
         } catch (err) {
           console.error(err);
@@ -1751,7 +1824,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stationList.forEach((s) => {
               stations[s.id] = s;
             });
-            return {
+            const updated = {
               ...prev,
               stations,
               liveSync: {
@@ -1759,6 +1832,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 stationStates: stations,
               },
             };
+            dbRef.current = updated;
+            saveCachedDb(updated).catch(() => {});
+            return updated;
           });
         } catch (err) {
           console.error(err);
@@ -2083,7 +2159,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [playBuzzerWithDebounce, currentStationId, deviceRole, projectorDeviceId, currentPage]);
 
-  // Continuous Background State Synchronization:
+  // Continuous Background State Synchronization & Auto-Refresher:
   // Runs continuously every 1000ms so that ANY backend change (direct edit, script, offline device sync, or station update)
   // is guaranteed to appear on the Projector and all views automatically without requiring manual F5 reload.
   useEffect(() => {
@@ -2106,9 +2182,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             saveCachedDb(fresh).catch(() => {});
             return fresh;
           });
+          dbRef.current = fresh;
         }
       } catch {
-        // Local server temporarily unreachable or offline, ignore
+        // AUTOMATIC OFFLINE REFRESHER:
+        // When server is offline, unreachable, or in local offline venue mode,
+        // actively pull from IndexedDB so the Projector and all views stay 100% updated without F5!
+        try {
+          const cached = await getCachedDb();
+          if (cached && cached.stations) {
+            setDb((prev) => {
+              if (!prev) return cached;
+              if (JSON.stringify(prev) === JSON.stringify(cached)) {
+                return prev;
+              }
+              return cached;
+            });
+            dbRef.current = cached;
+          }
+        } catch {}
       } finally {
         isPolling = false;
       }

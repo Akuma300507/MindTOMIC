@@ -745,6 +745,9 @@ app.get('/api/health', (req: Request, res: Response) => {
 
 // Full state
 app.get('/api/state', (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.json(db);
 });
 

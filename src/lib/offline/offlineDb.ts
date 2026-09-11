@@ -244,7 +244,7 @@ export async function clearQueue(): Promise<void> {
 export async function saveCachedDb(appDb: AppDatabase): Promise<void> {
   try {
     const db = await getDb();
-    return new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_APP_CACHE, 'readwrite');
       const store = tx.objectStore(STORE_APP_CACHE);
       const req = store.put({
@@ -255,6 +255,22 @@ export async function saveCachedDb(appDb: AppDatabase): Promise<void> {
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
+
+    // 1. Instantly notify all tabs and windows across the origin via storage event
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('m2m_offline_sync_pulse', Date.now().toString());
+      } catch {}
+    }
+
+    // 2. Broadcast directly via BroadcastChannel as well
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel('mindtomic_station_sync');
+        bc.postMessage({ type: 'db_sync', db: appDb, timestamp: Date.now() });
+        bc.close();
+      } catch {}
+    }
   } catch (err) {
     console.error('[offlineDb] Failed to save cached database:', err);
   }

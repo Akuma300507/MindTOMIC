@@ -59,7 +59,18 @@ export const ProjectorDisplay: React.FC = () => {
     const interval = setInterval(() => {
       reloadState().catch(() => {});
     }, 1000);
-    return () => clearInterval(interval);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'm2m_offline_sync_pulse' || e.key === 'm2m_last_sync_time') {
+        reloadState().catch(() => {});
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, [reloadState]);
 
   useEffect(() => {
@@ -151,8 +162,13 @@ export const ProjectorDisplay: React.FC = () => {
       const match = db.participants.find((p) => p.id === currentStationState.activeParticipantId);
       if (match) return match;
     }
+    // Fallback: match the first participant assigned to this station if not yet explicitly selected
+    if (selectedStationId && selectedStationId !== 'all' && db?.participants) {
+      const stationMatches = db.participants.filter((p) => p.stationId === selectedStationId);
+      if (stationMatches.length > 0) return stationMatches[0];
+    }
     return null;
-  }, [currentStationState, db?.participants]);
+  }, [currentStationState, db?.participants, selectedStationId]);
 
   const eventName = db?.settings?.event?.name || 'MIND TO MIC';
   const tagline = db?.settings?.event?.tagline || 'THINK. SPEAK. EXPRESS.';
@@ -165,42 +181,52 @@ export const ProjectorDisplay: React.FC = () => {
   // STRICT STATION ISOLATION: Active displayed item (image or topic)
   const activeItem = useMemo(() => {
     if (!currentStationState) return null;
-    if (currentRound === 1 && (currentStationState.selectedImage || currentStationState.selectedImageId)) {
-      const selectedImg =
-        currentStationState.selectedImage ||
-        (db?.images
-          ? db.images.find(
-              (img) =>
-                img.id === currentStationState.selectedImageId ||
-                img.imageId === currentStationState.selectedImageId
-            )
-          : null);
-      if (selectedImg) {
-        const imageId = selectedImg.imageId || selectedImg.name;
-        return {
-          type: 'image' as const,
-          title: `IMAGE ID: ${imageId}`,
-          mediaUrl: selectedImg.url,
-          id: selectedImg.id,
-          rotation: currentStationState.imageRotation ?? selectedImg.rotation ?? 0,
-        };
+
+    const hasImage = Boolean(currentStationState.selectedImage || currentStationState.selectedImageId);
+    const hasTopic = Boolean(currentStationState.selectedTopic || currentStationState.selectedTopicId || currentStationState.wheelSpin?.isSpinning);
+
+    if (currentRound === 1 || (hasImage && !hasTopic)) {
+      if (hasImage) {
+        const selectedImg =
+          currentStationState.selectedImage ||
+          (db?.images
+            ? db.images.find(
+                (img) =>
+                  img.id === currentStationState.selectedImageId ||
+                  img.imageId === currentStationState.selectedImageId
+              )
+            : null);
+        if (selectedImg) {
+          const imageId = selectedImg.imageId || selectedImg.name;
+          return {
+            type: 'image' as const,
+            title: `IMAGE ID: ${imageId}`,
+            mediaUrl: selectedImg.url,
+            id: selectedImg.id,
+            rotation: currentStationState.imageRotation ?? selectedImg.rotation ?? 0,
+          };
+        }
       }
     }
-    if (currentRound === 2 && (currentStationState.selectedTopic || currentStationState.selectedTopicId)) {
-      const selectedTop =
-        currentStationState.selectedTopic ||
-        (db?.topics
-          ? db.topics.find((t) => t.id === currentStationState.selectedTopicId)
-          : null);
-      if (selectedTop) {
-        return {
-          type: 'topic' as const,
-          title: selectedTop.topic,
-          id: selectedTop.id,
-          category: selectedTop.category,
-        };
+
+    if (currentRound === 2 || hasTopic) {
+      if (hasTopic) {
+        const selectedTop =
+          currentStationState.selectedTopic ||
+          (db?.topics
+            ? db.topics.find((t) => t.id === currentStationState.selectedTopicId)
+            : null);
+        if (selectedTop) {
+          return {
+            type: 'topic' as const,
+            title: selectedTop.topic,
+            id: selectedTop.id,
+            category: selectedTop.category,
+          };
+        }
       }
     }
+
     if (currentRound === 3) {
       return {
         type: 'final' as const,
@@ -714,15 +740,16 @@ export const ProjectorDisplay: React.FC = () => {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${
               isConnected
                 ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-300'
-                : 'bg-amber-950/70 border-amber-800/80 text-amber-300 animate-pulse'
+                : 'bg-indigo-950/80 border-indigo-600/80 text-indigo-200'
             }`}
+            title={isConnected ? 'Real-Time SSE Connected' : 'Continuous Offline Auto-Refresher Active (Syncs every 1s without F5)'}
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'bg-amber-400'
+                isConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)] animate-pulse'
               }`}
             />
-            <span className="hidden md:inline">{isConnected ? 'LIVE SYNC' : 'RECONNECTING'}</span>
+            <span className="hidden md:inline">{isConnected ? 'LIVE SYNC' : 'OFFLINE AUTO-REFRESH'}</span>
           </div>
 
           {/* Top-Right Corner Small Clock for Round 1 & Round 2 */}

@@ -38,7 +38,13 @@ export const api = {
 
   // State
   async getState(): Promise<AppDatabase> {
-    const res = await fetch('/api/state');
+    const res = await fetch(`/api/state?_t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+    });
     if (!res.ok) throw new Error('Failed to load database state');
     return res.json();
   },
