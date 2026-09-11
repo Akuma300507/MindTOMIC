@@ -23,8 +23,8 @@ export const Round1: React.FC = () => {
     setActiveParticipant,
     selectNextParticipant,
     saveRound1Result,
-    updateLiveSync,
     assignStationImage,
+    rotateStationImage,
     resetImagesStatus,
     currentStationId,
     setCurrentStationId,
@@ -119,49 +119,22 @@ export const Round1: React.FC = () => {
   // Image rotation state for projector and operator
   const [imageRotation, setImageRotation] = useState<number>(0);
 
-  // Reset rotation when image changes
+  // Reset rotation when image changes, or sync from currentStation
   useEffect(() => {
-    setImageRotation(0);
-  }, [selectedImage?.id]);
+    if (typeof currentStation?.imageRotation === 'number') {
+      setImageRotation(currentStation.imageRotation);
+    } else {
+      setImageRotation(0);
+    }
+  }, [selectedImage?.id, currentStation?.imageRotation]);
 
   const handleRotateImage = () => {
     const nextRot = (imageRotation + 90) % 360;
     setImageRotation(nextRot);
-    if (selectedImage) {
-      const imgId = selectedImage.imageId || selectedImage.name;
-      updateLiveSync({
-        currentRound: 1,
-        activeParticipantId: activeParticipant?.id || null,
-        locationId: currentStationId,
-        activeItem: {
-          type: 'image',
-          title: `IMAGE ID: ${imgId}`,
-          mediaUrl: selectedImage.url,
-          id: selectedImage.id,
-          rotation: nextRot,
-        },
-      }).catch(() => {});
+    if (currentStationId && rotateStationImage) {
+      rotateStationImage(currentStationId, nextRot).catch(() => {});
     }
   };
-
-  // Sync with projector screen
-  useEffect(() => {
-    if (selectedImage) {
-      const imgId = selectedImage.imageId || selectedImage.name;
-      updateLiveSync({
-        currentRound: 1,
-        activeParticipantId: activeParticipant?.id || null,
-        locationId: currentStationId,
-        activeItem: {
-          type: 'image',
-          title: `IMAGE ID: ${imgId}`,
-          mediaUrl: selectedImage.url,
-          id: selectedImage.id,
-          rotation: imageRotation,
-        },
-      }).catch(() => {});
-    }
-  }, [selectedImage?.id, selectedImage?.imageId, selectedImage?.name, activeParticipant?.id, currentStationId, updateLiveSync, imageRotation]);
 
   // Callback when timer finishes or stops
   const handleTimerFinish = useCallback(

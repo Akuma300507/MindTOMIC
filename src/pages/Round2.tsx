@@ -29,7 +29,6 @@ export const Round2: React.FC = () => {
     setActiveParticipant,
     selectNextParticipant,
     saveRound2Result,
-    updateLiveSync,
     spinStationTopic,
     completeStationSpin,
     replaceStationWheelTopic,
@@ -297,30 +296,6 @@ export const Round2: React.FC = () => {
         if (currentStationId) {
           completeStationSpin(currentStationId).catch(() => {});
         }
-
-        // Sync with projector display with current wheel
-        if (chosenTopic) {
-          updateLiveSync({
-            currentRound: 2,
-            activeParticipantId: activeParticipant?.id || null,
-            locationId: currentStationId,
-            activeItem: {
-              type: 'topic',
-              title: chosenTopic.topic || 'Selected Topic',
-              id: chosenTopic.id,
-              category: chosenTopic.category,
-            },
-            wheelSpin: {
-              isSpinning: false,
-              targetTopicId: chosenTopic.id,
-              targetTopicTitle: chosenTopic.topic || 'Selected Topic',
-              targetIndex,
-              wheelTopics: currentWheel,
-              startedAt: 0,
-              durationMs: 0,
-            },
-          }).catch(() => {});
-        }
       }
     };
 
@@ -345,27 +320,8 @@ export const Round2: React.FC = () => {
       if (currentStationId && nextTopic?.id) {
         replaceStationWheelTopic(currentStationId, winningId, nextTopic.id).catch(() => {});
       }
-      updateLiveSync({
-        currentRound: 2,
-        activeParticipantId: activeParticipant?.id || null,
-        locationId: currentStationId,
-        activeItem: {
-          type: 'topic',
-          title: winningTopic.topic || 'Selected Topic',
-          id: winningTopic.id,
-          category: winningTopic.category,
-        },
-        wheelSpin: {
-          isSpinning: false,
-          targetTopicId: winningTopic.id,
-          targetTopicTitle: winningTopic.topic || 'Selected Topic',
-          wheelTopics: updated,
-          startedAt: 0,
-          durationMs: 0,
-        },
-      }).catch(() => {});
     }
-  }, [winningTopic, db?.topics, topicsPool, lockedWheelTopics, activeWheelTopics, currentStationId, replaceStationWheelTopic, updateLiveSync, activeParticipant?.id]);
+  }, [winningTopic, db?.topics, topicsPool, lockedWheelTopics, activeWheelTopics, currentStationId, replaceStationWheelTopic]);
 
   // Callback when timer completes
   const handleTimerFinish = useCallback(
@@ -386,6 +342,7 @@ export const Round2: React.FC = () => {
         participantName: activeParticipant.name,
         mobile: activeParticipant.mobile || activeParticipant.phone || activeParticipant.customData?.phone || '',
         topicId: currentTopicId,
+        topic: winningTopic.topic || 'Selected Topic',
         topicText: winningTopic.topic || 'Selected Topic',
         prepDurationSeconds: 0,
         speechDurationSeconds: data.speechDurationSeconds,
@@ -409,29 +366,10 @@ export const Round2: React.FC = () => {
         if (remainingUnused.length > 0 && currentWheel.some((t) => t?.id === winningId)) {
           const updated = currentWheel.map((t) => (t?.id === winningId ? remainingUnused[0] : t));
           setLockedWheelTopics(updated);
-          updateLiveSync({
-            currentRound: 2,
-            activeParticipantId: activeParticipant?.id || null,
-            locationId: currentStationId,
-            activeItem: {
-              type: 'topic',
-              title: winningTopic.topic || 'Selected Topic',
-              id: winningTopic.id,
-              category: winningTopic.category,
-            },
-            wheelSpin: {
-              isSpinning: false,
-              targetTopicId: winningTopic.id,
-              targetTopicTitle: winningTopic.topic || 'Selected Topic',
-              wheelTopics: updated,
-              startedAt: 0,
-              durationMs: 0,
-            },
-          }).catch(() => {});
         }
       }
     },
-    [activeParticipant, winningTopic, speechSeconds, saveRound2Result, db?.topics, topicsPool, activeWheelTopics, updateLiveSync, currentStationId]
+    [activeParticipant, winningTopic, speechSeconds, saveRound2Result, db?.topics, topicsPool, activeWheelTopics, currentStationId]
   );
 
   return (

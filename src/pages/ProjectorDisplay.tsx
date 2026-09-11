@@ -17,6 +17,9 @@ import {
   CheckCircle2,
   RotateCw,
   Upload,
+  Bell,
+  X,
+  Monitor,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -34,6 +37,9 @@ export const ProjectorDisplay: React.FC = () => {
   const {
     db,
     allStations,
+    currentStationId,
+    setCurrentStationId,
+    rotateStationImage,
     isConnected,
     isFullscreen,
     toggleFullscreen,
@@ -41,7 +47,19 @@ export const ProjectorDisplay: React.FC = () => {
     soundUnlocked,
     unlockSound,
     uploadInspireLogo,
+    projectorDeviceId,
+    projectorPingNotification,
+    clearProjectorPingNotification,
   } = useApp();
+
+  useEffect(() => {
+    if (projectorPingNotification) {
+      const timer = setTimeout(() => {
+        clearProjectorPingNotification();
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [projectorPingNotification, clearProjectorPingNotification]);
 
   const inspireFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -62,27 +80,59 @@ export const ProjectorDisplay: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  // Multi-station / location selection with URL param and localStorage persistence
+  // Multi-station / location selection with URL param, device station, and localStorage persistence
   const initialStation = useMemo(() => {
     const urlVal = new URLSearchParams(window.location.search).get('station');
-    if (urlVal) return urlVal;
-    return localStorage.getItem('projector_assigned_station') || (allStations[0]?.id || 'station-a');
-  }, [allStations]);
+    if (urlVal && urlVal !== 'all') return urlVal;
+    if (currentStationId && currentStationId !== 'all') return currentStationId;
+    const stored = localStorage.getItem('projector_assigned_station');
+    if (stored && stored !== 'all') return stored;
+    const storedCurrent = localStorage.getItem('m2m_current_station_id');
+    if (storedCurrent && storedCurrent !== 'all') return storedCurrent;
+    return allStations[0]?.id || 'station-a';
+  }, [allStations, currentStationId]);
 
   const [selectedStationId, setSelectedStationId] = useState<string>(initialStation);
   const [showExitModal, setShowExitModal] = useState<boolean>(false);
   const [soundMuted, setSoundMuted] = useState<boolean>(false);
 
+  // Synchronize selectedStationId with currentStationId if device's station selection changes
+  useEffect(() => {
+    if (currentStationId && currentStationId !== 'all' && currentStationId !== selectedStationId) {
+      setSelectedStationId(currentStationId);
+    }
+  }, [currentStationId, selectedStationId]);
+
+  // Ensure selectedStationId always points to a valid station once allStations are loaded
+  useEffect(() => {
+    if (allStations.length > 0) {
+      if (!selectedStationId || selectedStationId === 'all' || !allStations.some((s) => s.id === selectedStationId)) {
+        const fallback = currentStationId && currentStationId !== 'all' && allStations.some((s) => s.id === currentStationId)
+          ? currentStationId
+          : allStations[0].id;
+        setSelectedStationId(fallback);
+      }
+    }
+  }, [allStations, selectedStationId, currentStationId]);
+
   const handleStationSelect = (stationId: string) => {
+    if (!stationId || stationId === 'all') return;
     setSelectedStationId(stationId);
-    localStorage.setItem('projector_assigned_station', stationId);
+    setCurrentStationId(stationId);
+    try {
+      localStorage.setItem('projector_assigned_station', stationId);
+      localStorage.setItem('m2m_current_station_id', stationId);
+      const url = new URL(window.location.href);
+      url.searchParams.set('station', stationId);
+      window.history.replaceState({}, '', url.toString());
+    } catch {}
   };
 
-  // Read current live state and station-specific state
-  const live = db?.liveSync;
-  const currentStationState = selectedStationId !== 'all' && db?.stations ? db.stations[selectedStationId] : null;
+  // Read current station-specific state strictly isolated to this projector's station
+  const currentStationState = db?.stations ? db.stations[selectedStationId] : null;
 
-  // Find active participant for this station or fallback to global live event
+  // STRICT STATION ISOLATION: Find active participant for this station
+  // NEVER fall back to other stations or global liveSync
   const activeParticipant = useMemo(() => {
     if (currentStationState?.activeParticipant) {
       return currentStationState.activeParticipant;
@@ -91,43 +141,46 @@ export const ProjectorDisplay: React.FC = () => {
       const match = db.participants.find((p) => p.id === currentStationState.activeParticipantId);
       if (match) return match;
     }
-    if (!live?.activeParticipantId || !db?.participants) return null;
-    return db.participants.find((p) => p.id === live.activeParticipantId) || null;
-  }, [currentStationState, live?.activeParticipantId, db?.participants]);
+    return null;
+  }, [currentStationState, db?.participants]);
 
   const eventName = db?.settings.event.name || 'MIND TO MIC';
   const tagline = db?.settings.event.tagline || 'THINK. SPEAK. EXPRESS.';
-  const currentRound = currentStationState?.currentRound || live?.currentRound || 1;
 
-  // Determine active displayed item (image or topic) from station or liveSync
+  // STRICT STATION ISOLATION: Round number for this station
+  const currentRound = useMemo(() => {
+    return currentStationState?.currentRound || 1;
+  }, [currentStationState?.currentRound]);
+
+  // STRICT STATION ISOLATION: Active displayed item (image or topic)
   const activeItem = useMemo(() => {
-    if (currentStationState) {
-      if (currentRound === 1 && currentStationState.selectedImage) {
-        const imageId = currentStationState.selectedImage.imageId || currentStationState.selectedImage.name;
-        return {
-          type: 'image' as const,
-          title: `IMAGE ID: ${imageId}`,
-          mediaUrl: currentStationState.selectedImage.url,
-          id: currentStationState.selectedImage.id,
-        };
-      }
-      if (currentRound === 2 && currentStationState.selectedTopic) {
-        return {
-          type: 'topic' as const,
-          title: currentStationState.selectedTopic.topic,
-          id: currentStationState.selectedTopic.id,
-          category: currentStationState.selectedTopic.category,
-        };
-      }
-      if (currentRound === 3) {
-        return {
-          type: 'final' as const,
-          title: 'Championship Grand Finals',
-        };
-      }
+    if (!currentStationState) return null;
+    if (currentRound === 1 && currentStationState.selectedImage) {
+      const imageId = currentStationState.selectedImage.imageId || currentStationState.selectedImage.name;
+      return {
+        type: 'image' as const,
+        title: `IMAGE ID: ${imageId}`,
+        mediaUrl: currentStationState.selectedImage.url,
+        id: currentStationState.selectedImage.id,
+        rotation: currentStationState.imageRotation ?? currentStationState.selectedImage.rotation ?? 0,
+      };
     }
-    return live?.activeItem;
-  }, [currentStationState, currentRound, live?.activeItem]);
+    if (currentRound === 2 && currentStationState.selectedTopic) {
+      return {
+        type: 'topic' as const,
+        title: currentStationState.selectedTopic.topic,
+        id: currentStationState.selectedTopic.id,
+        category: currentStationState.selectedTopic.category,
+      };
+    }
+    if (currentRound === 3) {
+      return {
+        type: 'final' as const,
+        title: 'Championship Grand Finals',
+      };
+    }
+    return null;
+  }, [currentStationState, currentRound]);
 
   // Real-time Timer Interpolation using shared backend timestamps (zero-drift, clock-synced)
   const [nowMs, setNowMs] = useState<number>(() => getServerNow());
@@ -138,10 +191,10 @@ export const ProjectorDisplay: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const stationOrLive = currentStationState || live;
+  // STRICT STATION ISOLATION: Timer source strictly for this station
   const computedTimer = useMemo(() => {
-    return computeStationTimer(stationOrLive, nowMs);
-  }, [stationOrLive, nowMs]);
+    return computeStationTimer(currentStationState, nowMs);
+  }, [currentStationState, nowMs]);
 
   const timerMode = computedTimer.phase;
   const isTimerRunning = computedTimer.isRunning;
@@ -161,31 +214,45 @@ export const ProjectorDisplay: React.FC = () => {
   const spinAnimFrameRef = useRef<number | null>(null);
 
   // Image rotation state (0, 90, 180, 270 degrees)
-  const [imageRotation, setImageRotation] = useState<number>(0);
+  const [localImageRotation, setLocalImageRotation] = useState<number>(0);
 
-  // Reset rotation when image changes
+  // Reset local rotation when active image changes
   useEffect(() => {
-    setImageRotation(0);
+    setLocalImageRotation(0);
   }, [activeItem?.id]);
 
-  // Combined rotation between local state and stage live sync rotation
-  const totalRotation = ((imageRotation + (activeItem?.rotation || 0)) % 360 + 360) % 360;
+  // Combined rotation between local display and station saved rotation
+  const serverImageRot = currentStationState?.imageRotation ?? (activeItem?.rotation || 0);
+  const totalRotation = ((localImageRotation + serverImageRot) % 360 + 360) % 360;
 
-  const handleRotateImage = useCallback(() => {
-    setImageRotation((prev) => (prev + 90) % 360);
-  }, []);
-
-  const handleResetImageRotation = useCallback(() => {
-    setImageRotation(0);
-  }, []);
-
-  // Reset winning topic when station resets or active participant changes
-  useEffect(() => {
-    if (!currentStationState?.selectedTopicId) {
-      setProjectorWinningTopic(null);
-      setProjectorWheelTopics([]);
+  const handleRotateImage = useCallback(async () => {
+    const nextRot = (totalRotation + 90) % 360;
+    setLocalImageRotation((prev) => (prev + 90) % 360);
+    if (selectedStationId && rotateStationImage) {
+      try {
+        await rotateStationImage(selectedStationId, nextRot);
+      } catch (err) {
+        console.error('Failed to sync rotation to station:', err);
+      }
     }
-  }, [activeParticipant?.id, currentRound, currentStationState?.selectedTopicId]);
+  }, [totalRotation, selectedStationId, rotateStationImage]);
+
+  const handleResetImageRotation = useCallback(async () => {
+    setLocalImageRotation(0);
+    if (selectedStationId && rotateStationImage) {
+      try {
+        await rotateStationImage(selectedStationId, 0);
+      } catch (err) {
+        console.error('Failed to reset rotation on station:', err);
+      }
+    }
+  }, [selectedStationId, rotateStationImage]);
+
+  // Reset winning topic when station changes, or when active participant changes
+  useEffect(() => {
+    setProjectorWinningTopic(null);
+    setProjectorWheelTopics([]);
+  }, [selectedStationId, activeParticipant?.id, currentRound, currentStationState?.selectedTopicId]);
 
   // Clean up animation on unmount
   useEffect(() => {
@@ -218,23 +285,47 @@ export const ProjectorDisplay: React.FC = () => {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  // Default active topics if no wheelTopics supplied
-  const defaultWheelTopics = useMemo(() => {
+  // STRICT STATION ISOLATION: Default active topics for this station
+  const stationDefaultWheelTopics = useMemo(() => {
     if (!db?.topics) return [];
     const count = db.settings.round2.activeWheelTopicCount || 20;
+
+    if (selectedStationId) {
+      const station = db.stations?.[selectedStationId];
+      const stationName = station?.name;
+      // Dedicated topics assigned to this station
+      const dedicated = db.topics.filter(
+        (t) => t.stationId === selectedStationId || (stationName && t.stationId === stationName)
+      );
+      if (dedicated.length > 0) {
+        const available = dedicated.filter((t) => t.status === 'available');
+        return (available.length > 0 ? available : dedicated).slice(0, count);
+      }
+      // Universal topics (excluding other stations' topics)
+      const otherStationTopics = db.topics.filter(
+        (t) => t.stationId && t.stationId !== 'all' && t.stationId !== selectedStationId && t.stationId !== stationName
+      );
+      const universal = db.topics.filter((t) => !otherStationTopics.includes(t));
+      const available = universal.filter((t) => t.status === 'available');
+      return (available.length > 0 ? available : universal).slice(0, count);
+    }
+
     const available = db.topics.filter((t) => t.status === 'available');
     return (available.length > 0 ? available : db.topics).slice(0, count);
-  }, [db?.topics, db?.settings.round2.activeWheelTopicCount]);
+  }, [db?.topics, db?.settings.round2.activeWheelTopicCount, selectedStationId, db?.stations]);
 
   // The topics currently rendered on the projector wheel
   const activeTopics = useMemo(() => {
     if (projectorWheelTopics.length > 0) return projectorWheelTopics;
-    return defaultWheelTopics;
-  }, [projectorWheelTopics, defaultWheelTopics]);
+    if (currentStationState?.activeWheelTopics && currentStationState.activeWheelTopics.length > 0) {
+      return currentStationState.activeWheelTopics;
+    }
+    return stationDefaultWheelTopics;
+  }, [projectorWheelTopics, currentStationState?.activeWheelTopics, stationDefaultWheelTopics]);
 
-  // Watch for wheel spin events (from station or global)
+  // STRICT STATION ISOLATION: Watch for wheel spin events ONLY for this station
   useEffect(() => {
-    const wheelSpin = currentStationState?.wheelSpin || live?.wheelSpin;
+    const wheelSpin = currentStationState?.wheelSpin;
     if (wheelSpin?.isSpinning) {
       if (wheelSpin.startedAt && wheelSpin.startedAt === lastSpinStartedAtRef.current) {
         return;
@@ -258,7 +349,7 @@ export const ProjectorDisplay: React.FC = () => {
           : [...activeTopics];
 
       if (topicsForSpin.length === 0) {
-        topicsForSpin = [...defaultWheelTopics];
+        topicsForSpin = [...stationDefaultWheelTopics];
       }
 
       // Locate slice index - match exact ID or Title in topicsForSpin
@@ -362,9 +453,8 @@ export const ProjectorDisplay: React.FC = () => {
     }
   }, [
     currentStationState?.wheelSpin,
-    live?.wheelSpin,
     activeTopics,
-    defaultWheelTopics,
+    stationDefaultWheelTopics,
     wheelAngle,
     soundMuted,
     db?.topics,
@@ -392,24 +482,16 @@ export const ProjectorDisplay: React.FC = () => {
     return formatTimeMMSS(secs);
   };
 
-  // Track whether any spin is currently active (locally or on station/liveSync)
+  // STRICT STATION ISOLATION: Track whether spin is active for THIS station
   const isSpinActive = Boolean(
     isProjectorWheelSpinning ||
-    currentStationState?.status === 'SPINNING' ||
-    currentStationState?.wheelSpin?.isSpinning ||
-    live?.wheelSpin?.isSpinning
+    (currentStationState && (currentStationState.status === 'SPINNING' || currentStationState.wheelSpin?.isSpinning))
   );
 
-  // Current Round 2 topic to display on projector:
+  // STRICT STATION ISOLATION: Current Round 2 topic to display on projector
   // Strictly hidden until wheel spin is fully finished!
   const currentRoundTopic = useMemo(() => {
     if (isSpinActive) return null;
-    if (projectorWinningTopic) {
-      return {
-        title: projectorWinningTopic.topic,
-        category: projectorWinningTopic.category,
-      };
-    }
     if (
       currentStationState?.selectedTopic &&
       currentStationState.status !== 'WAITING' &&
@@ -421,12 +503,16 @@ export const ProjectorDisplay: React.FC = () => {
       };
     }
     if (
-      activeItem?.type === 'topic' &&
-      activeItem.title &&
-      currentStationState?.status !== 'WAITING' &&
-      currentStationState?.status !== 'SPINNING'
+      projectorWinningTopic &&
+      currentStationState &&
+      currentStationState.status !== 'WAITING' &&
+      currentStationState.status !== 'SPINNING' &&
+      currentStationState.selectedTopicId === projectorWinningTopic.id
     ) {
-      return { title: activeItem.title, category: activeItem.category };
+      return {
+        title: projectorWinningTopic.topic,
+        category: projectorWinningTopic.category,
+      };
     }
     return null;
   }, [
@@ -434,7 +520,7 @@ export const ProjectorDisplay: React.FC = () => {
     projectorWinningTopic,
     currentStationState?.selectedTopic,
     currentStationState?.status,
-    activeItem,
+    currentStationState?.selectedTopicId,
   ]);
 
   return (
@@ -442,6 +528,33 @@ export const ProjectorDisplay: React.FC = () => {
       {/* Background ambient lighting effects */}
       <div className="absolute top-0 left-1/4 w-[700px] h-[700px] bg-purple-600/10 rounded-full blur-[160px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[700px] h-[700px] bg-blue-600/10 rounded-full blur-[160px] pointer-events-none" />
+
+      {/* Visual Test Ping Alert Banner from Master Monitor */}
+      <AnimatePresence>
+        {projectorPingNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -60, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -60, scale: 0.95 }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-50 px-8 py-4 rounded-3xl bg-cyan-400 text-slate-950 font-black shadow-[0_0_50px_rgba(34,211,238,0.6)] border-2 border-white flex items-center gap-4 backdrop-blur-xl"
+          >
+            <div className="p-2 rounded-2xl bg-black/10">
+              <Bell className="w-7 h-7 text-slate-950 animate-bounce" />
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-widest text-slate-800 font-extrabold">Master Admin Ping Received</div>
+              <div className="text-lg font-black tracking-tight">{projectorPingNotification.message}</div>
+            </div>
+            <button
+              onClick={clearProjectorPingNotification}
+              className="ml-4 p-1.5 rounded-full hover:bg-black/15 text-slate-950 transition-colors"
+              title="Dismiss"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Top Bar: Event Branding, Top-Center Inspire 2K26 Logo, Station Selector, Connection & Exit */}
       <header className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-4 border-b border-purple-900/40 pb-5">
@@ -456,22 +569,42 @@ export const ProjectorDisplay: React.FC = () => {
               {tagline}
             </p>
             {/* Station / Room Selector */}
-            <div className="flex items-center gap-2 pt-1">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-slate-800 text-xs">
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-slate-800 text-xs shadow-inner">
                 <MapPin className="w-3.5 h-3.5 text-indigo-400" />
                 <select
                   id="projector-station-select"
                   value={selectedStationId}
                   onChange={(e) => handleStationSelect(e.target.value)}
-                  className="bg-transparent text-slate-200 font-semibold focus:outline-none cursor-pointer text-xs"
+                  className="bg-transparent text-slate-200 font-bold focus:outline-none cursor-pointer text-xs"
                 >
-                  <option value="all" className="bg-slate-900 text-white">All Stations (Global)</option>
                   {allStations.map((s) => (
                     <option key={s.id} value={s.id} className="bg-slate-900 text-white">
-                      {s.name} (Round {s.currentRound})
+                      {s.name} {s.location ? `• ${s.location}` : ''} (Round {s.currentRound})
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* Dedicated Station Identity Badge */}
+              {currentStationState && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-indigo-950/90 to-purple-950/90 border border-indigo-500/40 text-xs shadow-md">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                  <span className="text-indigo-200 font-black tracking-wider uppercase">{currentStationState.name}</span>
+                  {currentStationState.location && (
+                    <span className="text-slate-400 text-[11px]">({currentStationState.location})</span>
+                  )}
+                </div>
+              )}
+
+              {/* Unique Scoped Device Screen ID */}
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-cyan-800/40 text-xs shadow-inner"
+                title={`Unique Hardware/Device ID: ${projectorDeviceId}`}
+              >
+                <Monitor className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-slate-400 text-[11px]">Screen:</span>
+                <span className="text-cyan-300 font-mono font-bold">{projectorDeviceId.slice(-7)}</span>
               </div>
 
               {/* Station Handler Indicator */}
@@ -652,7 +785,7 @@ export const ProjectorDisplay: React.FC = () => {
         {activeParticipant ? (
           <div className="space-y-1.5 animate-in fade-in zoom-in-95 duration-500">
             <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-purple-400 font-mono bg-purple-950/60 px-3 py-1 rounded-full border border-purple-800/60">
-              CONTESTANT {activeParticipant.participantNumber} • ON STAGE
+              CONTESTANT {activeParticipant.participantNumber} • {currentStationState?.name ? `${currentStationState.name.toUpperCase()} STAGE` : 'ON STAGE'}
             </span>
             <h2 className="text-3xl sm:text-5xl md:text-6xl font-black text-white font-['Outfit'] tracking-tight drop-shadow-2xl">
               {activeParticipant.name}
@@ -661,7 +794,7 @@ export const ProjectorDisplay: React.FC = () => {
         ) : (
           <div className="text-slate-400 font-semibold text-base sm:text-lg flex items-center gap-2">
             <Radio className="w-5 h-5 text-purple-400 animate-pulse" />
-            <span>Awaiting Next Contestant...</span>
+            <span>Awaiting Next Contestant{currentStationState ? ` for ${currentStationState.name}` : ''}...</span>
           </div>
         )}
 
@@ -844,7 +977,7 @@ export const ProjectorDisplay: React.FC = () => {
               <div className="space-y-2 text-center">
                 <h4 className="text-2xl sm:text-3xl font-bold text-white font-['Outfit']">ROUND 1 • IMAGE TO SPEECH</h4>
                 <p className="text-sm sm:text-base text-slate-400">
-                  Awaiting random image prompt assignment from operator station
+                  Awaiting random image prompt assignment from {currentStationState?.name || 'operator station'}
                 </p>
               </div>
             </div>

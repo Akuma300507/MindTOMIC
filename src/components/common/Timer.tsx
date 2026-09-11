@@ -160,9 +160,10 @@ export const Timer: React.FC<TimerProps> = ({
             setIsOvertime(true);
             setIsRunning(true);
             setRemainingSeconds(0);
-            sendTimerAction({ action: 'time_up', round: roundName, phase: 'speech' });
             if (currentStationId) {
               sendStationTimerAction(currentStationId, { action: 'time_up', phase: 'speech', remainingSeconds: 0 }).catch(() => {});
+            } else {
+              sendTimerAction({ action: 'time_up', round: roundName, phase: 'speech' });
             }
             startOvertimeTicker();
           }
@@ -198,15 +199,15 @@ export const Timer: React.FC<TimerProps> = ({
         totalSeconds: speechDurationSeconds,
         remainingSeconds: speechDurationSeconds,
       }).catch(() => {});
+    } else {
+      sendTimerAction({
+        action: 'transition_to_speech',
+        phase: 'speech',
+        totalSeconds: speechDurationSeconds,
+        remainingSeconds: speechDurationSeconds,
+        round: roundName,
+      });
     }
-
-    sendTimerAction({
-      action: 'transition_to_speech',
-      phase: 'speech',
-      totalSeconds: speechDurationSeconds,
-      remainingSeconds: speechDurationSeconds,
-      round: roundName,
-    });
 
     startTicker(speechDurationSeconds, 'speech');
   }, [clearIntervalSafe, speechDurationSeconds, currentStationId, sendStationTimerAction, sendTimerAction, roundName, startTicker]);
@@ -228,14 +229,6 @@ export const Timer: React.FC<TimerProps> = ({
         setTotalSecondsForPhase(prepDurationSeconds);
         setRemainingSeconds(prepDurationSeconds);
         setIsRunning(true);
-        sendTimerAction({
-          action: 'start',
-          phase: 'prep',
-          totalSeconds: prepDurationSeconds,
-          remainingSeconds: prepDurationSeconds,
-          round: roundName,
-          startedAt,
-        });
         if (currentStationId) {
           sendStationTimerAction(currentStationId, {
             action: 'start',
@@ -244,6 +237,15 @@ export const Timer: React.FC<TimerProps> = ({
             remainingSeconds: prepDurationSeconds,
             startedAt,
           }).catch(() => {});
+        } else {
+          sendTimerAction({
+            action: 'start',
+            phase: 'prep',
+            totalSeconds: prepDurationSeconds,
+            remainingSeconds: prepDurationSeconds,
+            round: roundName,
+            startedAt,
+          });
         }
         startTicker(prepDurationSeconds, 'prep');
       } else {
@@ -252,14 +254,6 @@ export const Timer: React.FC<TimerProps> = ({
         setTotalSecondsForPhase(speechDurationSeconds);
         setRemainingSeconds(speechDurationSeconds);
         setIsRunning(true);
-        sendTimerAction({
-          action: 'start',
-          phase: 'speech',
-          totalSeconds: speechDurationSeconds,
-          remainingSeconds: speechDurationSeconds,
-          round: roundName,
-          startedAt,
-        });
         if (currentStationId) {
           sendStationTimerAction(currentStationId, {
             action: 'start',
@@ -268,6 +262,15 @@ export const Timer: React.FC<TimerProps> = ({
             remainingSeconds: speechDurationSeconds,
             startedAt,
           }).catch(() => {});
+        } else {
+          sendTimerAction({
+            action: 'start',
+            phase: 'speech',
+            totalSeconds: speechDurationSeconds,
+            remainingSeconds: speechDurationSeconds,
+            round: roundName,
+            startedAt,
+          });
         }
         startTicker(speechDurationSeconds, 'speech');
       }
@@ -275,14 +278,6 @@ export const Timer: React.FC<TimerProps> = ({
       // Resume from pause
       const startedAt = getServerNow();
       setIsRunning(true);
-      sendTimerAction({
-        action: 'start',
-        phase,
-        totalSeconds: totalSecondsForPhase,
-        remainingSeconds: pausedTimeRemainingRef.current,
-        round: roundName,
-        startedAt,
-      });
       if (currentStationId) {
         sendStationTimerAction(currentStationId, {
           action: 'start',
@@ -291,6 +286,15 @@ export const Timer: React.FC<TimerProps> = ({
           remainingSeconds: pausedTimeRemainingRef.current,
           startedAt,
         }).catch(() => {});
+      } else {
+        sendTimerAction({
+          action: 'start',
+          phase,
+          totalSeconds: totalSecondsForPhase,
+          remainingSeconds: pausedTimeRemainingRef.current,
+          round: roundName,
+          startedAt,
+        });
       }
       startTicker(pausedTimeRemainingRef.current, phase as 'prep' | 'speech');
     }
@@ -302,18 +306,19 @@ export const Timer: React.FC<TimerProps> = ({
     clearIntervalSafe();
     setIsRunning(false);
     pausedTimeRemainingRef.current = remainingSeconds;
-    sendTimerAction({
-      action: 'pause',
-      phase,
-      remainingSeconds,
-      round: roundName,
-    });
     if (currentStationId) {
       sendStationTimerAction(currentStationId, {
         action: 'pause',
         phase,
         remainingSeconds,
       }).catch(() => {});
+    } else {
+      sendTimerAction({
+        action: 'pause',
+        phase,
+        remainingSeconds,
+        round: roundName,
+      });
     }
   }, [clearIntervalSafe, isRunning, remainingSeconds, sendTimerAction, sendStationTimerAction, currentStationId, phase, roundName]);
 
@@ -336,18 +341,19 @@ export const Timer: React.FC<TimerProps> = ({
     setPhase('stopped');
     // Deliberately no buzzer sound on manual stop
 
-    sendTimerAction({
-      action: 'stop',
-      phase: 'stopped',
-      remainingSeconds,
-      round: roundName,
-    });
     if (currentStationId) {
       sendStationTimerAction(currentStationId, {
         action: 'stop',
         phase: 'stopped',
         remainingSeconds,
       }).catch(() => {});
+    } else {
+      sendTimerAction({
+        action: 'stop',
+        phase: 'stopped',
+        remainingSeconds,
+        round: roundName,
+      });
     }
 
     let speechDuration = 0;
@@ -384,18 +390,19 @@ export const Timer: React.FC<TimerProps> = ({
     setActualSpeechElapsed(0);
     speechStartTimeRef.current = null;
     setShowResetConfirm(false);
-    sendTimerAction({
-      action: 'reset',
-      totalSeconds: initialSeconds,
-      remainingSeconds: initialSeconds,
-      round: roundName,
-    });
     if (currentStationId) {
       sendStationTimerAction(currentStationId, {
         action: 'reset',
         totalSeconds: initialSeconds,
         remainingSeconds: initialSeconds,
       }).catch(() => {});
+    } else {
+      sendTimerAction({
+        action: 'reset',
+        totalSeconds: initialSeconds,
+        remainingSeconds: initialSeconds,
+        round: roundName,
+      });
     }
   }, [clearIntervalSafe, hasPrepPhase, prepDurationSeconds, speechDurationSeconds, sendTimerAction, sendStationTimerAction, currentStationId, roundName]);
 

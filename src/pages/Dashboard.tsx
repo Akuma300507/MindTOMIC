@@ -18,7 +18,7 @@ import { useApp } from '../context/AppContext';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
 
 export const Dashboard: React.FC = () => {
-  const { db, setCurrentPage, activeParticipant, selectNextParticipant, triggerBuzzer } = useApp();
+  const { db, setCurrentPage, currentStationId, allStations, activeParticipant, selectNextParticipant, triggerBuzzer } = useApp();
 
   const totalParticipants = db?.participants.length || 0;
   const r1Completed = db?.round1Results.length || 0;
@@ -66,7 +66,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-purple-400">Current Participant</span>
               <button
-                onClick={selectNextParticipant}
+                onClick={() => selectNextParticipant()}
                 className="text-xs text-indigo-300 hover:text-white flex items-center gap-1 font-semibold transition-colors"
                 title="Select next participant (N)"
               >
@@ -367,13 +367,24 @@ export const Dashboard: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setCurrentPage('projector')}
+          onClick={() => {
+            const stId = currentStationId || allStations[0]?.id || 'station-a';
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('page', 'projector');
+              url.searchParams.set('station', stId);
+              window.history.pushState({}, '', url.toString());
+            } catch {}
+            setCurrentPage('projector');
+          }}
           className="flex items-center gap-3 p-4 rounded-xl bg-slate-900/70 border border-slate-800 hover:border-blue-600/40 text-slate-300 hover:text-white transition-all text-xs font-semibold"
         >
           <Tv className="w-5 h-5 text-blue-400" />
           <div className="text-left">
-            <div className="font-bold text-white">Projector Display Mode</div>
-            <div className="text-[11px] text-slate-400">Audience screen synchronized via LiveSync</div>
+            <div className="font-bold text-white">
+              Projector Display Mode {currentStationId && currentStationId !== 'all' ? `(${db?.stations?.[currentStationId]?.name || currentStationId})` : ''}
+            </div>
+            <div className="text-[11px] text-slate-400">Isolated audience display for this device's station</div>
           </div>
         </button>
       </div>

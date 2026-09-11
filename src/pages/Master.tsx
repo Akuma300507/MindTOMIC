@@ -28,6 +28,7 @@ import {
   Check,
   X,
   Plus,
+  Monitor,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { computeStationTimer } from '../lib/timerUtils';
@@ -50,6 +51,10 @@ export const Master: React.FC = () => {
     setCurrentPage,
     setCurrentStationId,
     setDeviceRole,
+    connectedProjectors,
+    assignProjectorStation,
+    pingProjectorDevice,
+    refreshConnectedProjectors,
   } = useApp();
 
   const [selectedRoundFilter, setSelectedRoundFilter] = useState<'all' | '1' | '2' | '3'>('all');
@@ -62,6 +67,8 @@ export const Master: React.FC = () => {
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
   const [overrideFilter, setOverrideFilter] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [pingingProjectId, setPingingProjectId] = useState<string | null>(null);
+  const [assigningProjectId, setAssigningProjectId] = useState<string | null>(null);
 
   // Station Handler Edit Form
   const [handlerForm, setHandlerForm] = useState({
@@ -604,7 +611,7 @@ export const Master: React.FC = () => {
                       Assigned Image:
                     </span>
                     <span className="font-bold text-white">
-                      {station.assignedImage?.title || 'None assigned yet'}
+                      {station.selectedImage?.name || station.selectedImage?.imageId || station.assignedImage?.name || 'None assigned yet'}
                     </span>
                   </div>
                 )}
@@ -615,7 +622,7 @@ export const Master: React.FC = () => {
                       Wheel Topic:
                     </span>
                     <span className="font-bold text-purple-300 truncate max-w-[200px]">
-                      {station.wheelSpin?.targetTopicTitle || station.assignedTopic?.topic || 'Not spun yet'}
+                      {station.wheelSpin?.targetTopicTitle || station.selectedTopic?.topic || station.assignedTopic?.topic || 'Not spun yet'}
                     </span>
                   </div>
                 )}
@@ -626,7 +633,7 @@ export const Master: React.FC = () => {
                       Topic / Prompt:
                     </span>
                     <span className="font-bold text-amber-300 truncate max-w-[200px]">
-                      {station.assignedTopic?.topic || 'Direct speech topic'}
+                      {station.selectedTopic?.topic || station.assignedTopic?.topic || 'Direct speech topic'}
                     </span>
                   </div>
                 )}
@@ -785,6 +792,167 @@ export const Master: React.FC = () => {
             </div>
           );
         })}
+      </div>
+
+      {/* Connected Projector Displays Hub */}
+      <div className="bg-slate-900/80 border border-purple-900/40 rounded-3xl p-6 space-y-4 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-purple-900/30 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-cyan-950 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shadow-md">
+              <Monitor className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-black text-white font-['Outfit']">
+                  Connected Projector Screens
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">
+                  {connectedProjectors.length} Active
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Hardware-isolated display devices. Each screen is strictly scoped to its assigned stage channel.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refreshConnectedProjectors()}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Refresh connected screens list"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={() => window.open(`${window.location.origin}/?page=projector`, '_blank')}
+              className="px-3.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-cyan-950 transition-colors cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Launch Screen</span>
+            </button>
+          </div>
+        </div>
+
+        {connectedProjectors.length === 0 ? (
+          <div className="p-8 text-center rounded-2xl bg-slate-950/60 border border-slate-800/80 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
+              <Tv className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-slate-300">No Projector Screens Connected</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                Open the Projector view on your presentation screen or TV. It will automatically register with a unique hardware ID and appear here for remote control.
+              </p>
+            </div>
+            <button
+              onClick={() => window.open(`${window.location.origin}/?page=projector`, '_blank')}
+              className="px-4 py-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open Projector Display</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {connectedProjectors.map((proj) => {
+              const assignedStation = allStations.find((s) => s.id === proj.stationId);
+              return (
+                <div
+                  key={proj.id}
+                  className="bg-slate-950/80 border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-4 space-y-3 transition-colors shadow-lg"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                      <span className="text-xs font-mono font-bold text-cyan-300" title={`Full ID: ${proj.id}`}>
+                        Screen #{proj.id.slice(-7)}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {proj.ip ? proj.ip.replace('::ffff:', '') : 'Local'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Assigned Stage:</span>
+                      <span className="font-bold text-white">
+                        {assignedStation?.name || (proj.stationId ? `Station ${proj.stationId.replace('station-', '').toUpperCase()}` : 'Unassigned')}
+                      </span>
+                    </div>
+
+                    <div className="pt-1">
+                      <label className="text-[11px] text-slate-400 font-medium block mb-1">
+                        Remote Re-assign Station:
+                      </label>
+                      <select
+                        value={proj.stationId || ''}
+                        disabled={assigningProjectId === proj.id}
+                        onChange={async (e) => {
+                          const newSt = e.target.value;
+                          setAssigningProjectId(proj.id);
+                          try {
+                            await assignProjectorStation(proj.id, newSt);
+                            setToastMessage(`Projector #${proj.id.slice(-7)} reassigned to ${allStations.find((s) => s.id === newSt)?.name || newSt}`);
+                            setTimeout(() => setToastMessage(null), 3500);
+                          } catch (err) {
+                            console.error(err);
+                          } finally {
+                            setAssigningProjectId(null);
+                          }
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-semibold focus:outline-none focus:border-cyan-500 cursor-pointer disabled:opacity-50"
+                      >
+                        {allStations.map((st) => (
+                          <option key={st.id} value={st.id}>
+                            {st.name} {st.location ? `(${st.location})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+                    <button
+                      onClick={async () => {
+                        setPingingProjectId(proj.id);
+                        try {
+                          await pingProjectorDevice(proj.id, 'Test signal from Master Monitor');
+                          setToastMessage(`Ping signal sent to Screen #${proj.id.slice(-7)}`);
+                          setTimeout(() => setToastMessage(null), 3000);
+                        } catch (err) {
+                          console.error(err);
+                        } finally {
+                          setPingingProjectId(null);
+                        }
+                      }}
+                      disabled={pingingProjectId === proj.id}
+                      className="flex-1 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      <Bell className="w-3.5 h-3.5" />
+                      <span>{pingingProjectId === proj.id ? 'Pinging...' : 'Test Ping'}</span>
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        window.open(
+                          `${window.location.origin}/?page=projector&station=${proj.stationId || 'station-a'}`,
+                          '_blank'
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                      title="Open Screen in New Tab"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* MODAL 1: Edit Station Handler */}

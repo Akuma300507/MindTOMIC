@@ -20,7 +20,6 @@ export const Round3: React.FC = () => {
     setActiveParticipant,
     selectNextParticipant,
     saveRound3Result,
-    updateLiveSync,
     currentStationId,
     setCurrentStationId,
     currentStation,
@@ -66,18 +65,7 @@ export const Round3: React.FC = () => {
   const speechSeconds = db?.settings.round3.speechTimeSeconds ?? 120;
   const buzzerEnabled = db?.settings.round3.buzzerEnabled ?? true;
 
-  // Sync with projector screen
-  useEffect(() => {
-    updateLiveSync({
-      currentRound: 3,
-      activeParticipantId: activeParticipant?.id || null,
-      locationId: currentStationId,
-      activeItem: {
-        type: 'final',
-        title: 'Championship Finals Speech',
-      },
-    }).catch(() => {});
-  }, [activeParticipant?.id, currentStationId, updateLiveSync]);
+
 
   const handleTimerFinish = useCallback(
     async (data: {
@@ -359,7 +347,7 @@ export const Round3: React.FC = () => {
             speechDurationSeconds={speechSeconds}
             hasPrepPhase={false}
             participantName={activeParticipant?.name}
-            roundName="Round 3 Finals"
+            roundName="Round 3"
             buzzerEnabled={buzzerEnabled}
             onPhaseChange={setTimerPhase}
             onFinish={handleTimerFinish}

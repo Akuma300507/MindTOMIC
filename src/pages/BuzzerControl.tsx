@@ -21,7 +21,7 @@ export const BuzzerControl: React.FC = () => {
 
   const [copied, setCopied] = useState(false);
   const [buzzerFiring, setBuzzerFiring] = useState(false);
-  const [selectedSound, setSelectedSound] = useState<'horn' | 'digital' | 'alarm' | 'siren'>(
+  const [selectedSound, setSelectedSound] = useState<'horn' | 'digital' | 'alarm' | 'siren' | 'custom'>(
     db?.settings.buzzer.sound || 'horn'
   );
   const [volume, setVolume] = useState<number>(db?.settings.buzzer.volume ?? 90);
@@ -42,12 +42,12 @@ export const BuzzerControl: React.FC = () => {
     setTimeout(() => setBuzzerFiring(false), 500);
   };
 
-  const handleTestSpecificSound = (snd: 'horn' | 'digital' | 'alarm' | 'siren') => {
+  const handleTestSpecificSound = (snd: 'horn' | 'digital' | 'alarm' | 'siren' | 'custom') => {
     unlockSound();
-    soundEngine.playBuzzer(snd, volume);
+    soundEngine.playBuzzer(snd, volume, db?.settings?.buzzer?.customAudioUrl);
   };
 
-  const handleSaveSoundChoice = async (snd: 'horn' | 'digital' | 'alarm' | 'siren') => {
+  const handleSaveSoundChoice = async (snd: 'horn' | 'digital' | 'alarm' | 'siren' | 'custom') => {
     setSelectedSound(snd);
     if (db?.settings) {
       await updateSettings({
@@ -343,7 +343,7 @@ export const BuzzerControl: React.FC = () => {
               </p>
             </div>
             <button
-              onClick={() => soundEngine.playPrepOverBuzzer(volume)}
+              onClick={() => soundEngine.playPrepOverBuzzer('dual_alert', volume)}
               className="w-full py-2 px-3 rounded-xl bg-amber-950/60 hover:bg-amber-900/80 text-amber-200 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
             >
               <Volume2 className="w-3.5 h-3.5" />

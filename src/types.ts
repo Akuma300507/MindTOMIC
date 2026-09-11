@@ -1,4 +1,4 @@
-export type RoundStatus = 'pending' | 'ready' | 'in_progress' | 'completed' | 'completed_early' | 'time_up' | 'cancelled';
+export type RoundStatus = 'pending' | 'ready' | 'waiting' | 'not_started' | 'in_progress' | 'completed' | 'completed_early' | 'time_up' | 'cancelled';
 
 export type QualificationStatus = 'pending' | 'qualified' | 'disqualified';
 
@@ -18,6 +18,7 @@ export interface Participant {
   id: string;
   participantNumber: string; // e.g., P-101
   name: string;
+  organization?: string;
   mobile?: string;
   phone?: string;
   stationId?: string; // e.g., 'station-a', 'station-b'
@@ -61,6 +62,7 @@ export interface EventImage {
   imageId?: string; // e.g., 'IMG-001' or custom ID
   name: string;
   url: string;
+  rotation?: number;
   stationId?: string; // e.g., 'station-a', 'station-b', or 'all'
   stationName?: string; // e.g., 'Station A', 'Station B', or 'All Stations'
   status: 'available' | 'used';
@@ -181,6 +183,7 @@ export interface EventSettings {
     customAudioUrl?: string; // base64 or audio URL
     customAudioName?: string;
     autoBuzzerOnZero?: boolean;
+    autoBuzzerAtZero?: boolean;
 
     // Preparation countdown buzzer (played after 30s prep time)
     prepSound?: 'dual_alert' | 'staccato' | 'chime' | 'horn' | 'klaxon' | 'custom';
@@ -235,8 +238,11 @@ export interface StationState {
   // Selected media / topic
   selectedImageId: string | null;
   selectedImage?: EventImage | null;
+  assignedImage?: EventImage | null;
+  imageRotation?: number;
   selectedTopicId: string | null;
   selectedTopic?: Topic | null;
+  assignedTopic?: Topic | null;
   pendingTopic?: Topic | null;
 
   // Round 2 Wheel Animation & Slot State
@@ -353,3 +359,13 @@ export type PageId =
   | 'settings'
   | 'buzzer'
   | 'projector';
+
+export interface ProjectorDevice {
+  id: string; // projector_device_id
+  stationId?: string;
+  stationName?: string;
+  connectedAt: number;
+  lastPing: number;
+  ip?: string;
+  userAgent?: string;
+}

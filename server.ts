@@ -18,6 +18,7 @@ import type {
   StationState,
   StationStatus,
   StationWheelSpin,
+  ProjectorDevice,
 } from './src/types';
 
 const app = express();
@@ -334,6 +335,7 @@ function createInitialStationState(
     activeParticipant: null,
     selectedImageId: null,
     selectedImage: null,
+    imageRotation: 0,
     selectedTopicId: null,
     selectedTopic: null,
     wheelSpin: null,
@@ -549,13 +551,19 @@ function persistDBSync() {
   }
 }
 
-// SSE clients for real-time mobile buzzer & projector sync
+// SSE clients for real-time mobile buzzer, station rooms, and projector sync
 interface SSEClient {
   id: string;
   res: Response;
-  type: 'projector' | 'buzzer' | 'organizer';
+  type: 'projector' | 'buzzer' | 'organizer' | 'master';
+  projectorDeviceId?: string;
+  stationId?: string;
+  channels: Set<string>;
 }
 const sseClients: SSEClient[] = [];
+
+// Registry of active connected projector screens
+const activeProjectors = new Map<string, ProjectorDevice>();
 
 function broadcastSSE(event: string, data: any) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -568,10 +576,67 @@ function broadcastSSE(event: string, data: any) {
   });
 }
 
-// SSE heartbeat to keep connections alive and maintain synchronized clock offset
+function broadcastToChannel(channel: string, event: string, data: any) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  sseClients.forEach((client) => {
+    if (client.channels.has(channel)) {
+      try {
+        client.res.write(payload);
+      } catch {
+        // client dropped
+      }
+    }
+  });
+}
+
+function broadcastStationUpdate(stationId: string, event: string, data: any) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const targetChannel = `station:${stationId}`;
+  sseClients.forEach((client) => {
+    if (client.channels.has(targetChannel) || client.channels.has('master') || client.type === 'master') {
+      try {
+        client.res.write(payload);
+      } catch {
+        // client dropped
+      }
+    }
+  });
+}
+
+function broadcastToProjector(projectorDeviceId: string, event: string, data: any) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const targetChannel = `projector:${projectorDeviceId}`;
+  sseClients.forEach((client) => {
+    if (client.channels.has(targetChannel) || client.projectorDeviceId === projectorDeviceId) {
+      try {
+        client.res.write(payload);
+      } catch {
+        // client dropped
+      }
+    }
+  });
+}
+
+function broadcastProjectorsList() {
+  const list = Array.from(activeProjectors.values());
+  const payload = `event: projectors_updated\ndata: ${JSON.stringify({ projectors: list })}\n\n`;
+  sseClients.forEach((client) => {
+    if (client.channels.has('master') || client.type === 'master' || client.type === 'organizer') {
+      try {
+        client.res.write(payload);
+      } catch {}
+    }
+  });
+}
+
+// SSE heartbeat to keep connections alive, refresh projector lastPing, and maintain synchronized clock offset
 setInterval(() => {
   if (sseClients.length > 0) {
-    broadcastSSE('heartbeat', { serverTime: Date.now() });
+    const now = Date.now();
+    broadcastSSE('heartbeat', { serverTime: now });
+    activeProjectors.forEach((p) => {
+      p.lastPing = now;
+    });
   }
 }, 10000);
 
@@ -619,7 +684,67 @@ app.post('/api/reset-data', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Database reset to initial template state.' });
 });
 
-// SSE Endpoint for Live Sync and Buzzer
+// Get connected projectors list
+app.get('/api/projectors', (req: Request, res: Response) => {
+  const projectors = Array.from(activeProjectors.values());
+  res.json({ success: true, projectors });
+});
+
+// Remotely assign a projector device to a station channel
+app.post('/api/projectors/:id/assign-station', (req: Request, res: Response) => {
+  const projectorDeviceId = req.params.id;
+  const { stationId } = req.body;
+
+  if (!stationId) {
+    return res.status(400).json({ error: 'stationId is required' });
+  }
+
+  const stationObj = getStation(stationId);
+  const existing = activeProjectors.get(projectorDeviceId);
+  if (existing) {
+    existing.stationId = stationId;
+    existing.stationName = stationObj?.name || stationId;
+    activeProjectors.set(projectorDeviceId, existing);
+  }
+
+  // Update channels on matching sseClients
+  sseClients.forEach((client) => {
+    if (client.projectorDeviceId === projectorDeviceId) {
+      Array.from(client.channels).forEach((ch) => {
+        if (ch.startsWith('station:')) client.channels.delete(ch);
+      });
+      client.channels.add(`station:${stationId}`);
+      client.stationId = stationId;
+    }
+  });
+
+  // Direct notification to that specific projector's private room
+  broadcastToProjector(projectorDeviceId, 'station_assigned', {
+    projectorDeviceId,
+    stationId,
+    station: stationObj,
+  });
+
+  broadcastProjectorsList();
+  logAction('Projector Assigned', `Admin bound screen ${projectorDeviceId} to ${stationObj?.name || stationId}.`);
+  res.json({ success: true, projector: activeProjectors.get(projectorDeviceId) || { id: projectorDeviceId, stationId } });
+});
+
+// Admin sends a visual test ping directly to a specific projector screen
+app.post('/api/projectors/:id/ping', (req: Request, res: Response) => {
+  const projectorDeviceId = req.params.id;
+  const { message } = req.body;
+
+  broadcastToProjector(projectorDeviceId, 'projector_ping', {
+    projectorDeviceId,
+    timestamp: Date.now(),
+    message: message || 'Ping received from Master Monitor',
+  });
+
+  res.json({ success: true, message: `Ping sent to projector ${projectorDeviceId}` });
+});
+
+// SSE Endpoint for Live Sync and Buzzer with Scoped Channels
 app.get('/api/events', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -627,22 +752,71 @@ app.get('/api/events', (req: Request, res: Response) => {
   res.flushHeaders?.();
 
   const clientId = `client-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-  const type = (req.query.type as 'projector' | 'buzzer' | 'organizer') || 'organizer';
-  const client: SSEClient = { id: clientId, res, type };
+  const type = (req.query.type as 'projector' | 'buzzer' | 'organizer' | 'master') || 'organizer';
+  const projectorDeviceId = (req.query.projector_device_id as string) || (req.headers['x-projector-device-id'] as string) || undefined;
+  const stationId = (req.query.station as string) || undefined;
+
+  const channels = new Set<string>();
+  channels.add('global');
+
+  if (type === 'master' || (type === 'organizer' && (!stationId || stationId === 'all'))) {
+    channels.add('master');
+  }
+
+  if (stationId && stationId !== 'all') {
+    channels.add(`station:${stationId}`);
+  }
+
+  if (projectorDeviceId) {
+    channels.add(`projector:${projectorDeviceId}`);
+
+    const stationObj = stationId ? getStation(stationId) : null;
+    const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '';
+    const userAgent = (req.headers['user-agent'] as string) || '';
+
+    activeProjectors.set(projectorDeviceId, {
+      id: projectorDeviceId,
+      stationId: stationId || undefined,
+      stationName: stationObj?.name || (stationId ? `Station ${stationId.replace('station-', '').toUpperCase()}` : undefined),
+      connectedAt: Date.now(),
+      lastPing: Date.now(),
+      ip: clientIp,
+      userAgent,
+    });
+
+    setTimeout(() => broadcastProjectorsList(), 50);
+  }
+
+  const client: SSEClient = { id: clientId, res, type, projectorDeviceId, stationId, channels };
   sseClients.push(client);
 
   // Send initial ping, live sync state, and server timestamp for clock calibration
-  res.write(`event: connected\ndata: ${JSON.stringify({ clientId, liveSync: db.liveSync, serverTime: Date.now() })}\n\n`);
+  res.write(`event: connected\ndata: ${JSON.stringify({ 
+    clientId, 
+    liveSync: db.liveSync, 
+    serverTime: Date.now(),
+    projectorDeviceId,
+    stationId,
+    channels: Array.from(channels)
+  })}\n\n`);
 
   req.on('close', () => {
     const idx = sseClients.findIndex((c) => c.id === clientId);
     if (idx !== -1) sseClients.splice(idx, 1);
+
+    if (projectorDeviceId) {
+      const hasOther = sseClients.some((c) => c.projectorDeviceId === projectorDeviceId);
+      if (!hasOther) {
+        activeProjectors.delete(projectorDeviceId);
+        broadcastProjectorsList();
+      }
+    }
   });
 });
 
 // Buzzer trigger
 app.post('/api/buzzer/trigger', (req: Request, res: Response) => {
-  const { source, reason, round, participantName } = req.body;
+  const { source, reason, round, participantName, stationId } = req.body;
   const triggerPayload = {
     timestamp: Date.now(),
     source: source || 'organizer',
@@ -650,11 +824,12 @@ app.post('/api/buzzer/trigger', (req: Request, res: Response) => {
     round: round || 'General',
     sound: db.settings.buzzer.sound,
     volume: db.settings.buzzer.volume,
+    stationId: stationId || undefined,
   };
 
   db.liveSync.buzzerTimestamp = triggerPayload.timestamp;
   broadcastSSE('buzzer_trigger', triggerPayload);
-  logAction('Buzzer Triggered', `${reason || 'Manual Buzzer'} sounded by ${source || 'organizer'} (${round || 'General'}) ${participantName ? 'for ' + participantName : ''}`);
+  logAction('Buzzer Triggered', `${reason || 'Manual Buzzer'} sounded by ${source || 'organizer'} (${round || 'General'}) ${participantName ? 'for ' + participantName : ''}${stationId ? ` [${stationId}]` : ''}`);
 
   res.json({ success: true, triggerPayload });
 });
@@ -1191,7 +1366,7 @@ app.post('/api/stations/:id/claim', (req: Request, res: Response) => {
   }
 
   persistDB();
-  broadcastSSE('station_updated', station);
+  broadcastStationUpdate(station.id, 'station_updated', station);
   logAction('Station Claimed', `${station.controllerDeviceName} assumed control of ${station.name}`);
   res.json({ success: true, station });
 });
@@ -1223,7 +1398,7 @@ app.post('/api/stations/:id/release', (req: Request, res: Response) => {
     station.controllerDeviceName = null;
     station.lastHeartbeat = 0;
     persistDB();
-    broadcastSSE('station_updated', station);
+    broadcastStationUpdate(station.id, 'station_updated', station);
   }
 
   res.json({ success: true });
@@ -1258,7 +1433,7 @@ app.post('/api/stations/:id/handler', (req: Request, res: Response) => {
 
   persistDB();
   logAction('Station Handler Updated', `Updated handler for ${station.name}: ${station.handlerName || 'None'} (${station.handlerRole || 'Handler'})`);
-  broadcastSSE('station_updated', station);
+  broadcastStationUpdate(station.id, 'station_updated', station);
   res.json({ success: true, station });
 });
 
@@ -1269,7 +1444,7 @@ app.post('/api/stations/:id/ping', (req: Request, res: Response) => {
   const alertMsg = message || `Master Monitor pinged ${station.name}!`;
 
   logAction('Station Pinged', `${senderName || 'Master'} pinged ${station.name} (${station.handlerName || 'No handler'})`);
-  broadcastSSE('station_ping', {
+  broadcastStationUpdate(station.id, 'station_ping', {
     stationId: station.id,
     stationName: station.name,
     handlerName: station.handlerName,
@@ -1296,10 +1471,6 @@ app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
   station.selectedTopic = null;
   station.wheelSpin = null;
 
-  db.liveSync.currentRound = station.currentRound;
-  db.liveSync.wheelSpin = null;
-  db.liveSync.activeItem = undefined;
-
   const roundDuration =
     station.currentRound === 1
       ? db.settings.round1.speechTimeSeconds || 120
@@ -1314,17 +1485,9 @@ app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
   station.timerStartedAt = null;
   station.timerEndsAt = null;
 
-  db.liveSync.timerMode = 'idle';
-  db.liveSync.timerTotalSeconds = roundDuration;
-  db.liveSync.timerRemainingSeconds = roundDuration;
-  db.liveSync.isTimerRunning = false;
-  db.liveSync.timerStartedAt = null;
-  db.liveSync.timerEndsAt = null;
-
   persistDB();
   logAction('Station Round Updated', `${station.name} switched to Round ${station.currentRound}`);
-  broadcastSSE('station_updated', station);
-  broadcastSSE('live_sync_update', db.liveSync);
+  broadcastStationUpdate(station.id, 'station_updated', station);
   res.json({ success: true, station });
 });
 
@@ -1338,10 +1501,6 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
     ? db.participants.find((p) => p.id === participantId) || null
     : null;
 
-  db.liveSync.activeParticipantId = participantId || null;
-  db.liveSync.activeItem = undefined;
-  db.liveSync.wheelSpin = null;
-
   // Reset current station item if contestant changes
   station.selectedImageId = null;
   station.selectedImage = null;
@@ -1351,8 +1510,7 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
   station.status = 'WAITING';
 
   persistDB();
-  broadcastSSE('station_updated', station);
-  broadcastSSE('live_sync_update', db.liveSync);
+  broadcastStationUpdate(station.id, 'station_updated', station);
   res.json({ success: true, station });
 });
 
@@ -1414,6 +1572,7 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
 
   station.selectedImageId = chosen.id;
   station.selectedImage = chosen;
+  station.imageRotation = 0;
   station.currentRound = 1;
 
   if (station.activeParticipantId) {
@@ -1443,27 +1602,26 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
   persistDB();
   logAction('Image Assigned', `Assigned image "${chosen.name}" at ${station.name} to contestant ${participantName || station.activeParticipant?.name || 'Contestant'}`);
 
-  // Mirror to liveSync
-  db.liveSync.currentRound = 1;
-  if (station.activeParticipantId) db.liveSync.activeParticipantId = station.activeParticipantId;
-  db.liveSync.activeItem = {
-    type: 'image',
-    title: chosen.imageId || chosen.name || chosen.id,
-    mediaUrl: chosen.url,
-    id: chosen.id,
-  };
-  db.liveSync.timerMode = station.timerMode;
-  db.liveSync.timerTotalSeconds = station.timerTotalSeconds;
-  db.liveSync.timerRemainingSeconds = station.timerRemainingSeconds;
-  db.liveSync.isTimerRunning = false;
-  db.liveSync.timerStartedAt = null;
-  db.liveSync.timerEndsAt = null;
-
   broadcastSSE('images_updated', db.images);
-  broadcastSSE('station_updated', station);
-  broadcastSSE('live_sync_update', db.liveSync);
+  broadcastStationUpdate(station.id, 'station_updated', station);
 
   res.json({ success: true, image: chosen, station });
+});
+
+// Rotate Image for Station
+app.post('/api/stations/:id/rotate-image', (req: Request, res: Response) => {
+  const station = getStation(req.params.id);
+  const { rotation } = req.body;
+  const nextRot = typeof rotation === 'number' ? ((rotation % 360) + 360) % 360 : (((station.imageRotation || 0) + 90) % 360);
+
+  station.imageRotation = nextRot;
+  if (station.selectedImage) {
+    station.selectedImage.rotation = nextRot;
+  }
+
+  persistDB();
+  broadcastStationUpdate(station.id, 'station_updated', station);
+  res.json({ success: true, station, imageRotation: nextRot });
 });
 
 // Atomic Round 2 Topic Spin for Station (Single Source of Truth, Global Uniqueness)
@@ -1582,16 +1740,10 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     durationMs: spinDurationMs,
   };
 
-  // Mirror to liveSync without revealing activeItem text until spin completes
-  db.liveSync.currentRound = 2;
-  if (station.activeParticipantId) db.liveSync.activeParticipantId = station.activeParticipantId;
-  db.liveSync.activeItem = undefined;
-  db.liveSync.wheelSpin = station.wheelSpin;
-
   persistDB();
   logAction('Topic Spun', `Wheel spin initiated at ${station.name} for contestant ${participantName || station.activeParticipant?.name || 'Contestant'}`);
 
-  broadcastSSE('wheel_spin_started', {
+  broadcastStationUpdate(station.id, 'wheel_spin_started', {
     stationId: station.id,
     topic: chosen,
     targetTopicId: chosen.id,
@@ -1601,8 +1753,7 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     durationMs: spinDurationMs,
   });
   broadcastSSE('topics_updated', db.topics);
-  broadcastSSE('station_updated', station);
-  broadcastSSE('live_sync_update', db.liveSync);
+  broadcastStationUpdate(station.id, 'station_updated', station);
 
   res.json({
     success: true,
@@ -1625,12 +1776,6 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
   if (winningTopic) {
     station.selectedTopic = winningTopic;
     station.selectedTopicId = winningTopic.id;
-    db.liveSync.activeItem = {
-      type: 'topic',
-      title: winningTopic.topic,
-      id: winningTopic.id,
-      category: winningTopic.category,
-    };
 
     // Slot-preservation topic replacement:
     // Replace the used topic in the wheel candidates with a fresh unused topic from the pool
@@ -1652,7 +1797,6 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
   }
   station.pendingTopic = undefined;
   station.wheelSpin = null;
-  db.liveSync.wheelSpin = null;
 
   // Setup speaking timer ready for operator to start (avoid auto-start desync with operator dashboard)
   station.status = 'READY_TO_SPEAK';
@@ -1663,16 +1807,8 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
   station.timerStartedAt = null;
   station.timerEndsAt = null;
 
-  db.liveSync.timerMode = 'speech';
-  db.liveSync.timerTotalSeconds = speechSec;
-  db.liveSync.timerRemainingSeconds = speechSec;
-  db.liveSync.isTimerRunning = false;
-  db.liveSync.timerStartedAt = null;
-  db.liveSync.timerEndsAt = null;
-
   persistDB();
-  broadcastSSE('station_updated', station);
-  broadcastSSE('live_sync_update', db.liveSync);
+  broadcastStationUpdate(station.id, 'station_updated', station);
   res.json({ success: true, station, winningTopic, activeWheelTopics: station.activeWheelTopics });
 });
 
@@ -1701,7 +1837,7 @@ app.post('/api/stations/:id/wheel-replace', (req: Request, res: Response) => {
   }
   station.activeWheelTopics = [...currentWheel].filter(Boolean);
   persistDB();
-  broadcastSSE('station_updated', station);
+  broadcastStationUpdate(station.id, 'station_updated', station);
   res.json({ success: true, activeWheelTopics: station.activeWheelTopics });
 });
 
@@ -1734,18 +1870,6 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     station.buzzerPlayed = false;
     station.isOvertime = false;
     station.overtimeSeconds = 0;
-
-    db.liveSync.timerMode = station.timerMode;
-    db.liveSync.timerStatus = 'running';
-    db.liveSync.timerDuration = station.timerDuration;
-    db.liveSync.timerTotalSeconds = station.timerTotalSeconds;
-    db.liveSync.timerRemainingSeconds = station.timerRemainingSeconds;
-    db.liveSync.isTimerRunning = true;
-    db.liveSync.timerStartTime = station.timerStartTime;
-    db.liveSync.timerStartedAt = station.timerStartedAt;
-    db.liveSync.timerAccumulatedMs = station.timerAccumulatedMs;
-    db.liveSync.timerEndsAt = station.timerEndsAt;
-    db.liveSync.timerStopTime = null;
   } else if (action === 'pause') {
     const runMs = station.timerStartTime ? now - station.timerStartTime : 0;
     station.timerAccumulatedMs = (station.timerAccumulatedMs || 0) + runMs;
@@ -1758,14 +1882,6 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
 
     const totalElapsedSec = Math.floor((station.timerAccumulatedMs || 0) / 1000);
     station.timerRemainingSeconds = Math.max(0, (station.timerDuration || 120) - totalElapsedSec);
-
-    db.liveSync.isTimerRunning = false;
-    db.liveSync.timerStatus = 'paused';
-    db.liveSync.timerRemainingSeconds = station.timerRemainingSeconds;
-    db.liveSync.timerAccumulatedMs = station.timerAccumulatedMs;
-    db.liveSync.timerStartTime = null;
-    db.liveSync.timerStartedAt = null;
-    db.liveSync.timerEndsAt = null;
   } else if (action === 'resume') {
     station.timerStartTime = now;
     station.timerStartedAt = now;
@@ -1776,12 +1892,6 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     const totalElapsedSec = Math.floor((station.timerAccumulatedMs || 0) / 1000);
     const remSec = Math.max(0, (station.timerDuration || 120) - totalElapsedSec);
     station.timerEndsAt = now + remSec * 1000;
-
-    db.liveSync.timerStartTime = now;
-    db.liveSync.timerStartedAt = now;
-    db.liveSync.timerStatus = 'running';
-    db.liveSync.isTimerRunning = true;
-    db.liveSync.timerEndsAt = station.timerEndsAt;
   } else if (action === 'transition_to_speech') {
     // Prep complete: automatically transition directly to Speaking phase
     const speechSec = roundSettings.speechTimeSeconds || 120;
@@ -1800,18 +1910,6 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     station.buzzerPlayed = false;
     station.isOvertime = false;
     station.overtimeSeconds = 0;
-
-    db.liveSync.timerMode = 'speech';
-    db.liveSync.timerStatus = 'running';
-    db.liveSync.timerDuration = speechSec;
-    db.liveSync.timerTotalSeconds = speechSec;
-    db.liveSync.timerRemainingSeconds = speechSec;
-    db.liveSync.isTimerRunning = true;
-    db.liveSync.timerStartTime = now;
-    db.liveSync.timerStartedAt = now;
-    db.liveSync.timerAccumulatedMs = 0;
-    db.liveSync.timerEndsAt = station.timerEndsAt;
-    db.liveSync.timerStopTime = null;
   } else if (action === 'limit_reached' || action === 'time_up') {
     // TIME LIMIT REACHED: trigger buzzer once, BUT KEEP TIMER RUNNING IN OVERTIME!
     station.buzzerPlayed = true;
@@ -1819,12 +1917,8 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     station.buzzerTimestamp = now;
     station.lastBuzzerEventId = `buzzer-${now}-${station.id}`;
 
-    db.liveSync.buzzerPlayed = true;
-    db.liveSync.isOvertime = true;
-    db.liveSync.buzzerTimestamp = now;
-
     if (roundSettings.buzzerEnabled) {
-      broadcastSSE('buzzer_trigger', {
+      broadcastStationUpdate(station.id, 'buzzer_trigger', {
         timestamp: now,
         eventId: station.lastBuzzerEventId,
         stationId: station.id,
@@ -1853,13 +1947,6 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     const duration = station.timerDuration || 120;
     station.isOvertime = totalElapsedSec > duration;
     station.overtimeSeconds = station.isOvertime ? totalElapsedSec - duration : 0;
-
-    db.liveSync.isTimerRunning = false;
-    db.liveSync.timerStatus = 'stopped';
-    db.liveSync.timerStopTime = now;
-    db.liveSync.timerStartTime = null;
-    db.liveSync.timerStartedAt = null;
-    db.liveSync.timerEndsAt = null;
     // Deliberately NO buzzer sound, NO buzzerTimestamp, and NO buzzer_trigger SSE broadcast on stop
   } else if (action === 'reset') {
     const initSec = (roundSettings.prepEnabled && (roundSettings.prepTimeSeconds || 0) > 0)
@@ -1881,26 +1968,10 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     station.buzzerPlayed = false;
     station.isOvertime = false;
     station.overtimeSeconds = 0;
-
-    db.liveSync.isTimerRunning = false;
-    db.liveSync.timerStatus = 'idle';
-    db.liveSync.timerMode = 'idle';
-    db.liveSync.timerDuration = initSec;
-    db.liveSync.timerTotalSeconds = initSec;
-    db.liveSync.timerRemainingSeconds = initSec;
-    db.liveSync.timerAccumulatedMs = 0;
-    db.liveSync.timerStartTime = null;
-    db.liveSync.timerStartedAt = null;
-    db.liveSync.timerEndsAt = null;
-    db.liveSync.timerStopTime = null;
-    db.liveSync.buzzerPlayed = false;
-    db.liveSync.isOvertime = false;
-    db.liveSync.overtimeSeconds = 0;
   }
 
   persistDB();
-  broadcastSSE('station_updated', { ...station, serverTime: now });
-  broadcastSSE('live_sync_update', { ...db.liveSync, serverTime: now });
+  broadcastStationUpdate(station.id, 'station_updated', { ...station, serverTime: now });
   res.json({ success: true, station, serverTime: now });
 });
 

@@ -14,6 +14,7 @@ import type {
   Round3Result,
   StationState,
   DeviceRole,
+  ProjectorDevice,
 } from '../types';
 import { api } from '../lib/api';
 import { soundEngine } from '../lib/audio';
@@ -59,6 +60,15 @@ interface AppContextType {
   takeoverModal: TakeoverModalInfo | null;
   closeTakeoverModal: (confirm: boolean) => void;
 
+  // Projector Devices Management
+  projectorDeviceId: string;
+  connectedProjectors: ProjectorDevice[];
+  assignProjectorStation: (deviceId: string, stationId: string) => Promise<void>;
+  pingProjectorDevice: (deviceId: string, message?: string) => Promise<void>;
+  refreshConnectedProjectors: () => Promise<void>;
+  projectorPingNotification: { timestamp: number; message: string } | null;
+  clearProjectorPingNotification: () => void;
+
   // Station Actions
   setStationRound: (stationId: string, round: 1 | 2 | 3) => Promise<void>;
   setStationParticipant: (stationId: string, participantId: string | null) => Promise<void>;
@@ -73,16 +83,18 @@ interface AppContextType {
   }) => Promise<void>;
   pingStation: (stationId: string, senderName?: string, message?: string) => Promise<void>;
   assignStationImage: (stationId: string) => Promise<EventImage>;
+  rotateStationImage: (stationId: string, rotation?: number) => Promise<void>;
   spinStationTopic: (stationId: string, wheelTopicIds?: string[]) => Promise<{ topic: Topic; targetIndex?: number; wheelTopics?: Topic[]; startedAt: number; durationMs: number; station?: StationState }>;
   completeStationSpin: (stationId: string) => Promise<void>;
   replaceStationWheelTopic: (stationId: string, usedTopicId: string, replacementTopicId?: string) => Promise<{ success: boolean; station: StationState; activeWheelTopics: Topic[] }>;
   sendStationTimerAction: (stationId: string, payload: {
-    action: 'start' | 'pause' | 'stop' | 'stop_with_buzzer' | 'reset' | 'time_up';
-    phase?: 'prep' | 'speech';
+    action: 'start' | 'pause' | 'stop' | 'stop_with_buzzer' | 'reset' | 'time_up' | 'transition_to_speech';
+    phase?: 'prep' | 'speech' | 'stopped' | 'idle' | 'time_up';
     totalSeconds?: number;
     remainingSeconds?: number;
     round?: string;
     endsAt?: number;
+    startedAt?: number;
   }) => Promise<void>;
 
   // Master / Admin
@@ -163,12 +175,13 @@ interface AppContextType {
   // Live Sync & Timer
   updateLiveSync: (updates: Partial<LiveSyncState>) => Promise<void>;
   sendTimerAction: (payload: {
-    action: 'start' | 'pause' | 'stop' | 'reset' | 'time_up' | 'transition_to_speech';
-    phase?: 'prep' | 'speech';
+    action: 'start' | 'pause' | 'stop' | 'reset' | 'time_up' | 'transition_to_speech' | 'stop_with_buzzer';
+    phase?: 'prep' | 'speech' | 'stopped' | 'idle' | 'time_up';
     totalSeconds?: number;
     remainingSeconds?: number;
     round?: string;
     endsAt?: number;
+    startedAt?: number;
   }) => Promise<void>;
   // Atomic Round 1 & Round 2 operations
   assignRound1Image: (stationId?: string) => Promise<EventImage>;
@@ -207,6 +220,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return `dev-${Date.now()}`;
     }
   });
+
+  // Unique Projector Device ID (User requirement: Check localStorage for 'projector_device_id', if absent generate and save)
+  const [projectorDeviceId] = useState<string>(() => {
+    try {
+      let id = localStorage.getItem('projector_device_id');
+      if (!id) {
+        id = `proj-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`;
+        localStorage.setItem('projector_device_id', id);
+      }
+      return id;
+    } catch {
+      return `proj-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`;
+    }
+  });
+
+  const [connectedProjectors, setConnectedProjectors] = useState<ProjectorDevice[]>([]);
+  const [projectorPingNotification, setProjectorPingNotification] = useState<{ timestamp: number; message: string } | null>(null);
+
+  const clearProjectorPingNotification = useCallback(() => {
+    setProjectorPingNotification(null);
+  }, []);
+
+  const refreshConnectedProjectors = useCallback(async () => {
+    try {
+      const list = await api.getConnectedProjectors();
+      setConnectedProjectors(list);
+    } catch (err) {
+      console.error('Failed to fetch connected projectors:', err);
+    }
+  }, []);
+
+  const assignProjectorStation = useCallback(async (devId: string, stId: string) => {
+    await api.assignProjectorStation(devId, stId);
+    await refreshConnectedProjectors();
+  }, [refreshConnectedProjectors]);
+
+  const pingProjectorDevice = useCallback(async (devId: string, message?: string) => {
+    await api.pingProjectorDevice(devId, message);
+  }, []);
 
   const [deviceRole, setDeviceRoleState] = useState<DeviceRole>(() => {
     try {
@@ -261,6 +313,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
   }, []);
+
+  const currentStationIdRef = useRef<string | null>(currentStationId);
+  useEffect(() => {
+    currentStationIdRef.current = currentStationId;
+  }, [currentStationId]);
+
+  const deviceRoleRef = useRef<DeviceRole>(deviceRole);
+  useEffect(() => {
+    deviceRoleRef.current = deviceRole;
+  }, [deviceRole]);
 
   const [projectorStationId, setProjectorStationIdState] = useState<string | null>(() => {
     try {
@@ -401,7 +463,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     reloadState();
-  }, [reloadState]);
+    refreshConnectedProjectors();
+  }, [reloadState, refreshConnectedProjectors]);
 
   // Periodic heartbeat for claimed station operator
   useEffect(() => {
@@ -426,13 +489,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return Object.values(db.stations);
   }, [db?.stations]);
 
-  // Synchronize active participant across station and global live sync
+  // Synchronize active participant across station
   useEffect(() => {
-    if (activeParticipant) {
-      if (currentStationId) {
-        api.setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
-      }
-      api.updateLiveSync({ activeParticipantId: activeParticipant.id }).catch(() => {});
+    if (activeParticipant && currentStationId) {
+      api.setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
     }
   }, [activeParticipant?.id, currentStationId]);
 
@@ -443,11 +503,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     else if (currentPage === 'round2') roundNum = 2;
     else if (currentPage === 'round3') roundNum = 3;
 
-    if (roundNum) {
-      if (currentStationId) {
-        api.setStationRound(currentStationId, roundNum).catch(() => {});
-      }
-      api.updateLiveSync({ currentRound: roundNum }).catch(() => {});
+    if (roundNum && currentStationId) {
+      api.setStationRound(currentStationId, roundNum).catch(() => {});
     }
   }, [currentPage, currentStationId]);
 
@@ -621,6 +678,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [db?.stations]
   );
 
+  const rotateStationImage = useCallback(
+    async (stationId: string, rotation?: number) => {
+      const res = await api.rotateStationImage(stationId, rotation);
+      setDb((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        };
+      });
+    },
+    []
+  );
+
   const spinStationTopic = useCallback(
     async (stationId: string, wheelTopicIds?: string[]) => {
       const station = db?.stations?.[stationId];
@@ -674,8 +745,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (
       stationId: string,
       payload: {
-        action: 'start' | 'pause' | 'stop' | 'stop_with_buzzer' | 'reset' | 'time_up';
-        phase?: 'prep' | 'speech';
+        action: 'start' | 'pause' | 'stop' | 'stop_with_buzzer' | 'reset' | 'time_up' | 'transition_to_speech';
+        phase?: 'prep' | 'speech' | 'stopped' | 'idle' | 'time_up';
         totalSeconds?: number;
         remainingSeconds?: number;
         round?: string;
@@ -727,15 +798,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stations,
             liveSync: {
               ...prev.liveSync,
-              timerMode: updated.timerMode,
-              timerStatus: 'running',
-              timerDuration: updated.timerDuration,
-              timerTotalSeconds: updated.timerTotalSeconds,
-              timerRemainingSeconds: updated.timerRemainingSeconds,
-              isTimerRunning: true,
-              timerStartTime: updated.timerStartTime,
-              timerStartedAt: updated.timerStartedAt,
-              timerEndsAt: updated.timerEndsAt,
               stationStates: stations,
             },
           };
@@ -785,7 +847,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let eventSource: EventSource | null = null;
 
     function connectSSE() {
-      eventSource = new EventSource('/api/events');
+      const sseUrl = new URL('/api/events', window.location.origin);
+      if (projectorDeviceId) {
+        sseUrl.searchParams.set('projector_device_id', projectorDeviceId);
+      }
+      if (currentStationId && currentStationId !== 'all') {
+        sseUrl.searchParams.set('station', currentStationId);
+      }
+      if (deviceRole) {
+        sseUrl.searchParams.set('type', deviceRole);
+      }
+
+      eventSource = new EventSource(sseUrl.toString());
 
       eventSource.addEventListener('connected', (e) => {
         setIsConnected(true);
@@ -809,6 +882,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       eventSource.addEventListener('buzzer_trigger', (e) => {
         try {
           const payload = JSON.parse(e.data);
+          const devStation = currentStationIdRef.current;
+          const devRole = deviceRoleRef.current;
+          // Multi-room station audio isolation:
+          // If buzzer is triggered specifically for a station, only sound it on
+          // devices dedicated to that station (or master role / hall monitors)
+          if (payload?.stationId && devStation && devStation !== 'all') {
+            if (payload.stationId !== devStation && devRole !== 'master') {
+              return; // Silence buzzers from other rooms/stations!
+            }
+          }
           playBuzzerWithDebounce(payload.eventId);
         } catch (err) {
           console.error('Failed to handle buzzer SSE event:', err);
@@ -907,18 +990,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               stations: updatedStation && prev.stations
                 ? { ...prev.stations, [spinData.stationId]: updatedStation }
                 : prev.stations,
-              liveSync: {
-                ...prev.liveSync,
-                wheelSpin: {
-                  isSpinning: true,
-                  targetTopicId: spinData.topic.id,
-                  targetTopicTitle: spinData.topic.topic,
-                  targetIndex: spinData.targetIndex ?? 0,
-                  wheelTopics: spinData.wheelTopics,
-                  startedAt: spinData.startedAt,
-                  durationMs: spinData.durationMs,
-                },
-              },
             };
           });
         } catch (err) {
@@ -1018,6 +1089,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
 
+      eventSource.addEventListener('projectors_updated', (e) => {
+        try {
+          const list = JSON.parse(e.data);
+          if (Array.isArray(list)) {
+            setConnectedProjectors(list);
+          }
+        } catch (err) {
+          console.error('Failed to handle projectors_updated SSE:', err);
+        }
+      });
+
+      eventSource.addEventListener('station_assigned', (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (payload?.stationId) {
+            setCurrentStationIdState(payload.stationId);
+            try {
+              localStorage.setItem('projector_assigned_station', payload.stationId);
+              localStorage.setItem('m2m_current_station_id', payload.stationId);
+              const url = new URL(window.location.href);
+              url.searchParams.set('station', payload.stationId);
+              window.history.replaceState({}, '', url.toString());
+            } catch {}
+          }
+        } catch (err) {
+          console.error('Failed to handle station_assigned SSE:', err);
+        }
+      });
+
+      eventSource.addEventListener('projector_ping', (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          setProjectorPingNotification({
+            timestamp: payload?.timestamp || Date.now(),
+            message: payload?.message || 'Test Ping from Master Monitor',
+          });
+        } catch (err) {
+          console.error('Failed to handle projector_ping SSE:', err);
+        }
+      });
+
       eventSource.onerror = () => {
         setIsConnected(false);
         eventSource?.close();
@@ -1030,7 +1142,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       eventSource?.close();
     };
-  }, [playBuzzerWithDebounce]);
+  }, [playBuzzerWithDebounce, currentStationId, deviceRole, projectorDeviceId]);
 
   // Fullscreen helper
   const toggleFullscreen = useCallback(() => {
@@ -1141,12 +1253,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Synchronized Timer Action
   const sendTimerAction = useCallback(
     async (payload: {
-      action: 'start' | 'pause' | 'stop' | 'reset' | 'time_up';
-      phase?: 'prep' | 'speech';
+      action: 'start' | 'pause' | 'stop' | 'reset' | 'time_up' | 'transition_to_speech' | 'stop_with_buzzer';
+      phase?: 'prep' | 'speech' | 'stopped' | 'idle' | 'time_up';
       totalSeconds?: number;
       remainingSeconds?: number;
       round?: string;
       endsAt?: number;
+      startedAt?: number;
     }) => {
       try {
         const res = await api.sendTimerAction(payload);
@@ -1210,9 +1323,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reason,
         round,
         participantName: activeParticipant?.name,
+        stationId: currentStationId || undefined,
       });
     },
-    [activeParticipant?.name, unlockSound, playBuzzerLocal]
+    [activeParticipant?.name, currentStationId, unlockSound, playBuzzerLocal]
   );
 
   // Keyboard shortcuts (SPACE, S, R, B, N, F)
@@ -1594,12 +1708,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         takeoverModal,
         closeTakeoverModal,
 
+        // Projector Devices Management
+        projectorDeviceId,
+        connectedProjectors,
+        assignProjectorStation,
+        pingProjectorDevice,
+        refreshConnectedProjectors,
+        projectorPingNotification,
+        clearProjectorPingNotification,
+
         // Station Actions
         setStationRound,
         setStationParticipant,
         updateStationHandler,
         pingStation,
         assignStationImage,
+        rotateStationImage,
         spinStationTopic,
         completeStationSpin,
         replaceStationWheelTopic,

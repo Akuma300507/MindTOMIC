@@ -8,8 +8,22 @@ import type {
   EventLog,
   LiveSyncState,
   StationState,
+  ProjectorDevice,
 } from '../types';
 import { getServerNow, recordServerTimestamp } from './timeSync';
+
+// Scoped fetch wrapper attaching unique projector device ID header if present in localStorage
+const nativeFetch = typeof window !== 'undefined' ? window.fetch.bind(window) : globalThis.fetch;
+const fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const headers = new Headers(init?.headers);
+  try {
+    const projId = typeof localStorage !== 'undefined' ? localStorage.getItem('projector_device_id') : null;
+    if (projId && !headers.has('x-projector-device-id')) {
+      headers.set('x-projector-device-id', projId);
+    }
+  } catch {}
+  return nativeFetch(input, { ...init, headers });
+};
 
 export const api = {
   // Health
@@ -148,6 +162,19 @@ export const api = {
     return res.json();
   },
 
+  async rotateStationImage(id: string, rotation?: number): Promise<{ success: boolean; station: StationState; imageRotation: number }> {
+    const res = await fetch(`/api/stations/${id}/rotate-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rotation }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to rotate station image');
+    }
+    return res.json();
+  },
+
   async spinStationTopic(id: string, participantId?: string, participantName?: string, wheelTopicIds?: string[]): Promise<{ success: boolean; topic: Topic; startedAt: number; durationMs: number; station: StationState }> {
     const res = await fetch(`/api/stations/${id}/spin-topic`, {
       method: 'POST',
@@ -184,8 +211,8 @@ export const api = {
   },
 
   async sendStationTimerAction(id: string, payload: {
-    action: 'start' | 'pause' | 'stop' | 'stop_with_buzzer' | 'reset' | 'time_up';
-    phase?: 'prep' | 'speech';
+    action: 'start' | 'pause' | 'stop' | 'stop_with_buzzer' | 'reset' | 'time_up' | 'transition_to_speech';
+    phase?: 'prep' | 'speech' | 'stopped' | 'idle' | 'time_up';
     totalSeconds?: number;
     remainingSeconds?: number;
     round?: string;
@@ -540,7 +567,7 @@ export const api = {
   },
 
   // Buzzer Trigger
-  async triggerBuzzer(payload: { source?: string; reason?: string; round?: string; participantName?: string }) {
+  async triggerBuzzer(payload: { source?: string; reason?: string; round?: string; participantName?: string; stationId?: string }) {
     const res = await fetch('/api/buzzer/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -561,8 +588,8 @@ export const api = {
 
   // Synchronized Timer Action
   async sendTimerAction(payload: {
-    action: 'start' | 'pause' | 'stop' | 'reset' | 'time_up';
-    phase?: 'prep' | 'speech';
+    action: 'start' | 'pause' | 'stop' | 'reset' | 'time_up' | 'transition_to_speech' | 'stop_with_buzzer';
+    phase?: 'prep' | 'speech' | 'stopped' | 'idle' | 'time_up';
     totalSeconds?: number;
     remainingSeconds?: number;
     round?: string;
@@ -692,6 +719,33 @@ export const api = {
   async startNewEvent() {
     const res = await fetch('/api/event/start-new', { method: 'POST' });
     if (!res.ok) throw new Error('Failed to start new event');
+    return res.json();
+  },
+
+  // Projector Display Devices
+  async getConnectedProjectors(): Promise<ProjectorDevice[]> {
+    const res = await fetch('/api/projectors');
+    if (!res.ok) throw new Error('Failed to fetch connected projectors');
+    return res.json();
+  },
+
+  async assignProjectorStation(deviceId: string, stationId: string): Promise<{ success: boolean; projector?: ProjectorDevice }> {
+    const res = await fetch(`/api/projectors/${deviceId}/assign-station`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stationId }),
+    });
+    if (!res.ok) throw new Error('Failed to assign station to projector');
+    return res.json();
+  },
+
+  async pingProjectorDevice(deviceId: string, message?: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`/api/projectors/${deviceId}/ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+    if (!res.ok) throw new Error('Failed to ping projector');
     return res.json();
   },
 };
