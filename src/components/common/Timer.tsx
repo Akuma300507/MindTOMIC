@@ -22,6 +22,7 @@ interface TimerProps {
   participantName?: string;
   roundName: 'Round 1' | 'Round 2' | 'Round 3';
   buzzerEnabled?: boolean;
+  stationId?: string;
   onFinish?: (data: {
     status: 'completed' | 'completed_early' | 'time_up';
     prepDurationSeconds: number;
@@ -39,6 +40,7 @@ export const Timer: React.FC<TimerProps> = ({
   participantName,
   roundName,
   buzzerEnabled = true,
+  stationId,
   onFinish,
   onPhaseChange,
 }) => {
@@ -55,6 +57,8 @@ export const Timer: React.FC<TimerProps> = ({
     unlockSound,
     playBuzzerLocal,
   } = useApp();
+
+  const activeStationId = stationId || currentStationId;
 
   const playCurrentPrepBuzzer = useCallback(() => {
     const prepSound = db?.settings?.buzzer?.prepSound || 'dual_alert';
@@ -154,15 +158,16 @@ export const Timer: React.FC<TimerProps> = ({
             transitionToSpeechRef.current();
           } else {
             // Sound 3: Finish buzzer sound after speech time limit is reached
-            if (buzzerEnabled) {
-              triggerBuzzer('Time Limit Reached', roundName);
-            }
             setIsOvertime(true);
             setIsRunning(true);
             setRemainingSeconds(0);
-            if (currentStationId) {
-              sendStationTimerAction(currentStationId, { action: 'time_up', phase: 'speech', remainingSeconds: 0 }).catch(() => {});
+            if (activeStationId && activeStationId !== 'all') {
+              // sendStationTimerAction handles local zero-delay station-scoped buzzer and scoped server broadcast
+              sendStationTimerAction(activeStationId, { action: 'time_up', phase: 'speech', remainingSeconds: 0 }).catch(() => {});
             } else {
+              if (buzzerEnabled) {
+                triggerBuzzer('Time Limit Reached', roundName);
+              }
               sendTimerAction({ action: 'time_up', round: roundName, phase: 'speech' });
             }
             startOvertimeTicker();
@@ -170,7 +175,7 @@ export const Timer: React.FC<TimerProps> = ({
         }
       }, 100);
     },
-    [clearIntervalSafe, buzzerEnabled, triggerBuzzer, roundName, sendTimerAction, sendStationTimerAction, currentStationId, startOvertimeTicker]
+    [clearIntervalSafe, buzzerEnabled, triggerBuzzer, roundName, sendTimerAction, sendStationTimerAction, activeStationId, startOvertimeTicker]
   );
 
   // Transition to speech phase
@@ -192,8 +197,8 @@ export const Timer: React.FC<TimerProps> = ({
       startTimeRef.current = new Date().toISOString();
     }
 
-    if (currentStationId) {
-      sendStationTimerAction(currentStationId, {
+    if (activeStationId && activeStationId !== 'all') {
+      sendStationTimerAction(activeStationId, {
         action: 'transition_to_speech',
         phase: 'speech',
         totalSeconds: speechDurationSeconds,
@@ -210,7 +215,7 @@ export const Timer: React.FC<TimerProps> = ({
     }
 
     startTicker(speechDurationSeconds, 'speech');
-  }, [clearIntervalSafe, speechDurationSeconds, currentStationId, sendStationTimerAction, sendTimerAction, roundName, startTicker]);
+  }, [clearIntervalSafe, speechDurationSeconds, activeStationId, sendStationTimerAction, sendTimerAction, roundName, startTicker]);
 
   useEffect(() => {
     transitionToSpeechRef.current = handleTransitionToSpeech;
@@ -229,8 +234,8 @@ export const Timer: React.FC<TimerProps> = ({
         setTotalSecondsForPhase(prepDurationSeconds);
         setRemainingSeconds(prepDurationSeconds);
         setIsRunning(true);
-        if (currentStationId) {
-          sendStationTimerAction(currentStationId, {
+        if (activeStationId && activeStationId !== 'all') {
+          sendStationTimerAction(activeStationId, {
             action: 'start',
             phase: 'prep',
             totalSeconds: prepDurationSeconds,
@@ -254,8 +259,8 @@ export const Timer: React.FC<TimerProps> = ({
         setTotalSecondsForPhase(speechDurationSeconds);
         setRemainingSeconds(speechDurationSeconds);
         setIsRunning(true);
-        if (currentStationId) {
-          sendStationTimerAction(currentStationId, {
+        if (activeStationId && activeStationId !== 'all') {
+          sendStationTimerAction(activeStationId, {
             action: 'start',
             phase: 'speech',
             totalSeconds: speechDurationSeconds,
@@ -278,8 +283,8 @@ export const Timer: React.FC<TimerProps> = ({
       // Resume from pause
       const startedAt = getServerNow();
       setIsRunning(true);
-      if (currentStationId) {
-        sendStationTimerAction(currentStationId, {
+      if (activeStationId && activeStationId !== 'all') {
+        sendStationTimerAction(activeStationId, {
           action: 'start',
           phase,
           totalSeconds: totalSecondsForPhase,
@@ -298,7 +303,7 @@ export const Timer: React.FC<TimerProps> = ({
       }
       startTicker(pausedTimeRemainingRef.current, phase as 'prep' | 'speech');
     }
-  }, [hasPrepPhase, isRunning, phase, prepDurationSeconds, speechDurationSeconds, startTicker, unlockSound, sendTimerAction, sendStationTimerAction, currentStationId, roundName, totalSecondsForPhase]);
+  }, [hasPrepPhase, isRunning, phase, prepDurationSeconds, speechDurationSeconds, startTicker, unlockSound, sendTimerAction, sendStationTimerAction, activeStationId, roundName, totalSecondsForPhase]);
 
   // PAUSE action
   const handlePause = useCallback(() => {
@@ -306,8 +311,8 @@ export const Timer: React.FC<TimerProps> = ({
     clearIntervalSafe();
     setIsRunning(false);
     pausedTimeRemainingRef.current = remainingSeconds;
-    if (currentStationId) {
-      sendStationTimerAction(currentStationId, {
+    if (activeStationId && activeStationId !== 'all') {
+      sendStationTimerAction(activeStationId, {
         action: 'pause',
         phase,
         remainingSeconds,
@@ -320,7 +325,7 @@ export const Timer: React.FC<TimerProps> = ({
         round: roundName,
       });
     }
-  }, [clearIntervalSafe, isRunning, remainingSeconds, sendTimerAction, sendStationTimerAction, currentStationId, phase, roundName]);
+  }, [clearIntervalSafe, isRunning, remainingSeconds, sendTimerAction, sendStationTimerAction, activeStationId, phase, roundName]);
 
   // Toggle start/pause
   const handleToggleStartPause = useCallback(() => {
@@ -341,8 +346,8 @@ export const Timer: React.FC<TimerProps> = ({
     setPhase('stopped');
     // Deliberately no buzzer sound on manual stop
 
-    if (currentStationId) {
-      sendStationTimerAction(currentStationId, {
+    if (activeStationId && activeStationId !== 'all') {
+      sendStationTimerAction(activeStationId, {
         action: 'stop',
         phase: 'stopped',
         remainingSeconds,
@@ -374,7 +379,7 @@ export const Timer: React.FC<TimerProps> = ({
       startTime: startTimeRef.current || new Date().toISOString(),
       endTime,
     });
-  }, [phase, clearIntervalSafe, speechDurationSeconds, remainingSeconds, isOvertime, overtimeSeconds, onFinish, hasPrepPhase, prepDurationSeconds, sendTimerAction, sendStationTimerAction, currentStationId, roundName]);
+  }, [phase, clearIntervalSafe, speechDurationSeconds, remainingSeconds, isOvertime, overtimeSeconds, onFinish, hasPrepPhase, prepDurationSeconds, sendTimerAction, sendStationTimerAction, activeStationId, roundName]);
 
   // RESET action
   const executeReset = useCallback(() => {
@@ -390,8 +395,8 @@ export const Timer: React.FC<TimerProps> = ({
     setActualSpeechElapsed(0);
     speechStartTimeRef.current = null;
     setShowResetConfirm(false);
-    if (currentStationId) {
-      sendStationTimerAction(currentStationId, {
+    if (activeStationId && activeStationId !== 'all') {
+      sendStationTimerAction(activeStationId, {
         action: 'reset',
         totalSeconds: initialSeconds,
         remainingSeconds: initialSeconds,
@@ -404,7 +409,7 @@ export const Timer: React.FC<TimerProps> = ({
         round: roundName,
       });
     }
-  }, [clearIntervalSafe, hasPrepPhase, prepDurationSeconds, speechDurationSeconds, sendTimerAction, sendStationTimerAction, currentStationId, roundName]);
+  }, [clearIntervalSafe, hasPrepPhase, prepDurationSeconds, speechDurationSeconds, sendTimerAction, sendStationTimerAction, activeStationId, roundName]);
 
   // Keyboard shortcut binding
   useEffect(() => {

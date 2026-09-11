@@ -689,6 +689,7 @@ export const Round2: React.FC = () => {
             participantName={activeParticipant?.name}
             roundName="Round 2"
             buzzerEnabled={buzzerEnabled}
+            stationId={currentStationId || undefined}
             onPhaseChange={setTimerPhase}
             onFinish={handleTimerFinish}
           />

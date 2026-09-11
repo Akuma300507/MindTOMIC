@@ -762,8 +762,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Immediate local zero-delay buzzer trigger ONLY on natural Time Up (Stop button must NOT play buzzer)
       if (payload.action === 'time_up') {
-        const localEventId = `buzzer-${Date.now()}-${stationId}`;
-        playBuzzerWithDebounce(localEventId);
+        const roundNum = db?.stations?.[stationId]?.currentRound || 1;
+        const roundSettings = (db?.settings as any)?.[`round${roundNum}`] || db?.settings?.round1;
+        if (roundSettings?.buzzerEnabled !== false) {
+          const localEventId = `buzzer-${Date.now()}-${stationId}`;
+          playBuzzerWithDebounce(localEventId);
+        }
       }
 
       // Optimistic local state update for instant zero-lag response
@@ -883,16 +887,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const payload = JSON.parse(e.data);
           const devStation = currentStationIdRef.current;
-          const devRole = deviceRoleRef.current;
-          // Multi-room station audio isolation:
-          // If buzzer is triggered specifically for a station, only sound it on
-          // devices dedicated to that station (or master role / hall monitors)
-          if (payload?.stationId && devStation && devStation !== 'all') {
-            if (payload.stationId !== devStation && devRole !== 'master') {
-              return; // Silence buzzers from other rooms/stations!
+
+          // STRICT MULTI-STATION AUDIO ISOLATION:
+          // 1. If this buzzer event specifies a stationId:
+          //    It MUST ONLY sound on devices/projectors currently operating or assigned to THAT station!
+          //    If this device is on another station (e.g. Station B while buzzer is for Station A), SILENCE IT!
+          if (payload?.stationId) {
+            if (devStation && devStation !== 'all' && payload.stationId !== devStation) {
+              return; // Station mismatch -> Silence immediately!
             }
           }
-          playBuzzerWithDebounce(payload.eventId);
+
+          // 2. If this device is operating a specific station (e.g. Station B):
+          //    Never play ANY timer/time_limit buzzers unless specifically addressed to THIS station!
+          //    This prevents un-isolated global timer alarms from disrupting this station's ongoing speech.
+          if (devStation && devStation !== 'all') {
+            const isTimerBuzzer =
+              payload?.source === 'time_limit' ||
+              payload?.source === 'timer' ||
+              payload?.source === 'timer_auto' ||
+              payload?.reason?.toLowerCase().includes('time');
+            if (isTimerBuzzer && payload?.stationId !== devStation) {
+              return; // Silence timer alarm from other station!
+            }
+          }
+
+          playBuzzerWithDebounce(payload?.eventId);
         } catch (err) {
           console.error('Failed to handle buzzer SSE event:', err);
         }

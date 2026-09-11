@@ -593,6 +593,19 @@ function broadcastStationUpdate(stationId: string, event: string, data: any) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   const targetChannel = `station:${stationId}`;
   sseClients.forEach((client) => {
+    // Audio isolation: buzzer_trigger must ONLY be sent to clients explicitly listening to THIS station!
+    // Never leak audio buzzers across stations or to general master channels!
+    if (event === 'buzzer_trigger') {
+      if (client.channels.has(targetChannel) || client.stationId === stationId) {
+        try {
+          client.res.write(payload);
+        } catch {
+          // client dropped
+        }
+      }
+      return;
+    }
+
     if (client.channels.has(targetChannel) || client.channels.has('master') || client.type === 'master') {
       try {
         client.res.write(payload);
@@ -819,6 +832,7 @@ app.post('/api/buzzer/trigger', (req: Request, res: Response) => {
   const { source, reason, round, participantName, stationId } = req.body;
   const triggerPayload = {
     timestamp: Date.now(),
+    eventId: `buzzer-${Date.now()}-${stationId || 'global'}`,
     source: source || 'organizer',
     reason: reason || 'Manual Buzzer',
     round: round || 'General',
@@ -828,7 +842,13 @@ app.post('/api/buzzer/trigger', (req: Request, res: Response) => {
   };
 
   db.liveSync.buzzerTimestamp = triggerPayload.timestamp;
-  broadcastSSE('buzzer_trigger', triggerPayload);
+
+  if (stationId && stationId !== 'all') {
+    broadcastStationUpdate(stationId, 'buzzer_trigger', triggerPayload);
+  } else {
+    broadcastSSE('buzzer_trigger', triggerPayload);
+  }
+
   logAction('Buzzer Triggered', `${reason || 'Manual Buzzer'} sounded by ${source || 'organizer'} (${round || 'General'}) ${participantName ? 'for ' + participantName : ''}${stationId ? ` [${stationId}]` : ''}`);
 
   res.json({ success: true, triggerPayload });
@@ -1062,21 +1082,37 @@ app.post('/api/timer/action', (req: Request, res: Response) => {
     db.liveSync.timerMode = 'speech';
     db.liveSync.buzzerTimestamp = now;
 
-    Object.values(db.stations).forEach((s) => {
+    const targetStationId = req.body.stationId;
+    if (targetStationId && db.stations?.[targetStationId]) {
+      const s = db.stations[targetStationId];
       s.isOvertime = true;
       s.buzzerPlayed = true;
       s.buzzerTimestamp = now;
-    });
-
-    if (db.settings.buzzer.autoBuzzerOnZero) {
-      broadcastSSE('buzzer_trigger', {
-        timestamp: now,
-        source: 'timer_auto',
-        reason: 'Time Expired (00:00)',
-        round: round || 'General',
-        sound: db.settings.buzzer.sound,
-        volume: db.settings.buzzer.volume,
-      });
+      s.lastBuzzerEventId = `buzzer-${now}-${targetStationId}`;
+      if (db.settings.buzzer.autoBuzzerOnZero) {
+        broadcastStationUpdate(targetStationId, 'buzzer_trigger', {
+          timestamp: now,
+          eventId: s.lastBuzzerEventId,
+          stationId: targetStationId,
+          source: 'timer_auto',
+          reason: 'Time Expired (00:00)',
+          round: round || `Round ${s.currentRound}`,
+          sound: db.settings.buzzer.sound,
+          volume: db.settings.buzzer.volume,
+        });
+      }
+    } else {
+      if (db.settings.buzzer.autoBuzzerOnZero) {
+        broadcastSSE('buzzer_trigger', {
+          timestamp: now,
+          eventId: `buzzer-${now}-global`,
+          source: 'timer_auto',
+          reason: 'Time Expired (00:00)',
+          round: round || 'General',
+          sound: db.settings.buzzer.sound,
+          volume: db.settings.buzzer.volume,
+        });
+      }
     }
   }
 
