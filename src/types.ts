@@ -90,6 +90,10 @@ export interface Round1Result {
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;
+  deviceId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
 }
 
 export interface Round2Result {
@@ -111,6 +115,10 @@ export interface Round2Result {
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;
+  deviceId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
 }
 
 export interface Round3Result {
@@ -128,6 +136,10 @@ export interface Round3Result {
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;
+  deviceId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
 }
 
 export interface EventStation {

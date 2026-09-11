@@ -132,15 +132,10 @@ class SyncEngine {
     await saveQueueItem(item);
     await this.refreshPendingCount();
 
-    if (this.isOnline) {
-      // Trigger background sync without blocking the caller
-      this.syncNow().catch((err) => {
-        console.warn('[SyncEngine] Background sync deferred:', err);
-      });
-    } else {
-      this.status = 'offline';
-      this.notify();
-    }
+    // Optimistically attempt local server sync immediately (supports offline LAN/localhost)
+    this.syncNow().catch((err) => {
+      console.warn('[SyncEngine] Local/background sync deferred:', err);
+    });
   }
 
   /**
@@ -148,11 +143,6 @@ class SyncEngine {
    */
   public async syncNow(): Promise<void> {
     if (this.isSyncing) return;
-    if (!this.isOnline && typeof navigator !== 'undefined' && !navigator.onLine) {
-      this.status = 'offline';
-      this.notify();
-      return;
-    }
 
     this.isSyncing = true;
     this.status = 'syncing';
@@ -251,10 +241,10 @@ class SyncEngine {
   private startPeriodicSync() {
     if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => {
-      if (this.isOnline && this.pendingCount > 0 && !this.isSyncing) {
-        this.syncNow();
+      if (this.pendingCount > 0 && !this.isSyncing) {
+        this.syncNow().catch(() => {});
       }
-    }, 12000);
+    }, 5000);
   }
 
   public destroy() {

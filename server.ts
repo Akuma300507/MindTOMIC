@@ -19,6 +19,9 @@ import type {
   StationStatus,
   StationWheelSpin,
   ProjectorDevice,
+  Round1Result,
+  Round2Result,
+  Round3Result,
   SyncBatchRequest,
   SyncBatchResponse,
   SyncQueueItem,
@@ -509,6 +512,7 @@ async function initMongo() {
 
 // Helper to persist data to disk and MongoDB Atlas
 let saveTimeout: NodeJS.Timeout | null = null;
+let isSelfWriting = false;
 function persistDB() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
@@ -516,7 +520,9 @@ function persistDB() {
       if (db.stations) {
         db.liveSync.stationStates = db.stations;
       }
+      isSelfWriting = true;
       fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+      setTimeout(() => { isSelfWriting = false; }, 350);
 
       if (mongoDb) {
         await mongoDb.collection('app_state').updateOne(
@@ -526,6 +532,7 @@ function persistDB() {
         );
       }
     } catch (err) {
+      isSelfWriting = false;
       console.error('Failed to persist database:', err);
     }
   }, 100);
@@ -541,7 +548,9 @@ function persistDBSync() {
     if (db.stations) {
       db.liveSync.stationStates = db.stations;
     }
+    isSelfWriting = true;
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    setTimeout(() => { isSelfWriting = false; }, 350);
     if (mongoDb) {
       mongoDb.collection('app_state').updateOne(
         { _id: 'current_state' },
@@ -550,6 +559,7 @@ function persistDBSync() {
       ).catch((e: any) => console.error('[mongodb] sync persist error:', e));
     }
   } catch (err) {
+    isSelfWriting = false;
     console.error('Failed to persist database synchronously:', err);
   }
 }
@@ -577,6 +587,39 @@ function broadcastSSE(event: string, data: any) {
       // client dropped
     }
   });
+}
+
+// Watch data/db.json for external backend changes or direct edits
+let reloadDebounce: NodeJS.Timeout | null = null;
+try {
+  fs.watch(DB_FILE, (eventType) => {
+    if (eventType !== 'change') return;
+    if (isSelfWriting) return;
+
+    if (reloadDebounce) clearTimeout(reloadDebounce);
+    reloadDebounce = setTimeout(() => {
+      try {
+        if (!fs.existsSync(DB_FILE)) return;
+        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+        const freshDb: AppDatabase = JSON.parse(raw);
+        if (freshDb && freshDb.stations) {
+          db = freshDb;
+          console.log('[server] Detected external change to data/db.json, syncing clients & projector...');
+          broadcastSSE('db_sync', db);
+          broadcastSSE('stations_updated', Object.values(db.stations));
+          if (db.settings) broadcastSSE('settings_updated', db.settings);
+          if (db.topics) broadcastSSE('topics_updated', db.topics);
+          if (db.images) broadcastSSE('images_updated', db.images);
+          if (db.participants) broadcastSSE('participants_batch_updated', { updatedList: db.participants });
+        }
+      } catch (err) {
+        console.warn('[server] Error reloading external db.json change:', err);
+      }
+    }, 200);
+  });
+  console.log('[server] File watcher active on data/db.json for real-time offline sync');
+} catch (err) {
+  console.warn('[server] Could not attach watcher to db.json:', err);
 }
 
 function broadcastToChannel(channel: string, event: string, data: any) {
@@ -3061,7 +3104,10 @@ app.post('/api/sync/batch', (req: Request, res: Response) => {
 
   if (syncedIds.length > 0) {
     persistDB();
-    broadcastSSE('sync_update', { syncedCount: syncedIds.length, deviceId });
+    broadcastSSE('sync_update', { syncedCount: syncedIds.length, deviceId, db });
+    broadcastSSE('db_sync', db);
+    broadcastSSE('stations_updated', Object.values(db.stations || {}));
+    broadcastSSE('participants_batch_updated', { updatedList: db.participants });
   }
 
   return res.json({
