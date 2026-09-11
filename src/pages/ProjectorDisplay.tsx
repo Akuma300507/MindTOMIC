@@ -50,7 +50,17 @@ export const ProjectorDisplay: React.FC = () => {
     projectorDeviceId,
     projectorPingNotification,
     clearProjectorPingNotification,
+    reloadState,
   } = useApp();
+
+  // Active continuous synchronization safeguard: guarantees projector picks up all offline/backend changes within 1s without F5
+  useEffect(() => {
+    if (!reloadState) return;
+    const interval = setInterval(() => {
+      reloadState().catch(() => {});
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [reloadState]);
 
   useEffect(() => {
     if (projectorPingNotification) {
@@ -155,23 +165,41 @@ export const ProjectorDisplay: React.FC = () => {
   // STRICT STATION ISOLATION: Active displayed item (image or topic)
   const activeItem = useMemo(() => {
     if (!currentStationState) return null;
-    if (currentRound === 1 && currentStationState.selectedImage) {
-      const imageId = currentStationState.selectedImage.imageId || currentStationState.selectedImage.name;
-      return {
-        type: 'image' as const,
-        title: `IMAGE ID: ${imageId}`,
-        mediaUrl: currentStationState.selectedImage.url,
-        id: currentStationState.selectedImage.id,
-        rotation: currentStationState.imageRotation ?? currentStationState.selectedImage.rotation ?? 0,
-      };
+    if (currentRound === 1 && (currentStationState.selectedImage || currentStationState.selectedImageId)) {
+      const selectedImg =
+        currentStationState.selectedImage ||
+        (db?.images
+          ? db.images.find(
+              (img) =>
+                img.id === currentStationState.selectedImageId ||
+                img.imageId === currentStationState.selectedImageId
+            )
+          : null);
+      if (selectedImg) {
+        const imageId = selectedImg.imageId || selectedImg.name;
+        return {
+          type: 'image' as const,
+          title: `IMAGE ID: ${imageId}`,
+          mediaUrl: selectedImg.url,
+          id: selectedImg.id,
+          rotation: currentStationState.imageRotation ?? selectedImg.rotation ?? 0,
+        };
+      }
     }
-    if (currentRound === 2 && currentStationState.selectedTopic) {
-      return {
-        type: 'topic' as const,
-        title: currentStationState.selectedTopic.topic,
-        id: currentStationState.selectedTopic.id,
-        category: currentStationState.selectedTopic.category,
-      };
+    if (currentRound === 2 && (currentStationState.selectedTopic || currentStationState.selectedTopicId)) {
+      const selectedTop =
+        currentStationState.selectedTopic ||
+        (db?.topics
+          ? db.topics.find((t) => t.id === currentStationState.selectedTopicId)
+          : null);
+      if (selectedTop) {
+        return {
+          type: 'topic' as const,
+          title: selectedTop.topic,
+          id: selectedTop.id,
+          category: selectedTop.category,
+        };
+      }
     }
     if (currentRound === 3) {
       return {
@@ -180,7 +208,7 @@ export const ProjectorDisplay: React.FC = () => {
       };
     }
     return null;
-  }, [currentStationState, currentRound]);
+  }, [currentStationState, currentRound, db?.images, db?.topics]);
 
   // Real-time Timer Interpolation using shared backend timestamps (zero-drift, clock-synced)
   const [nowMs, setNowMs] = useState<number>(() => getServerNow());
@@ -494,14 +522,20 @@ export const ProjectorDisplay: React.FC = () => {
   // Strictly hidden until wheel spin is fully finished!
   const currentRoundTopic = useMemo(() => {
     if (isSpinActive) return null;
+    const resolvedTopic =
+      currentStationState?.selectedTopic ||
+      (currentStationState?.selectedTopicId && db?.topics
+        ? db.topics.find((t) => t.id === currentStationState.selectedTopicId)
+        : null);
+
     if (
-      currentStationState?.selectedTopic &&
-      currentStationState.status !== 'WAITING' &&
-      currentStationState.status !== 'SPINNING'
+      resolvedTopic &&
+      currentStationState?.status !== 'WAITING' &&
+      currentStationState?.status !== 'SPINNING'
     ) {
       return {
-        title: currentStationState.selectedTopic.topic,
-        category: currentStationState.selectedTopic.category,
+        title: resolvedTopic.topic,
+        category: resolvedTopic.category,
       };
     }
     if (
@@ -523,6 +557,7 @@ export const ProjectorDisplay: React.FC = () => {
     currentStationState?.selectedTopic,
     currentStationState?.status,
     currentStationState?.selectedTopicId,
+    db?.topics,
   ]);
 
   if (!db) {

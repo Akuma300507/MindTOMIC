@@ -652,12 +652,14 @@ function broadcastStationUpdate(stationId: string, event: string, data: any) {
       return;
     }
 
-    // State, timer, and metadata updates: broadcast to station subscribers, master supervisors, and organizer consoles
+    // State, timer, and metadata updates: broadcast to station subscribers, master supervisors, organizer consoles, and projectors
     if (
       client.channels.has(targetChannel) ||
       client.channels.has('master') ||
       client.type === 'master' ||
       client.type === 'organizer' ||
+      client.type === 'projector' ||
+      client.channels.has('projector') ||
       client.channels.has('global')
     ) {
       try {
@@ -830,8 +832,12 @@ app.get('/api/events', (req: Request, res: Response) => {
   const channels = new Set<string>();
   channels.add('global');
 
-  if (type === 'master' || type === 'organizer' || !stationId || stationId === 'all') {
+  if (type === 'master' || type === 'organizer' || type === 'projector' || !stationId || stationId === 'all') {
     channels.add('master');
+  }
+
+  if (type === 'projector') {
+    channels.add('projector');
   }
 
   if (stationId && stationId !== 'all') {

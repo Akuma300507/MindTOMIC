@@ -90,6 +90,7 @@ interface AppContextType {
   }) => Promise<void>;
   pingStation: (stationId: string, senderName?: string, message?: string) => Promise<void>;
   assignStationImage: (stationId: string) => Promise<EventImage>;
+  setStationImage: (stationId: string, image: EventImage) => Promise<void>;
   rotateStationImage: (stationId: string, rotation?: number) => Promise<void>;
   spinStationTopic: (stationId: string, wheelTopicIds?: string[]) => Promise<{ topic: Topic; targetIndex?: number; wheelTopics?: Topic[]; startedAt: number; durationMs: number; station?: StationState }>;
   completeStationSpin: (stationId: string) => Promise<void>;
@@ -637,7 +638,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const reloadState = useCallback(async () => {
     try {
       const state = await api.getState();
-      setDb(state);
+      setDb((prev) => {
+        if (!prev) return state;
+        if (JSON.stringify(prev) === JSON.stringify(state)) return prev;
+        return state;
+      });
       saveCachedDb(state).catch(() => {});
       // If no active participant yet and participants exist, set first active safely (respecting current station)
       setActiveParticipant((current) => {
@@ -1022,6 +1027,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     },
     [db?.stations, broadcastStationLocal]
+  );
+
+  const setStationImage = useCallback(
+    async (stationId: string, image: EventImage) => {
+      setDb((prev) => {
+        if (!prev) return prev;
+        const targetStation = prev.stations?.[stationId];
+        if (!targetStation) return prev;
+
+        const updatedStation: StationState = {
+          ...targetStation,
+          selectedImage: image,
+          selectedImageId: image.id,
+          imageRotation: 0,
+          currentRound: 1,
+        };
+
+        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedDb = { ...prev, stations };
+        saveCachedDb(updatedDb).catch(() => {});
+        broadcastStationLocal('station_updated', { station: updatedStation });
+        return updatedDb;
+      });
+
+      try {
+        await api.assignStationImage(stationId, undefined, undefined);
+      } catch (err) {
+        console.warn('[Offline] setStationImage processed locally:', err);
+      }
+    },
+    [broadcastStationLocal]
   );
 
   const rotateStationImage = useCallback(
@@ -1466,9 +1502,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (projectorDeviceId) {
         sseUrl.searchParams.set('projector_device_id', projectorDeviceId);
       }
-      const effectiveRole = currentPage === 'master' ? 'master' : deviceRole;
+      const effectiveRole = currentPage === 'master' ? 'master' : currentPage === 'projector' ? 'projector' : deviceRole;
       if (effectiveRole === 'master') {
         sseUrl.searchParams.set('type', 'master');
+      } else if (effectiveRole === 'projector') {
+        sseUrl.searchParams.set('type', 'projector');
+        if (currentStationId && currentStationId !== 'all') {
+          sseUrl.searchParams.set('station', currentStationId);
+        }
       } else {
         if (currentStationId && currentStationId !== 'all') {
           sseUrl.searchParams.set('station', currentStationId);
@@ -1897,16 +1938,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [playBuzzerWithDebounce, currentStationId, deviceRole, projectorDeviceId, currentPage]);
 
-  // Resilient Auto-Polling Fallback:
-  // When SSE is disconnected (offline, network glitch, or browser sleep),
-  // automatically poll /api/state every 1.5 seconds so backend changes
-  // appear on the Projector and all views automatically without requiring manual refresh.
+  // Continuous Background State Synchronization:
+  // Runs continuously every 1000ms so that ANY backend change (direct edit, script, offline device sync, or station update)
+  // is guaranteed to appear on the Projector and all views automatically without requiring manual F5 reload.
   useEffect(() => {
-    let timer: any = null;
+    let isPolling = false;
 
     const poll = async () => {
-      // Only poll if SSE is NOT currently connected
-      if (isConnected) return;
+      if (isPolling) return;
+      isPolling = true;
       try {
         const fresh = await api.getState();
         if (fresh && fresh.stations) {
@@ -1915,15 +1955,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               saveCachedDb(fresh).catch(() => {});
               return fresh;
             }
-            // Check if stations or active contestants changed
-            const prevStations = JSON.stringify(prev.stations);
-            const freshStations = JSON.stringify(fresh.stations);
-            const prevCount = prev.participants?.length;
-            const freshCount = fresh.participants?.length;
-            const prevSettings = JSON.stringify(prev.settings);
-            const freshSettings = JSON.stringify(fresh.settings);
-
-            if (prevStations === freshStations && prevCount === freshCount && prevSettings === freshSettings) {
+            if (JSON.stringify(prev) === JSON.stringify(fresh)) {
               return prev;
             }
             saveCachedDb(fresh).catch(() => {});
@@ -1931,19 +1963,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
       } catch {
-        // Local server temporarily unreachable, ignore
+        // Local server temporarily unreachable or offline, ignore
+      } finally {
+        isPolling = false;
       }
     };
 
-    if (!isConnected) {
-      timer = setInterval(poll, 1500);
-      poll();
-    }
-
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [isConnected]);
+    const timer = setInterval(poll, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Fullscreen helper
   const toggleFullscreen = useCallback(() => {
@@ -2995,6 +3023,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateStationHandler,
         pingStation,
         assignStationImage,
+        setStationImage,
         rotateStationImage,
         spinStationTopic,
         completeStationSpin,
