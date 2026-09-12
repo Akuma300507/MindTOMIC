@@ -527,8 +527,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!msg || !msg.type) return;
 
       if (msg.type === 'db_sync' && msg.db) {
-        setDb(msg.db);
-        saveCachedDb(msg.db).catch(() => {});
+        setDb((prev) => {
+          if (!prev) return msg.db;
+          if (JSON.stringify(prev) === JSON.stringify(msg.db)) return prev;
+          return msg.db;
+        });
+        dbRef.current = msg.db;
+        saveCachedDb(msg.db, { skipBroadcast: true, skipPulse: true }).catch(() => {});
       } else if (msg.type === 'station_updated' && msg.station) {
         setDb((prev) => {
           if (!prev) return prev;
@@ -541,7 +546,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               stationStates: stations,
             },
           };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'stations_updated' && msg.stations) {
@@ -563,7 +569,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               stationStates: stations,
             },
           };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'wheel_spin_started' && msg.spinData) {
@@ -595,7 +602,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               stationStates: stations,
             },
           };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'participant_created' && msg.participant) {
@@ -603,7 +611,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (!prev) return prev;
           if (prev.participants.some((p) => p.id === msg.participant.id)) return prev;
           const updated = { ...prev, participants: [...prev.participants, msg.participant] };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'participant_updated' && msg.participant) {
@@ -613,10 +622,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...prev,
             participants: prev.participants.map((p) => (p.id === msg.participant.id ? { ...p, ...msg.participant } : p)),
           };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
-        setActiveParticipant((curr) => (curr?.id === msg.participant.id ? { ...curr, ...msg.participant } : curr));
+        setActiveParticipantState((curr) => (curr?.id === msg.participant.id ? { ...curr, ...msg.participant } : curr));
       } else if (msg.type === 'participant_deleted' && msg.id) {
         setDb((prev) => {
           if (!prev) return prev;
@@ -624,29 +634,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...prev,
             participants: prev.participants.filter((p) => p.id !== msg.id),
           };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
-        setActiveParticipant((curr) => (curr?.id === msg.id ? null : curr));
+        setActiveParticipantState((curr) => (curr?.id === msg.id ? null : curr));
       } else if (msg.type === 'topics_updated' && msg.topics) {
         setDb((prev) => {
           if (!prev) return prev;
           const updated = { ...prev, topics: msg.topics };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'images_updated' && msg.images) {
         setDb((prev) => {
           if (!prev) return prev;
           const updated = { ...prev, images: msg.images };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'settings_updated' && msg.settings) {
         setDb((prev) => {
           if (!prev) return prev;
           const updated = { ...prev, settings: msg.settings };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'result_added' && msg.result) {
@@ -658,7 +672,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...prev,
             [key]: [...list.filter((r: any) => r.id !== msg.result.id), msg.result],
           };
-          saveCachedDb(updated).catch(() => {});
+          dbRef.current = updated;
+          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           return updated;
         });
       } else if (msg.type === 'buzzer_trigger') {
@@ -707,48 +722,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const reloadState = useCallback(async () => {
     try {
-      const state = await api.getState();
-      setDb((prev) => {
-        if (!prev) return state;
-        if (JSON.stringify(prev) === JSON.stringify(state)) return prev;
-        return state;
-      });
-      dbRef.current = state;
-      saveCachedDb(state).catch(() => {});
-      // If no active participant yet and participants exist, set first active safely (respecting current station)
-      setActiveParticipant((current) => {
-        if (current) return current;
-        if (!state.participants || state.participants.length === 0) return null;
-        if (currentStationId && currentStationId !== 'all') {
-          const stationMatch = state.participants.find((p) => p.stationId === currentStationId);
-          if (stationMatch) return stationMatch;
-        }
-        return state.participants[0] ?? null;
-      });
+      const state = await api.getState(800);
+      if (state && state.stations) {
+        setDb((prev) => {
+          if (!prev) return state;
+          if (JSON.stringify(prev) === JSON.stringify(state)) return prev;
+          return state;
+        });
+        dbRef.current = state;
+        saveCachedDb(state, { skipBroadcast: true, skipPulse: true }).catch(() => {});
+      }
     } catch {
       // Offline fallback: restore and sync from IndexedDB
       const cached = await getCachedDb();
-      if (cached) {
+      if (cached && cached.stations) {
         setDb((prev) => {
           if (!prev) return cached;
           if (JSON.stringify(prev) === JSON.stringify(cached)) return prev;
           return cached;
         });
         dbRef.current = cached;
-        setActiveParticipant((current) => {
-          if (current) return current;
-          if (!cached.participants || cached.participants.length === 0) return null;
-          if (currentStationId && currentStationId !== 'all') {
-            const stationMatch = cached.participants.find((p) => p.stationId === currentStationId);
-            if (stationMatch) return stationMatch;
-          }
-          return cached.participants[0] ?? null;
-        });
       }
     } finally {
       setLoading(false);
     }
-  }, [currentStationId, setActiveParticipant]);
+  }, []);
 
   useEffect(() => {
     // Immediate optimistic boot from IndexedDB cache so page loads instantly offline
@@ -756,6 +754,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (cached) {
         setDb((curr) => curr || cached);
         setLoading(false);
+        if (deviceRoleRef.current === 'station' && currentStationIdRef.current && currentStationIdRef.current !== 'all') {
+          setActiveParticipantState((current) => {
+            if (current) return current;
+            const stationMatches = cached.participants?.filter((p) => p.stationId === currentStationIdRef.current);
+            return stationMatches?.[0] || null;
+          });
+        }
       }
     }).catch(() => {});
 
@@ -1806,7 +1811,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               },
             };
             dbRef.current = updated;
-            saveCachedDb(updated).catch(() => {});
+            saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
             return updated;
           });
         } catch (err) {
@@ -1833,7 +1838,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               },
             };
             dbRef.current = updated;
-            saveCachedDb(updated).catch(() => {});
+            saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
             return updated;
           });
         } catch (err) {
@@ -2093,7 +2098,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 ...prev,
                 participants: [...existingUpdated, ...newItems],
               };
-              saveCachedDb(updated).catch(() => {});
+              dbRef.current = updated;
+              saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
               return updated;
             });
           }
@@ -2113,7 +2119,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ...prev,
               [key]: [...list.filter((r: any) => r.id !== result.id), result],
             };
-            saveCachedDb(updated).catch(() => {});
+            dbRef.current = updated;
+            saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
             return updated;
           });
         } catch (err) {
@@ -2126,7 +2133,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const { db: freshDb } = JSON.parse(e.data);
           if (freshDb) {
             setDb(freshDb);
-            saveCachedDb(freshDb).catch(() => {});
+            dbRef.current = freshDb;
+            saveCachedDb(freshDb, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           }
         } catch (err) {
           console.error('Failed to handle sync_update SSE:', err);
@@ -2138,7 +2146,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const freshDb = JSON.parse(e.data);
           if (freshDb && freshDb.stations) {
             setDb(freshDb);
-            saveCachedDb(freshDb).catch(() => {});
+            dbRef.current = freshDb;
+            saveCachedDb(freshDb, { skipBroadcast: true, skipPulse: true }).catch(() => {});
           }
         } catch (err) {
           console.error('Failed to handle db_sync SSE:', err);
@@ -2169,17 +2178,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (isPolling) return;
       isPolling = true;
       try {
-        const fresh = await api.getState();
+        const fresh = await api.getState(800);
         if (fresh && fresh.stations) {
           setDb((prev) => {
             if (!prev) {
-              saveCachedDb(fresh).catch(() => {});
+              saveCachedDb(fresh, { skipBroadcast: true, skipPulse: true }).catch(() => {});
               return fresh;
             }
             if (JSON.stringify(prev) === JSON.stringify(fresh)) {
               return prev;
             }
-            saveCachedDb(fresh).catch(() => {});
+            saveCachedDb(fresh, { skipBroadcast: true, skipPulse: true }).catch(() => {});
             return fresh;
           });
           dbRef.current = fresh;

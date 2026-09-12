@@ -53,24 +53,11 @@ export const ProjectorDisplay: React.FC = () => {
     reloadState,
   } = useApp();
 
-  // Active continuous synchronization safeguard: guarantees projector picks up all offline/backend changes within 1s without F5
+  // Ensure freshest state on projector mount; continuous updates are handled reactively by AppContext
   useEffect(() => {
-    if (!reloadState) return;
-    const interval = setInterval(() => {
+    if (reloadState) {
       reloadState().catch(() => {});
-    }, 1000);
-
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'm2m_offline_sync_pulse' || e.key === 'm2m_last_sync_time') {
-        reloadState().catch(() => {});
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('storage', handleStorage);
-    };
+    }
   }, [reloadState]);
 
   useEffect(() => {

@@ -237,11 +237,27 @@ export async function clearQueue(): Promise<void> {
   }
 }
 
+let sharedBroadcastChannel: BroadcastChannel | null = null;
+function getSharedBroadcastChannel(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  if (!sharedBroadcastChannel) {
+    try {
+      sharedBroadcastChannel = new BroadcastChannel('mindtomic_station_sync');
+    } catch {
+      sharedBroadcastChannel = null;
+    }
+  }
+  return sharedBroadcastChannel;
+}
+
 /**
  * Persists a complete snapshot of AppDatabase into IndexedDB.
  * Ensures the app can be refreshed or opened when offline.
  */
-export async function saveCachedDb(appDb: AppDatabase): Promise<void> {
+export async function saveCachedDb(
+  appDb: AppDatabase,
+  options?: { skipBroadcast?: boolean; skipPulse?: boolean }
+): Promise<void> {
   try {
     const db = await getDb();
     await new Promise<void>((resolve, reject) => {
@@ -257,18 +273,19 @@ export async function saveCachedDb(appDb: AppDatabase): Promise<void> {
     });
 
     // 1. Instantly notify all tabs and windows across the origin via storage event
-    if (typeof localStorage !== 'undefined') {
+    if (!options?.skipPulse && typeof localStorage !== 'undefined') {
       try {
         localStorage.setItem('m2m_offline_sync_pulse', Date.now().toString());
       } catch {}
     }
 
-    // 2. Broadcast directly via BroadcastChannel as well
-    if (typeof BroadcastChannel !== 'undefined') {
+    // 2. Broadcast directly via persistent BroadcastChannel as well
+    if (!options?.skipBroadcast) {
       try {
-        const bc = new BroadcastChannel('mindtomic_station_sync');
-        bc.postMessage({ type: 'db_sync', db: appDb, timestamp: Date.now() });
-        bc.close();
+        const bc = getSharedBroadcastChannel();
+        if (bc) {
+          bc.postMessage({ type: 'db_sync', db: appDb, timestamp: Date.now() });
+        }
       } catch {}
     }
   } catch (err) {
