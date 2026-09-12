@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Award,
   Users,
+  Bell,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
@@ -697,6 +698,29 @@ export const Round2: React.FC = () => {
             onPhaseChange={setTimerPhase}
             onFinish={handleTimerFinish}
           />
+
+          {/* Round 2 Warning Buzzer Status & Shortcut */}
+          <div className="mt-3 p-3.5 rounded-2xl bg-slate-900/80 border border-purple-500/30 flex items-center justify-between gap-3 text-xs shadow-lg">
+            <div className="flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0">
+                <Bell className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="font-bold text-white block">
+                  Warning Buzzer: {warningBuzzerEnabled ? `${warningTimeSeconds}s remaining` : 'Disabled'}
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {warningBuzzerEnabled ? `Sounds alert at ${warningTimeSeconds}s left` : 'No mid-round alert'} • Tone: {db?.settings.buzzer.warningSound || 'double_beep'}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setCurrentPage('warning-buzzer')}
+              className="px-3 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 hover:text-white border border-purple-500/40 font-semibold text-[11px] transition-all cursor-pointer shrink-0"
+            >
+              Configure Timing
+            </button>
+          </div>
         </div>
       </div>
 

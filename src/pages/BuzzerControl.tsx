@@ -12,12 +12,13 @@ import {
   QrCode,
   ExternalLink,
   Clock,
+  ChevronRight,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { soundEngine } from '../lib/audio';
 
 export const BuzzerControl: React.FC = () => {
-  const { db, triggerBuzzer, triggerWarningBuzzer, isConnected, soundUnlocked, unlockSound, updateSettings } = useApp();
+  const { db, triggerBuzzer, triggerWarningBuzzer, isConnected, soundUnlocked, unlockSound, updateSettings, setCurrentPage } = useApp();
 
   const [copied, setCopied] = useState(false);
   const [buzzerFiring, setBuzzerFiring] = useState(false);
@@ -156,6 +157,33 @@ export const BuzzerControl: React.FC = () => {
         <p className="text-xs sm:text-sm text-slate-400 mt-1">
           Manual buzzer controls, sound synthesis preview, and wireless mobile loudspeaker architecture.
         </p>
+      </div>
+
+      {/* Warning Buzzer System Direct Access Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/40 shadow-xl">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-blue-500/20 border border-blue-500/40 text-blue-300 flex items-center justify-center shrink-0">
+            <Bell className="w-6 h-6 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-base font-bold text-white font-['Outfit']">Looking for the Warning Buzzer System?</h4>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                TIMING & UPLOAD
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Upload custom warning audio, select alert tones, and configure warning timing (seconds remaining) for every round.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => setCurrentPage('warning-buzzer')}
+          className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-950/60 transition-all shrink-0 cursor-pointer"
+        >
+          <span>Open Warning Buzzer System</span>
+          <ChevronRight className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Main Large Manual Buzzer Trigger Button */}

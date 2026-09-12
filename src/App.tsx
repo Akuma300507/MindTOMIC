@@ -21,6 +21,7 @@ import { ExcelPage } from './pages/ExcelPage';
 import { EventHistory } from './pages/EventHistory';
 import { ProjectorDisplay } from './pages/ProjectorDisplay';
 import { Master } from './pages/Master';
+import { WarningBuzzer } from './pages/WarningBuzzer';
 import { StationModals } from './components/StationModals';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
@@ -77,6 +78,7 @@ const AppContent: React.FC = () => {
           )}
           {currentPage === 'round3' && <Round3 />}
           {currentPage === 'buzzer' && <BuzzerControl />}
+          {currentPage === 'warning-buzzer' && <WarningBuzzer />}
           {currentPage === 'results' && <Results />}
           {currentPage === 'settings' && <Settings />}
           {currentPage === 'excel' && <ExcelPage />}

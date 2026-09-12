@@ -14,6 +14,7 @@ import {
   Volume2,
   Tv,
   ShieldAlert,
+  Bell,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MindToMicLogo } from '../common/MindToMicLogo';
@@ -39,7 +40,8 @@ const navItems: NavItem[] = [
   { id: 'results', label: 'Results & Ranks', icon: Trophy, group: 'management' },
   { id: 'excel', label: 'Excel Import / Export', icon: FileSpreadsheet, group: 'management' },
   { id: 'history', label: 'Event History', icon: History, group: 'tools' },
-  { id: 'buzzer', label: 'Buzzer Control', icon: Volume2, group: 'tools' },
+  { id: 'buzzer', label: 'Finish Buzzer', icon: Volume2, group: 'tools' },
+  { id: 'warning-buzzer', label: 'Warning Buzzer System', icon: Bell, group: 'tools', badge: 'Alert' },
   { id: 'projector', label: 'Projector Display', icon: Tv, group: 'tools' },
   { id: 'settings', label: 'Settings', icon: Settings, group: 'tools' },
 ];

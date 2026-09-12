@@ -8,6 +8,7 @@ import {
   Volume2,
   CheckCircle2,
   Zap,
+  Bell,
 } from 'lucide-react';
 import { soundEngine } from '../../lib/audio';
 import { useApp } from '../../context/AppContext';
@@ -524,13 +525,29 @@ export const Timer: React.FC<TimerProps> = ({
         </div>
       )}
 
-      {/* Phase Badge */}
-      <div className="mb-4 z-10">
+      {/* Phase Badge & Warning Badge */}
+      <div className="mb-4 z-10 flex flex-wrap items-center justify-center gap-2">
         <span
           className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border transition-all duration-300 shadow-lg ${badgeColor}`}
         >
           {phaseLabel}
         </span>
+        {warningBuzzerEnabled && (warningTimeSeconds ?? 0) > 0 && phase === 'speech' && (
+          <span
+            className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider border transition-all duration-300 flex items-center gap-1.5 ${
+              remainingSeconds <= (warningTimeSeconds ?? 30) && remainingSeconds > 0
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 animate-pulse'
+                : 'bg-slate-800/80 text-blue-300 border-blue-500/30'
+            }`}
+          >
+            <Bell className="w-3 h-3 text-blue-400" />
+            <span>
+              {remainingSeconds <= (warningTimeSeconds ?? 30) && remainingSeconds > 0
+                ? 'Warning Alert Active'
+                : `Warning at ${warningTimeSeconds}s`}
+            </span>
+          </span>
+        )}
       </div>
 
       {/* Circular Animated Countdown Dial */}

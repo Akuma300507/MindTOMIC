@@ -370,6 +370,7 @@ export type PageId =
   | 'history'
   | 'settings'
   | 'buzzer'
+  | 'warning-buzzer'
   | 'projector';
 
 export interface ProjectorDevice {
