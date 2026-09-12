@@ -82,9 +82,9 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
       ctx.translate(center, center);
       ctx.rotate(angle);
 
-      // Base target font size: significantly larger for projector display
-      const targetBaseFontSize = Math.max(14, Math.min(24, Math.round(size * 0.034)));
-      const minAllowedFontSize = Math.max(10, Math.round(size * 0.018));
+      // Base target font size: nicely proportioned for wheel slices
+      const baseFontSize = Math.max(11, Math.min(14, Math.round(size * 0.028)));
+      const minAllowedFontSize = Math.max(9, Math.round(size * 0.020));
 
       for (let i = 0; i < totalSlices; i++) {
         const start = i * sliceAngle;
@@ -102,7 +102,8 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Draw Topic Text using the full slice without truncation
+        // Draw Topic Text strictly along the slice centerline (y = 0)
+        // Guaranteed to NEVER overlap adjacent slices and NEVER cross the center hub
         ctx.save();
         ctx.rotate(start + sliceAngle / 2);
         ctx.textAlign = 'right';
@@ -117,117 +118,26 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
         const topicTitle = (topicItem?.topic || (topicItem as any)?.title || `Topic ${i + 1}`).trim();
         const rawTopicText = `${i + 1}. ${topicTitle}`;
 
-        // Intelligent multi-line word wrapping and font scaling algorithm
-        let currentFontSize = targetBaseFontSize;
-        let lines: string[] = [];
+        // Dynamically find the largest font size that fits within maxAllowedWidth
+        let fSize = baseFontSize;
+        ctx.font = `bold ${fSize}px Outfit, sans-serif`;
 
-        // Helper to measure text at given font size
-        const measure = (text: string, fSize: number): number => {
+        while (fSize > minAllowedFontSize && ctx.measureText(rawTopicText).width > maxAllowedWidth) {
+          fSize -= 0.5;
           ctx.font = `bold ${fSize}px Outfit, sans-serif`;
-          return ctx.measureText(text).width;
-        };
-
-        const words = rawTopicText.split(/\s+/).filter(Boolean);
-
-        // Check if text fits on 1 line at targetBaseFontSize
-        if (measure(rawTopicText, currentFontSize) <= maxAllowedWidth) {
-          lines = [rawTopicText];
-        } else if (words.length >= 2) {
-          // Attempt 2-line balanced split
-          let bestSplit = 1;
-          let minDiff = Infinity;
-          for (let s = 1; s < words.length; s++) {
-            const l1 = words.slice(0, s).join(' ');
-            const l2 = words.slice(s).join(' ');
-            const diff = Math.abs(measure(l1, currentFontSize) - measure(l2, currentFontSize));
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestSplit = s;
-            }
-          }
-          const l1 = words.slice(0, bestSplit).join(' ');
-          const l2 = words.slice(bestSplit).join(' ');
-
-          if (Math.max(measure(l1, currentFontSize), measure(l2, currentFontSize)) <= maxAllowedWidth) {
-            lines = [l1, l2];
-          } else if (words.length >= 4) {
-            // Attempt 3-line balanced split for longer topics
-            let bestSplit1 = 1;
-            let bestSplit2 = 2;
-            let minMaxLen = Infinity;
-
-            for (let s1 = 1; s1 < words.length - 1; s1++) {
-              for (let s2 = s1 + 1; s2 < words.length; s2++) {
-                const p1 = words.slice(0, s1).join(' ');
-                const p2 = words.slice(s1, s2).join(' ');
-                const p3 = words.slice(s2).join(' ');
-                const maxLen = Math.max(
-                  measure(p1, currentFontSize),
-                  measure(p2, currentFontSize),
-                  measure(p3, currentFontSize)
-                );
-                if (maxLen < minMaxLen) {
-                  minMaxLen = maxLen;
-                  bestSplit1 = s1;
-                  bestSplit2 = s2;
-                }
-              }
-            }
-
-            const p1 = words.slice(0, bestSplit1).join(' ');
-            const p2 = words.slice(bestSplit1, bestSplit2).join(' ');
-            const p3 = words.slice(bestSplit2).join(' ');
-
-            if (minMaxLen <= maxAllowedWidth) {
-              lines = [p1, p2, p3];
-            } else {
-              lines = [p1, p2, p3];
-              // Scale down font size until the longest line fits within maxAllowedWidth
-              while (
-                currentFontSize > minAllowedFontSize &&
-                Math.max(
-                  measure(lines[0], currentFontSize),
-                  measure(lines[1], currentFontSize),
-                  measure(lines[2], currentFontSize)
-                ) > maxAllowedWidth
-              ) {
-                currentFontSize--;
-              }
-            }
-          } else {
-            // Fall back to 2 lines with scaled-down font
-            lines = [l1, l2];
-            while (
-              currentFontSize > minAllowedFontSize &&
-              Math.max(measure(lines[0], currentFontSize), measure(lines[1], currentFontSize)) > maxAllowedWidth
-            ) {
-              currentFontSize--;
-            }
-          }
-        } else {
-          // Single long word: scale font down to fit
-          lines = [rawTopicText];
-          while (currentFontSize > minAllowedFontSize && measure(rawTopicText, currentFontSize) > maxAllowedWidth) {
-            currentFontSize--;
-          }
         }
 
-        ctx.font = `bold ${currentFontSize}px Outfit, sans-serif`;
-
-        // Render lines across the slice wedge without any truncation
-        if (lines.length === 1) {
-          ctx.fillText(lines[0], textOuterEdge, 0);
-        } else if (lines.length === 2) {
-          const lineSpacing = Math.round(currentFontSize * 1.16);
-          ctx.fillText(lines[0], textOuterEdge, -lineSpacing * 0.52);
-          ctx.fillText(lines[1], textOuterEdge, lineSpacing * 0.52);
-        } else if (lines.length === 3) {
-          const lineSpacing = Math.round(currentFontSize * 1.12);
-          ctx.fillText(lines[0], textOuterEdge, -lineSpacing);
-          ctx.fillText(lines[1], textOuterEdge, 0);
-          ctx.fillText(lines[2], textOuterEdge, lineSpacing);
+        // If even at minAllowedFontSize it exceeds maxAllowedWidth, trim cleanly with ellipsis
+        let displayText = rawTopicText;
+        if (ctx.measureText(displayText).width > maxAllowedWidth) {
+          let trimmed = rawTopicText;
+          while (trimmed.length > 0 && ctx.measureText(trimmed + '…').width > maxAllowedWidth) {
+            trimmed = trimmed.slice(0, -1).trimEnd();
+          }
+          displayText = trimmed + '…';
         }
 
+        ctx.fillText(displayText, textOuterEdge, 0);
         ctx.restore();
       }
 

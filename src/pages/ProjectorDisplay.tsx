@@ -315,10 +315,11 @@ export const ProjectorDisplay: React.FC = () => {
 
   // Dynamic responsive wheel size strictly computed from actual available stage dimensions
   const wheelSize = useMemo(() => {
-    const availH = stageDim.height - 40; // leave room for badge above wheel
-    const availW = stageDim.width - 24;
+    // Leave safe overhead for contestant banner (40px), badge (28px), pointer (26px), and bottom breathing margin (20px)
+    const availH = stageDim.height - 114;
+    const availW = stageDim.width - 40;
     const avail = Math.min(availW, availH);
-    return Math.max(260, Math.min(840, Math.floor(avail)));
+    return Math.max(220, Math.min(560, Math.floor(avail)));
   }, [stageDim.width, stageDim.height]);
 
   // STRICT STATION ISOLATION: Default active topics for this station

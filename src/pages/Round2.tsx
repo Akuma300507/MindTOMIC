@@ -549,7 +549,7 @@ export const Round2: React.FC = () => {
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Canvas Spinning Wheel */}
-        <div className="lg:col-span-7 bg-slate-900/90 border border-purple-900/30 rounded-3xl p-6 shadow-2xl flex flex-col items-center justify-between space-y-6">
+        <div className="lg:col-span-7 bg-slate-900/90 border border-purple-900/30 rounded-3xl p-5 shadow-2xl flex flex-col items-center justify-between space-y-4">
           <div className="w-full flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5" />
@@ -567,11 +567,11 @@ export const Round2: React.FC = () => {
           </div>
 
           {/* Wheel Canvas & Top Pointer */}
-          <div className="relative flex items-center justify-center p-2">
+          <div className="relative flex items-center justify-center p-1">
             <WheelCanvas
               topics={activeWheelTopics}
               rotationAngle={rotationAngle}
-              size={460}
+              size={350}
               sliceColors={sliceColors}
             />
           </div>
