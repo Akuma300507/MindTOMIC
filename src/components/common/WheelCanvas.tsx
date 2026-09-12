@@ -37,15 +37,10 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-      // High-DPI physical backing store with CSS logical dimensions
-      if (canvas.width !== Math.round(size * dpr) || canvas.height !== Math.round(size * dpr)) {
-        canvas.width = Math.round(size * dpr);
-        canvas.height = Math.round(size * dpr);
+      if (canvas.width !== size || canvas.height !== size) {
+        canvas.width = size;
+        canvas.height = size;
       }
-
-      ctx.save();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       const center = size / 2;
       const radius = center - 14;
@@ -155,8 +150,6 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
       ctx.shadowBlur = 12;
       ctx.stroke();
       ctx.restore();
-
-      ctx.restore();
     },
     [topics, size, sliceColors]
   );
@@ -188,6 +181,9 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
 
       <canvas
         ref={canvasRef}
+        width={size}
+        height={size}
+        style={{ width: size, height: size }}
         className="rounded-full shadow-[0_0_50px_rgba(168,85,247,0.3)] bg-slate-950 block"
       />
     </div>
