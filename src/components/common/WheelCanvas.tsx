@@ -7,6 +7,7 @@ interface WheelCanvasProps {
   rotationAngle: number;
   size?: number;
   sliceColors?: string[];
+  fontSize?: number;
 }
 
 const DEFAULT_SLICE_COLORS = [
@@ -27,6 +28,7 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
   rotationAngle,
   size = 460,
   sliceColors = DEFAULT_SLICE_COLORS,
+  fontSize,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -59,7 +61,7 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
       const hubRadius = Math.max(26, Math.round(size * 0.072));
       const hubInnerEdge = hubRadius + 14;
       const textOuterEdge = radius - 12;
-      const maxAllowedWidth = Math.max(50, textOuterEdge - hubInnerEdge);
+      const maxAllowedWidth = Math.max(40, textOuterEdge - hubInnerEdge);
 
       ctx.clearRect(0, 0, size, size);
 
@@ -77,9 +79,11 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
       ctx.translate(center, center);
       ctx.rotate(angle);
 
-      // Base target font size: nicely proportioned for wheel slices
-      const baseFontSize = Math.max(11, Math.min(14, Math.round(size * 0.028)));
-      const minAllowedFontSize = Math.max(9, Math.round(size * 0.020));
+      // Base target font size: user configured font size or auto proportioned
+      const baseFontSize =
+        typeof fontSize === 'number' && fontSize > 0
+          ? fontSize
+          : Math.max(10, Math.min(14, Math.round(size * 0.028)));
 
       for (let i = 0; i < totalSlices; i++) {
         const start = i * sliceAngle;
@@ -97,8 +101,7 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Draw Topic Text strictly along the slice centerline (y = 0)
-        // Guaranteed to NEVER overlap adjacent slices and NEVER cross the center hub
+        // Draw Topic Text strictly inside slice boundaries with NO '..' ellipsis effect
         ctx.save();
         ctx.rotate(start + sliceAngle / 2);
         ctx.textAlign = 'right';
@@ -113,26 +116,92 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
         const topicTitle = (topicItem?.topic || (topicItem as any)?.title || `Topic ${i + 1}`).trim();
         const rawTopicText = `${i + 1}. ${topicTitle}`;
 
-        // Dynamically find the largest font size that fits within maxAllowedWidth
-        let fSize = baseFontSize;
-        ctx.font = `bold ${fSize}px Outfit, sans-serif`;
+        const words = rawTopicText.split(/\s+/).filter(Boolean);
 
-        while (fSize > minAllowedFontSize && ctx.measureText(rawTopicText).width > maxAllowedWidth) {
-          fSize -= 0.5;
-          ctx.font = `bold ${fSize}px Outfit, sans-serif`;
-        }
+        // Helper to measure text width
+        const measure = (text: string, sz: number) => {
+          ctx.font = `bold ${sz}px Outfit, sans-serif`;
+          return ctx.measureText(text).width;
+        };
 
-        // If even at minAllowedFontSize it exceeds maxAllowedWidth, trim cleanly with ellipsis
-        let displayText = rawTopicText;
-        if (ctx.measureText(displayText).width > maxAllowedWidth) {
-          let trimmed = rawTopicText;
-          while (trimmed.length > 0 && ctx.measureText(trimmed + '…').width > maxAllowedWidth) {
-            trimmed = trimmed.slice(0, -1).trimEnd();
+        // Determine if text can fit in 1 line or 2 lines strictly inside the slice bounds
+        // WITHOUT any '..' or '...' truncation effect
+        let useTwoLines = false;
+        let line1 = '';
+        let line2 = '';
+        let chosenFontSize = baseFontSize;
+
+        // Check if 1 line fits at baseFontSize
+        if (measure(rawTopicText, chosenFontSize) <= maxAllowedWidth) {
+          useTwoLines = false;
+        } else if (words.length >= 3) {
+          // Check if a balanced 2-line split can fit safely in the wider outer half of the wedge
+          let bestSplit = 1;
+          let minDiff = Infinity;
+          for (let s = 1; s < words.length; s++) {
+            const l1 = words.slice(0, s).join(' ');
+            const l2 = words.slice(s).join(' ');
+            const diff = Math.abs(measure(l1, chosenFontSize) - measure(l2, chosenFontSize));
+            if (diff < minDiff) {
+              minDiff = diff;
+              bestSplit = s;
+            }
           }
-          displayText = trimmed + '…';
+          const cand1 = words.slice(0, bestSplit).join(' ');
+          const cand2 = words.slice(bestSplit).join(' ');
+
+          let twoLineFont = chosenFontSize;
+          while (
+            twoLineFont > 7 &&
+            Math.max(measure(cand1, twoLineFont), measure(cand2, twoLineFont)) > maxAllowedWidth
+          ) {
+            twoLineFont -= 0.5;
+          }
+
+          const w1 = measure(cand1, twoLineFont);
+          const w2 = measure(cand2, twoLineFont);
+          const xInner1 = textOuterEdge - w1;
+          const xInner2 = textOuterEdge - w2;
+          const lineSpacing = twoLineFont * 0.55;
+          const textMaxY = lineSpacing + twoLineFont * 0.5;
+
+          // Geometric verification: at the innermost point of each line, is the text within the slice wedge?
+          const tanHalf = Math.tan(sliceAngle / 2);
+          const maxAllowedY1 = xInner1 * tanHalf * 0.86; // 14% safety buffer from slice border
+          const maxAllowedY2 = xInner2 * tanHalf * 0.86;
+
+          if (
+            textMaxY <= maxAllowedY1 &&
+            textMaxY <= maxAllowedY2 &&
+            xInner1 >= hubInnerEdge &&
+            xInner2 >= hubInnerEdge
+          ) {
+            useTwoLines = true;
+            line1 = cand1;
+            line2 = cand2;
+            chosenFontSize = twoLineFont;
+          }
         }
 
-        ctx.fillText(displayText, textOuterEdge, 0);
+        // If not using 2 lines, scale font on single line until full text fits without ANY ellipsis
+        if (!useTwoLines) {
+          chosenFontSize = baseFontSize;
+          while (chosenFontSize > 5 && measure(rawTopicText, chosenFontSize) > maxAllowedWidth) {
+            chosenFontSize -= 0.25;
+          }
+        }
+
+        ctx.font = `bold ${chosenFontSize}px Outfit, sans-serif`;
+
+        if (useTwoLines) {
+          const spacing = Math.round(chosenFontSize * 0.55);
+          ctx.fillText(line1, textOuterEdge, -spacing);
+          ctx.fillText(line2, textOuterEdge, spacing);
+        } else {
+          // Strictly on centerline (y = 0) - guaranteed 100% inside slice
+          ctx.fillText(rawTopicText, textOuterEdge, 0);
+        }
+
         ctx.restore();
       }
 
@@ -151,7 +220,7 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({
       ctx.stroke();
       ctx.restore();
     },
-    [topics, size, sliceColors]
+    [topics, size, sliceColors, fontSize]
   );
 
   useEffect(() => {

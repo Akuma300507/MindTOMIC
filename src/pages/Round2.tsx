@@ -12,6 +12,8 @@ import {
   Award,
   Users,
   Bell,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
@@ -40,7 +42,55 @@ export const Round2: React.FC = () => {
     currentStation,
     allStations,
     setCurrentPage,
+    updateSettings,
   } = useApp();
+
+  // Wheel topic font size adjustment state (synced with settings and localStorage)
+  const initialWheelFontSize = useMemo(() => {
+    if (typeof db?.settings.round2.wheelFontSize === 'number') {
+      return db.settings.round2.wheelFontSize;
+    }
+    const saved = localStorage.getItem('m2m_wheel_font_size');
+    if (saved) {
+      const num = parseInt(saved, 10);
+      if (!isNaN(num) && num >= 7 && num <= 24) return num;
+    }
+    return undefined;
+  }, [db?.settings?.round2?.wheelFontSize]);
+
+  const [wheelFontSize, setWheelFontSize] = useState<number | undefined>(initialWheelFontSize);
+
+  useEffect(() => {
+    if (typeof db?.settings.round2.wheelFontSize === 'number') {
+      setWheelFontSize(db.settings.round2.wheelFontSize);
+    }
+  }, [db?.settings?.round2?.wheelFontSize]);
+
+  const handleWheelFontChange = useCallback(async (delta: number) => {
+    let nextSize: number | undefined;
+    if (delta === 0) {
+      nextSize = undefined;
+      localStorage.removeItem('m2m_wheel_font_size');
+    } else {
+      const current = wheelFontSize || 11;
+      nextSize = Math.max(8, Math.min(22, current + delta));
+      localStorage.setItem('m2m_wheel_font_size', String(nextSize));
+    }
+    setWheelFontSize(nextSize);
+
+    if (updateSettings && db?.settings) {
+      try {
+        await updateSettings({
+          round2: {
+            ...db.settings.round2,
+            wheelFontSize: nextSize,
+          },
+        });
+      } catch (err) {
+        console.error('Failed to sync wheel font size to settings:', err);
+      }
+    }
+  }, [wheelFontSize, updateSettings, db?.settings]);
 
   // Round 1 qualification workflow:
   // ONLY contestants who are qualified in Round 1 advance to Round 2 (Strict - no override)
@@ -550,20 +600,55 @@ export const Round2: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Canvas Spinning Wheel */}
         <div className="lg:col-span-7 bg-slate-900/90 border border-purple-900/30 rounded-3xl p-5 shadow-2xl flex flex-col items-center justify-between space-y-4">
-          <div className="w-full flex items-center justify-between">
+          <div className="w-full flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5" />
               Dynamic Wheel Arena ({activeWheelTopics.length} Slices)
             </span>
 
-            <button
-              onClick={handleSpin}
-              disabled={isSpinning || timerPhase === 'speech'}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white font-bold text-xs shadow-lg shadow-purple-950/60 transition-all active:scale-95"
-            >
-              <RotateCw className={`w-4 h-4 ${isSpinning ? 'animate-spin' : ''}`} />
-              <span>{isSpinning ? 'SPINNING...' : 'SPIN THE WHEEL'}</span>
-            </button>
+            {/* Font Size Adjuster for Wheel Topics */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-950/80 border border-purple-800/60 shadow-inner text-xs">
+                <span className="text-[10px] font-mono font-bold text-purple-300 uppercase tracking-wider hidden sm:inline mr-1">
+                  Font:
+                </span>
+                <button
+                  onClick={() => handleWheelFontChange(-1)}
+                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-purple-900/60 text-slate-200 hover:text-white border border-slate-700 font-bold transition-all cursor-pointer active:scale-90"
+                  title="Decrease wheel topic font size"
+                >
+                  <Minus className="w-3 h-3" />
+                </button>
+                <span className="font-mono font-bold text-xs text-amber-300 min-w-[32px] text-center">
+                  {wheelFontSize ? `${wheelFontSize}px` : 'Auto'}
+                </span>
+                <button
+                  onClick={() => handleWheelFontChange(+1)}
+                  className="w-5 h-5 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-purple-900/60 text-slate-200 hover:text-white border border-slate-700 font-bold transition-all cursor-pointer active:scale-90"
+                  title="Increase wheel topic font size"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+                {wheelFontSize !== undefined && (
+                  <button
+                    onClick={() => handleWheelFontChange(0)}
+                    className="ml-1 text-[10px] text-slate-400 hover:text-slate-200 px-1 py-0.5 rounded transition-colors cursor-pointer"
+                    title="Reset to Auto font sizing"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={handleSpin}
+                disabled={isSpinning || timerPhase === 'speech'}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white font-bold text-xs shadow-lg shadow-purple-950/60 transition-all active:scale-95 cursor-pointer"
+              >
+                <RotateCw className={`w-4 h-4 ${isSpinning ? 'animate-spin' : ''}`} />
+                <span>{isSpinning ? 'SPINNING...' : 'SPIN THE WHEEL'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Wheel Canvas & Top Pointer */}
@@ -573,6 +658,7 @@ export const Round2: React.FC = () => {
               rotationAngle={rotationAngle}
               size={350}
               sliceColors={sliceColors}
+              fontSize={wheelFontSize}
             />
           </div>
 

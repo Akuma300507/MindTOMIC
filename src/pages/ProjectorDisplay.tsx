@@ -20,6 +20,8 @@ import {
   Bell,
   X,
   Monitor,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -50,7 +52,45 @@ export const ProjectorDisplay: React.FC = () => {
     projectorDeviceId,
     projectorPingNotification,
     clearProjectorPingNotification,
+    updateSettings,
   } = useApp();
+
+  // Wheel topic font size adjustment state (synced with settings and localStorage)
+  const wheelFontSize = useMemo(() => {
+    if (typeof db?.settings.round2.wheelFontSize === 'number') {
+      return db.settings.round2.wheelFontSize;
+    }
+    const saved = localStorage.getItem('m2m_wheel_font_size');
+    if (saved) {
+      const num = parseInt(saved, 10);
+      if (!isNaN(num) && num >= 7 && num <= 24) return num;
+    }
+    return undefined;
+  }, [db?.settings?.round2?.wheelFontSize]);
+
+  const handleWheelFontAdjust = useCallback(async (delta: number) => {
+    let nextSize: number | undefined;
+    if (delta === 0) {
+      nextSize = undefined;
+      localStorage.removeItem('m2m_wheel_font_size');
+    } else {
+      const current = wheelFontSize || 11;
+      nextSize = Math.max(8, Math.min(22, current + delta));
+      localStorage.setItem('m2m_wheel_font_size', String(nextSize));
+    }
+    if (updateSettings && db?.settings) {
+      try {
+        await updateSettings({
+          round2: {
+            ...db.settings.round2,
+            wheelFontSize: nextSize,
+          },
+        });
+      } catch (err) {
+        console.error('Failed to sync wheel font on projector:', err);
+      }
+    }
+  }, [wheelFontSize, updateSettings, db?.settings]);
 
   useEffect(() => {
     if (projectorPingNotification) {
@@ -973,13 +1013,13 @@ export const ProjectorDisplay: React.FC = () => {
                   <Disc className="w-4 h-4 animate-spin" />
                   WHEEL IS SPINNING...
                 </span>
-                <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} />
+                <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} fontSize={wheelFontSize} />
               </div>
             ) : currentRoundTopic ? (
               <div className="relative w-full h-full flex-1 min-h-0 flex flex-col items-center justify-center">
                 {/* Background Wheel: Centered and slightly scaled/blurred to provide depth */}
                 <div className="transition-all duration-700 scale-90 opacity-25 blur-[1px]">
-                  <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} />
+                  <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} fontSize={wheelFontSize} />
                 </div>
 
                 {/* Animated Topic: Bursts OUT from the wheel in a high-energy rotating motion */}
@@ -1030,11 +1070,43 @@ export const ProjectorDisplay: React.FC = () => {
               </div>
             ) : (
               <div className="flex flex-col items-center space-y-1.5 animate-in fade-in">
-                <span className="text-[10px] sm:text-xs font-mono font-bold text-purple-400 uppercase tracking-widest flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  TOPIC WHEEL • READY TO SPIN
-                </span>
-                <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} />
+                <div className="flex items-center gap-2.5">
+                  <span className="text-[10px] sm:text-xs font-mono font-bold text-purple-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    TOPIC WHEEL • READY TO SPIN
+                  </span>
+                  {/* Wheel Font Size Stepper on Projector Display */}
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900/90 border border-purple-800/60 text-[10px] font-mono shadow">
+                    <span className="text-slate-400 mr-0.5 hidden sm:inline">Font:</span>
+                    <button
+                      onClick={() => handleWheelFontAdjust(-1)}
+                      className="w-4 h-4 rounded bg-slate-800 hover:bg-purple-800 text-slate-200 flex items-center justify-center font-bold cursor-pointer transition-colors"
+                      title="Decrease wheel topic font size"
+                    >
+                      <Minus className="w-2.5 h-2.5" />
+                    </button>
+                    <span className="text-amber-300 font-bold px-1 min-w-[28px] text-center">
+                      {wheelFontSize ? `${wheelFontSize}px` : 'Auto'}
+                    </span>
+                    <button
+                      onClick={() => handleWheelFontAdjust(+1)}
+                      className="w-4 h-4 rounded bg-slate-800 hover:bg-purple-800 text-slate-200 flex items-center justify-center font-bold cursor-pointer transition-colors"
+                      title="Increase wheel topic font size"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                    </button>
+                    {wheelFontSize !== undefined && (
+                      <button
+                        onClick={() => handleWheelFontAdjust(0)}
+                        className="ml-1 text-[9px] text-slate-400 hover:text-slate-200 cursor-pointer"
+                        title="Reset to Auto font size"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} fontSize={wheelFontSize} />
               </div>
             )}
           </div>

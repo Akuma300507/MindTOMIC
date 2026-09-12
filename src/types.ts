@@ -171,6 +171,7 @@ export interface EventSettings {
     topicReuseAllowed: boolean;
     warningBuzzerEnabled?: boolean; // default true
     warningTimeSeconds?: number; // default 30 (seconds remaining)
+    wheelFontSize?: number; // user configurable font size for wheel slices
   };
   round3: {
     prepEnabled: boolean; // default false
