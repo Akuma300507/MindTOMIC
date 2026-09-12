@@ -30,7 +30,6 @@ export const Round1: React.FC = () => {
     setCurrentStationId,
     currentStation,
     allStations,
-    setStationImage,
   } = useApp();
 
   const [selectedImage, setSelectedImage] = useState<EventImage | null>(null);
@@ -103,27 +102,19 @@ export const Round1: React.FC = () => {
   const handleRandomImage = useCallback(async () => {
     try {
       setPoolNotice(null);
-      const chosen = await assignStationImage(currentStationId || 'station-a');
-      if (chosen) setSelectedImage(chosen);
+      const chosen = await assignStationImage(currentStationId);
+      setSelectedImage(chosen);
     } catch (err: any) {
-      if (err?.message && !err.message.includes('fetch') && !err.message.includes('Network') && !err.message.includes('Failed')) {
-        setPoolNotice(err.message);
-      } else {
-        console.warn('Random image assignment warning:', err);
-      }
+      setPoolNotice(err.message || 'No unused images remaining. Reset pool or enable reuse in settings.');
     }
   }, [assignStationImage, currentStationId]);
 
-  // Select initial image if none selected and synchronize to current station
+  // Select initial image if none selected
   useEffect(() => {
     if (!selectedImage && availableImages.length > 0) {
-      const initial = availableImages[0];
-      setSelectedImage(initial);
-      if (currentStationId && currentStationId !== 'all' && setStationImage && !currentStation?.selectedImage) {
-        setStationImage(currentStationId, initial).catch(() => {});
-      }
+      setSelectedImage(availableImages[0]);
     }
-  }, [availableImages, selectedImage, currentStationId, setStationImage, currentStation?.selectedImage]);
+  }, [availableImages, selectedImage]);
 
   // Image rotation state for projector and operator
   const [imageRotation, setImageRotation] = useState<number>(0);
@@ -452,9 +443,6 @@ export const Round1: React.FC = () => {
                   onClick={() => {
                     setSelectedImage(img);
                     setShowImagePicker(false);
-                    if (currentStationId && currentStationId !== 'all' && setStationImage) {
-                      setStationImage(currentStationId, img).catch(() => {});
-                    }
                   }}
                   className="cursor-pointer rounded-xl overflow-hidden border border-slate-800 hover:border-purple-500 transition-all hover:scale-102 bg-slate-950 relative group"
                 >

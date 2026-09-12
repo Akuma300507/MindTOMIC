@@ -19,9 +19,6 @@ import type {
 import { api } from '../lib/api';
 import { soundEngine } from '../lib/audio';
 import { getServerNow, recordServerTimestamp } from '../lib/timeSync';
-import { generateUUID, getDeviceId } from '../lib/offline/device';
-import { syncEngine, type SyncEngineState } from '../lib/offline/syncEngine';
-import { saveCachedDb, getCachedDb } from '../lib/offline/offlineDb';
 
 export interface TakeoverModalInfo {
   stationId: string;
@@ -47,10 +44,6 @@ interface AppContextType {
   unlockSound: () => void;
   isFullscreen: boolean;
   toggleFullscreen: () => void;
-
-  // Offline & Synchronization State
-  syncState: SyncEngineState;
-  syncNow: () => Promise<void>;
 
   // Station & Device Management
   deviceId: string;
@@ -90,7 +83,6 @@ interface AppContextType {
   }) => Promise<void>;
   pingStation: (stationId: string, senderName?: string, message?: string) => Promise<void>;
   assignStationImage: (stationId: string) => Promise<EventImage>;
-  setStationImage: (stationId: string, image: EventImage) => Promise<void>;
   rotateStationImage: (stationId: string, rotation?: number) => Promise<void>;
   spinStationTopic: (stationId: string, wheelTopicIds?: string[]) => Promise<{ topic: Topic; targetIndex?: number; wheelTopics?: Topic[]; startedAt: number; durationMs: number; station?: StationState }>;
   completeStationSpin: (stationId: string) => Promise<void>;
@@ -215,37 +207,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [db, setDb] = useState<AppDatabase | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Synchronous Database Reference for instant zero-latency offline operations
-  const dbRef = useRef<AppDatabase | null>(null);
-  useEffect(() => {
-    dbRef.current = db;
-  }, [db]);
-
-  // Stable Persistent Device Identification
-  const [deviceId] = useState<string>(() => getDeviceId());
-
-  // Offline Synchronization State
-  const [syncState, setSyncState] = useState<SyncEngineState>(() => syncEngine.getState());
-
-  useEffect(() => {
-    const unsubscribe = syncEngine.subscribe((newSyncState) => {
-      setSyncState(newSyncState);
-    });
-
-    const unsubscribeServerState = syncEngine.onServerState((freshDb) => {
-      setDb(freshDb);
-      saveCachedDb(freshDb).catch(() => {});
-    });
-
-    return () => {
-      unsubscribe();
-      unsubscribeServerState();
-    };
-  }, []);
-
-  const syncNow = useCallback(async () => {
-    await syncEngine.syncNow();
-  }, []);
+  // Stable Device Identification
+  const [deviceId] = useState<string>(() => {
+    try {
+      let id = localStorage.getItem('m2m_device_id');
+      if (!id) {
+        id = `dev-${Math.random().toString(36).substring(2, 9)}`;
+        localStorage.setItem('m2m_device_id', id);
+      }
+      return id;
+    } catch {
+      return `dev-${Date.now()}`;
+    }
+  });
 
   // Unique Projector Device ID (User requirement: Check localStorage for 'projector_device_id', if absent generate and save)
   const [projectorDeviceId] = useState<string>(() => {
@@ -401,7 +375,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return 'dashboard';
   });
-  const [activeParticipant, setActiveParticipantState] = useState<Participant | null>(null);
+  const [activeParticipant, setActiveParticipant] = useState<Participant | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [soundUnlocked, setSoundUnlocked] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -468,302 +442,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     playBuzzerLocal();
   }, [playBuzzerLocal]);
 
-  // Offline Cross-Tab & Cross-Window Synchronization via BroadcastChannel
-  // Synchronizes Projector Displays, Station Controllers, and Master Monitors across windows without network
-  const stationChannelRef = useRef<BroadcastChannel | null>(null);
-
-  const broadcastStationLocal = useCallback((type: string, data: any) => {
-    try {
-      stationChannelRef.current?.postMessage({ type, ...data });
-    } catch {
-      // BroadcastChannel optional fallback
-    }
-  }, []);
-
-  const setActiveParticipant = useCallback(
-    (participantOrFn: Participant | null | ((prev: Participant | null) => Participant | null)) => {
-      setActiveParticipantState((prev) => {
-        const next = typeof participantOrFn === 'function' ? participantOrFn(prev) : participantOrFn;
-        const stId = currentStationIdRef.current;
-        if (stId && stId !== 'all') {
-          setDb((currentDb) => {
-            if (!currentDb) return currentDb;
-            const targetStation = currentDb.stations?.[stId];
-            if (!targetStation) return currentDb;
-            if (
-              targetStation.activeParticipantId === (next?.id || null) &&
-              targetStation.activeParticipant?.id === (next?.id || null)
-            ) {
-              return currentDb;
-            }
-            const updatedStation: StationState = {
-              ...targetStation,
-              activeParticipantId: next?.id || null,
-              activeParticipant: next,
-            };
-            const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
-            const updatedDb = { ...currentDb, stations };
-            dbRef.current = updatedDb;
-            saveCachedDb(updatedDb).catch(() => {});
-            broadcastStationLocal('station_updated', { station: updatedStation });
-            return updatedDb;
-          });
-          api.setStationParticipant(stId, next?.id || null).catch(() => {});
-        }
-        return next;
-      });
-    },
-    [broadcastStationLocal]
-  );
-
-  useEffect(() => {
-    if (typeof BroadcastChannel === 'undefined') return;
-
-    const channel = new BroadcastChannel('mindtomic_station_sync');
-    stationChannelRef.current = channel;
-
-    channel.onmessage = (event) => {
-      const msg = event.data;
-      if (!msg || !msg.type) return;
-
-      if (msg.type === 'db_sync' && msg.db) {
-        setDb((prev) => {
-          if (!prev) return msg.db;
-          if (JSON.stringify(prev) === JSON.stringify(msg.db)) return prev;
-          return msg.db;
-        });
-        dbRef.current = msg.db;
-        saveCachedDb(msg.db, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-      } else if (msg.type === 'station_updated' && msg.station) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const stations = { ...(prev.stations || {}), [msg.station.id]: msg.station };
-          const updated: AppDatabase = {
-            ...prev,
-            stations,
-            liveSync: {
-              ...prev.liveSync,
-              stationStates: stations,
-            },
-          };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'stations_updated' && msg.stations) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const stations = { ...(prev.stations || {}) };
-          if (Array.isArray(msg.stations)) {
-            msg.stations.forEach((s: StationState) => {
-              stations[s.id] = s;
-            });
-          } else {
-            Object.assign(stations, msg.stations);
-          }
-          const updated: AppDatabase = {
-            ...prev,
-            stations,
-            liveSync: {
-              ...prev.liveSync,
-              stationStates: stations,
-            },
-          };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'wheel_spin_started' && msg.spinData) {
-        const { spinData } = msg;
-        setDb((prev) => {
-          if (!prev) return prev;
-          const targetStation = prev.stations?.[spinData.stationId];
-          if (!targetStation) return prev;
-          const updatedStation: StationState = {
-            ...targetStation,
-            status: 'SPINNING',
-            wheelSpin: {
-              isSpinning: true,
-              targetTopicId: spinData.topic.id,
-              targetTopicTitle: spinData.topic.topic,
-              targetTopicCategory: spinData.topic.category,
-              targetSliceIndex: spinData.targetIndex ?? 0,
-              wheelTopics: spinData.wheelTopics,
-              startedAt: spinData.startedAt,
-              durationMs: spinData.durationMs,
-            },
-          };
-          const stations = { ...prev.stations, [spinData.stationId]: updatedStation };
-          const updated: AppDatabase = {
-            ...prev,
-            stations,
-            liveSync: {
-              ...prev.liveSync,
-              stationStates: stations,
-            },
-          };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'participant_created' && msg.participant) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          if (prev.participants.some((p) => p.id === msg.participant.id)) return prev;
-          const updated = { ...prev, participants: [...prev.participants, msg.participant] };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'participant_updated' && msg.participant) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const updated = {
-            ...prev,
-            participants: prev.participants.map((p) => (p.id === msg.participant.id ? { ...p, ...msg.participant } : p)),
-          };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-        setActiveParticipantState((curr) => (curr?.id === msg.participant.id ? { ...curr, ...msg.participant } : curr));
-      } else if (msg.type === 'participant_deleted' && msg.id) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const updated = {
-            ...prev,
-            participants: prev.participants.filter((p) => p.id !== msg.id),
-          };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-        setActiveParticipantState((curr) => (curr?.id === msg.id ? null : curr));
-      } else if (msg.type === 'topics_updated' && msg.topics) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const updated = { ...prev, topics: msg.topics };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'images_updated' && msg.images) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const updated = { ...prev, images: msg.images };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'settings_updated' && msg.settings) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const updated = { ...prev, settings: msg.settings };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'result_added' && msg.result) {
-        setDb((prev) => {
-          if (!prev) return prev;
-          const key = msg.round === 1 ? 'round1Results' : msg.round === 2 ? 'round2Results' : 'round3Results';
-          const list = (prev as any)[key] || [];
-          const updated = {
-            ...prev,
-            [key]: [...list.filter((r: any) => r.id !== msg.result.id), msg.result],
-          };
-          dbRef.current = updated;
-          saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          return updated;
-        });
-      } else if (msg.type === 'buzzer_trigger') {
-        const { payload } = msg;
-        const devStation = currentStationIdRef.current;
-        if (payload?.stationId && devStation && devStation !== 'all' && payload.stationId !== devStation) {
-          return;
-        }
-        playBuzzerWithDebounce(payload?.eventId);
-      }
-    };
-
-    return () => {
-      channel.close();
-      stationChannelRef.current = null;
-    };
-  }, [playBuzzerWithDebounce]);
-
-  // Cross-Tab & Cross-Window Instant Synchronization via Storage Events
-  // When ANY tab or window writes to IndexedDB cache, this guarantees other windows (like Projector)
-  // pick up the change immediately in 0ms without requiring F5.
-  useEffect(() => {
-    const handleStorageEvent = async (e: StorageEvent) => {
-      if (e.key === 'm2m_offline_sync_pulse' || e.key === 'm2m_last_sync_time') {
-        try {
-          const cached = await getCachedDb();
-          if (cached && cached.stations) {
-            setDb((prev) => {
-              if (!prev) return cached;
-              if (JSON.stringify(prev) === JSON.stringify(cached)) return prev;
-              return cached;
-            });
-            dbRef.current = cached;
-          }
-        } catch {}
-      } else if (e.key === 'm2m_current_station_id' && e.newValue) {
-        if (e.newValue !== currentStationIdRef.current) {
-          setCurrentStationIdState(e.newValue);
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageEvent);
-    return () => window.removeEventListener('storage', handleStorageEvent);
-  }, []);
-
   const reloadState = useCallback(async () => {
     try {
-      const state = await api.getState(800);
-      if (state && state.stations) {
-        setDb((prev) => {
-          if (!prev) return state;
-          if (JSON.stringify(prev) === JSON.stringify(state)) return prev;
-          return state;
-        });
-        dbRef.current = state;
-        saveCachedDb(state, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-      }
-    } catch {
-      // Offline fallback: restore and sync from IndexedDB
-      const cached = await getCachedDb();
-      if (cached && cached.stations) {
-        setDb((prev) => {
-          if (!prev) return cached;
-          if (JSON.stringify(prev) === JSON.stringify(cached)) return prev;
-          return cached;
-        });
-        dbRef.current = cached;
-      }
+      const state = await api.getState();
+      setDb(state);
+      // If no active participant yet and participants exist, set first active safely (respecting current station)
+      setActiveParticipant((current) => {
+        if (current) return current;
+        if (!state.participants || state.participants.length === 0) return null;
+        if (currentStationId && currentStationId !== 'all') {
+          const stationMatch = state.participants.find((p) => p.stationId === currentStationId);
+          if (stationMatch) return stationMatch;
+        }
+        return state.participants[0] ?? null;
+      });
+    } catch (err) {
+      console.error('Failed to load initial state:', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    // Immediate optimistic boot from IndexedDB cache so page loads instantly offline
-    getCachedDb().then((cached) => {
-      if (cached) {
-        setDb((curr) => curr || cached);
-        setLoading(false);
-        if (deviceRoleRef.current === 'station' && currentStationIdRef.current && currentStationIdRef.current !== 'all') {
-          setActiveParticipantState((current) => {
-            if (current) return current;
-            const stationMatches = cached.participants?.filter((p) => p.stationId === currentStationIdRef.current);
-            return stationMatches?.[0] || null;
-          });
-        }
-      }
-    }).catch(() => {});
-
     reloadState();
     refreshConnectedProjectors();
   }, [reloadState, refreshConnectedProjectors]);
@@ -794,25 +494,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Synchronize active participant across station
   useEffect(() => {
     if (activeParticipant && currentStationId) {
-      setDb((prev) => {
-        if (!prev) return prev;
-        const targetStation = prev.stations?.[currentStationId];
-        if (!targetStation) return prev;
-        if (targetStation.activeParticipantId === activeParticipant.id) return prev;
-        const updatedStation: StationState = {
-          ...targetStation,
-          activeParticipantId: activeParticipant.id,
-          activeParticipant,
-        };
-        const stations = { ...(prev.stations || {}), [currentStationId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
-      });
       api.setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
     }
-  }, [activeParticipant, currentStationId, broadcastStationLocal]);
+  }, [activeParticipant?.id, currentStationId]);
 
   // Synchronize round switch when operator navigates pages
   useEffect(() => {
@@ -822,34 +506,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     else if (currentPage === 'round3') roundNum = 3;
 
     if (roundNum && currentStationId) {
-      setDb((prev) => {
-        if (!prev) return prev;
-        const targetStation = prev.stations?.[currentStationId];
-        if (!targetStation) return prev;
-        if (targetStation.currentRound === roundNum) return prev;
-        const updatedStation: StationState = {
-          ...targetStation,
-          currentRound: roundNum,
-          status: 'WAITING',
-          timerMode: 'idle',
-          isTimerRunning: false,
-          timerStatus: 'idle',
-        };
-        const stations = { ...(prev.stations || {}), [currentStationId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
-      });
       api.setStationRound(currentStationId, roundNum).catch(() => {});
     }
-  }, [currentPage, currentStationId, broadcastStationLocal]);
+  }, [currentPage, currentStationId]);
 
   // Station claim & takeover
   const claimStation = useCallback(
     async (stationId: string, force: boolean = false): Promise<boolean> => {
       try {
-        const station = (dbRef.current || db)?.stations?.[stationId];
+        const station = db?.stations?.[stationId];
         const res = await api.claimStation(
           stationId,
           deviceId,
@@ -872,44 +537,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setCurrentStationId(stationId);
           setDb((prev) => {
             if (!prev) return prev;
-            const stations = { ...(prev.stations || {}), [stationId]: res.station! };
-            const nextDb = { ...prev, stations };
-            dbRef.current = nextDb;
-            return nextDb;
+            return {
+              ...prev,
+              stations: { ...(prev.stations || {}), [stationId]: res.station! },
+            };
           });
           return true;
         }
         return false;
       } catch (err) {
-        console.warn('[Offline] Network offline, claiming station locally:', err);
-        setCurrentStationId(stationId);
-        setDb((prev) => {
-          if (!prev) return prev;
-          const current = prev.stations?.[stationId] || {
-            id: stationId,
-            name: `Station ${stationId.replace('station-', '').toUpperCase()}`,
-            currentRound: 1,
-            activeParticipantId: null,
-            activeParticipant: null,
-            status: 'WAITING',
-          };
-          const updated: StationState = {
-            ...current,
-            currentDevice: deviceId,
-            currentDeviceName: `${current.name || 'Station'} Operator`,
-            claimedAt: Date.now(),
-          };
-          const stations = { ...(prev.stations || {}), [stationId]: updated };
-          const nextDb = { ...prev, stations };
-          dbRef.current = nextDb;
-          saveCachedDb(nextDb).catch(() => {});
-          broadcastStationLocal('station_updated', { station: updated });
-          return nextDb;
-        });
-        return true;
+        console.error('Failed to claim station:', err);
+        return false;
       }
     },
-    [db, deviceId, setCurrentStationId, broadcastStationLocal]
+    [db?.stations, deviceId, setCurrentStationId]
   );
 
   const closeTakeoverModal = useCallback(
@@ -931,11 +572,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (stationId?: string) => {
       const targetId = stationId || currentStationId;
       if (targetId) {
-        try {
-          await api.releaseStation(targetId, deviceId);
-        } catch (err) {
-          console.warn('[Offline] releaseStation ignored offline error:', err);
-        }
+        await api.releaseStation(targetId, deviceId);
       }
     },
     [currentStationId, deviceId]
@@ -944,61 +581,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Station Actions
   const setStationRound = useCallback(
     async (stationId: string, round: 1 | 2 | 3) => {
+      const res = await api.setStationRound(stationId, round);
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
-        if (!targetStation) return prev;
-        const updatedStation: StationState = {
-          ...targetStation,
-          currentRound: round,
-          status: 'WAITING',
-          timerMode: 'idle',
-          isTimerRunning: false,
-          timerStatus: 'idle',
+        return {
+          ...prev,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
         };
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
       });
-
-      try {
-        await api.setStationRound(stationId, round);
-      } catch (err) {
-        console.warn('[Offline] setStationRound saved locally:', err);
-      }
     },
-    [broadcastStationLocal]
+    []
   );
 
   const setStationParticipant = useCallback(
     async (stationId: string, participantId: string | null) => {
+      const res = await api.setStationParticipant(stationId, participantId);
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
-        if (!targetStation) return prev;
-        const participant =
-          participantId && prev.participants ? prev.participants.find((p) => p.id === participantId) || null : null;
-        const updatedStation: StationState = {
-          ...targetStation,
-          activeParticipantId: participantId,
-          activeParticipant: participant,
+        return {
+          ...prev,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
         };
-        const stations = { ...(prev.stations || {}), [stationId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
       });
-
-      try {
-        await api.setStationParticipant(stationId, participantId);
-      } catch (err) {
-        console.warn('[Offline] setStationParticipant saved locally:', err);
-      }
     },
-    [broadcastStationLocal]
+    []
   );
 
   const updateStationHandler = useCallback(
@@ -1014,21 +620,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         location?: string;
       }
     ) => {
+      const res = await api.updateStationHandler(stationId, data);
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
-        if (!targetStation) return prev;
-        const updatedStation: StationState = {
-          ...targetStation,
-          ...(data.name ? { name: data.name } : {}),
-          ...(data.location ? { location: data.location } : {}),
-          handlerName: data.handlerName !== undefined ? data.handlerName : targetStation.handlerName,
-          handlerPhone: data.handlerPhone !== undefined ? data.handlerPhone : targetStation.handlerPhone,
-          handlerRole: data.handlerRole !== undefined ? data.handlerRole : targetStation.handlerRole,
-          handlerStatus: data.handlerStatus !== undefined ? data.handlerStatus : targetStation.handlerStatus,
-          handlerNotes: data.handlerNotes !== undefined ? data.handlerNotes : targetStation.handlerNotes,
-        };
-        const updatedStations = { ...(prev.stations || {}), [stationId]: updatedStation };
+        const updatedStations = { ...(prev.stations || {}), [stationId]: res.station };
         const updatedSettingsStations = (prev.settings.stations || []).map((s) =>
           s.id === stationId
             ? {
@@ -1043,7 +638,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               }
             : s
         );
-        const updatedDb = {
+        return {
           ...prev,
           stations: updatedStations,
           settings: {
@@ -1051,417 +646,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stations: updatedSettingsStations,
           },
         };
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
       });
-
-      try {
-        await api.updateStationHandler(stationId, data);
-      } catch (err) {
-        console.warn('[Offline] updateStationHandler saved locally:', err);
-      }
     },
-    [broadcastStationLocal]
+    []
   );
 
   const pingStation = useCallback(
     async (stationId: string, senderName?: string, message?: string) => {
-      try {
-        await api.pingStation(stationId, senderName, message);
-      } catch (err) {
-        console.warn('[Offline] pingStation skipped offline:', err);
-      }
+      await api.pingStation(stationId, senderName, message);
     },
     []
   );
 
   const assignStationImage = useCallback(
     async (stationId: string) => {
-      const currentDb = dbRef.current || db;
-      if (!currentDb) {
-        throw new Error('Database not loaded yet');
-      }
-
-      const stId = stationId && stationId !== 'all' ? stationId : (currentDb.settings?.stations?.[0]?.id || 'station-a');
-      const targetStation = currentDb.stations?.[stId] || {
-        id: stId,
-        name: `Station ${stId.replace('station-', '').toUpperCase()}`,
-        currentRound: 1,
-        activeParticipantId: null,
-        activeParticipant: null,
-        status: 'WAITING',
-      };
-
-      // Filter available images strictly for THIS station to prevent repeating across stations
-      const stationCandidates = currentDb.images.filter(
-        (img) => img.stationId === stId || (targetStation.name && img.stationId === targetStation.name)
+      const station = db?.stations?.[stationId];
+      const res = await api.assignStationImage(
+        stationId,
+        station?.activeParticipantId || undefined,
+        station?.activeParticipant?.name || undefined
       );
-      let candidates: EventImage[] = [];
-      if (stationCandidates.length > 0) {
-        const available = stationCandidates.filter((img) => img.status === 'available');
-        candidates = available.length > 0 ? available : (currentDb.settings?.round1?.allowImageReuse ? stationCandidates : []);
-      } else {
-        const otherStationImages = currentDb.images.filter(
-          (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stId && img.stationId !== targetStation.name
-        );
-        const universalPool = currentDb.images.filter((img) => !otherStationImages.includes(img));
-        const available = universalPool.filter((img) => img.status === 'available');
-        candidates = available.length > 0 ? available : (currentDb.settings?.round1?.allowImageReuse ? universalPool : []);
-      }
-
-      if (candidates.length === 0) {
-        throw new Error('No unused images remaining for this station. Reset pool or enable reuse in settings.');
-      }
-
-      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-      const allowReuse = currentDb.settings?.round1?.allowImageReuse;
-      const updatedImages = allowReuse
-        ? currentDb.images
-        : currentDb.images.map((img) =>
-            img.id === chosen.id
-              ? {
-                  ...img,
-                  status: 'used' as const,
-                  usedByParticipantId: targetStation.activeParticipantId || undefined,
-                  usedByParticipantName: targetStation.activeParticipant?.name || undefined,
-                  usedAt: new Date().toISOString(),
-                }
-              : img
-          );
-
-      const updatedStation: StationState = {
-        ...targetStation,
-        selectedImage: chosen,
-        selectedImageId: chosen.id,
-        imageRotation: 0,
-        currentRound: 1,
-      };
-
-      const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
-      const updatedDb: AppDatabase = { ...currentDb, images: updatedImages, stations };
-      dbRef.current = updatedDb;
-      setDb(updatedDb);
-      saveCachedDb(updatedDb).catch(() => {});
-      broadcastStationLocal('station_updated', { station: updatedStation });
-      broadcastStationLocal('images_updated', { images: updatedImages });
-
-      // Synchronize with server if online; gracefully ignore network error if offline!
-      try {
-        await api.assignStationImage(
-          stId,
-          targetStation.activeParticipantId || undefined,
-          targetStation.activeParticipant?.name || undefined
-        );
-      } catch (err) {
-        console.warn('[Offline] assignStationImage processed offline locally:', err);
-      }
-
-      return chosen;
+      setDb((prev) => {
+        if (!prev) return prev;
+        const updatedImages = prev.images.map((img) => (img.id === res.image.id ? res.image : img));
+        return {
+          ...prev,
+          images: updatedImages,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        };
+      });
+      return res.image;
     },
-    [db, broadcastStationLocal]
-  );
-
-  const setStationImage = useCallback(
-    async (stationId: string, image: EventImage) => {
-      const currentDb = dbRef.current || db;
-      if (!currentDb) return;
-      const stId = stationId && stationId !== 'all' ? stationId : (currentDb.settings?.stations?.[0]?.id || 'station-a');
-      const targetStation = currentDb.stations?.[stId] || {
-        id: stId,
-        name: `Station ${stId.replace('station-', '').toUpperCase()}`,
-        currentRound: 1,
-        activeParticipantId: null,
-        activeParticipant: null,
-        status: 'WAITING',
-      };
-
-      const updatedStation: StationState = {
-        ...targetStation,
-        selectedImage: image,
-        selectedImageId: image.id,
-        imageRotation: 0,
-        currentRound: 1,
-      };
-
-      const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
-      const updatedDb: AppDatabase = { ...currentDb, stations };
-      dbRef.current = updatedDb;
-      setDb(updatedDb);
-      saveCachedDb(updatedDb).catch(() => {});
-      broadcastStationLocal('station_updated', { station: updatedStation });
-
-      try {
-        await api.assignStationImage(stId, undefined, undefined);
-      } catch (err) {
-        console.warn('[Offline] setStationImage processed locally:', err);
-      }
-    },
-    [db, broadcastStationLocal]
+    [db?.stations]
   );
 
   const rotateStationImage = useCallback(
     async (stationId: string, rotation?: number) => {
-      const currentDb = dbRef.current || db;
-      const stId = stationId && stationId !== 'all' ? stationId : (currentDb?.settings?.stations?.[0]?.id || 'station-a');
+      const res = await api.rotateStationImage(stationId, rotation);
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stId];
-        if (!targetStation) return prev;
-        const currentRot = targetStation.imageRotation || 0;
-        const newRot = typeof rotation === 'number' ? rotation : (currentRot + 90) % 360;
-        const updatedStation: StationState = {
-          ...targetStation,
-          imageRotation: newRot,
+        return {
+          ...prev,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
         };
-        const stations = { ...(prev.stations || {}), [stId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        dbRef.current = updatedDb;
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
       });
-
-      try {
-        await api.rotateStationImage(stId, rotation);
-      } catch (err) {
-        console.warn('[Offline] rotateStationImage saved locally:', err);
-      }
     },
-    [db, broadcastStationLocal]
+    []
   );
 
   const spinStationTopic = useCallback(
     async (stationId: string, wheelTopicIds?: string[]) => {
-      const currentDb = dbRef.current || db;
-      if (!currentDb) {
-        throw new Error('Database not loaded yet');
-      }
-      const stId = stationId && stationId !== 'all' ? stationId : (currentDb.settings?.stations?.[0]?.id || 'station-a');
-      const targetStation = currentDb.stations?.[stId] || {
-        id: stId,
-        name: `Station ${stId.replace('station-', '').toUpperCase()}`,
-        currentRound: 2,
-        activeParticipantId: null,
-        activeParticipant: null,
-        status: 'WAITING',
-      };
-
-      const wheelCount = currentDb.settings?.round2?.activeWheelTopicCount || 20;
-      let candidates: Topic[] = [];
-
-      if (Array.isArray(wheelTopicIds) && wheelTopicIds.length > 0) {
-        candidates = wheelTopicIds
-          .map((id) => currentDb.topics.find((t) => t.id === id))
-          .filter(Boolean) as Topic[];
-      }
-
-      if (candidates.length === 0) {
-        const dedicated = currentDb.topics.filter(
-          (t) => t.stationId === stId || (targetStation.name && t.stationId === targetStation.name)
-        );
-        if (dedicated.length > 0) {
-          const available = dedicated.filter((t) => t.status === 'available');
-          candidates = (available.length > 0 ? available : dedicated).slice(0, wheelCount);
-        } else {
-          const otherStationTopics = currentDb.topics.filter(
-            (t) => t.stationId && t.stationId !== 'all' && t.stationId !== stId && t.stationId !== targetStation.name
-          );
-          const universal = currentDb.topics.filter((t) => !otherStationTopics.includes(t));
-          const available = universal.filter((t) => t.status === 'available');
-          candidates = (available.length > 0 ? available : universal).slice(0, wheelCount);
-        }
-      }
-
-      if (candidates.length === 0) {
-        throw new Error('No unused topics remaining. Please reset topic pool or allow reuse.');
-      }
-
-      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-      const targetIndex = candidates.findIndex((t) => t.id === chosen.id);
-      const spinDurationMs = 4800;
-      const startedAt = Date.now();
-
-      const allowReuse = currentDb.settings?.round2?.topicReuseAllowed;
-      const updatedTopics = allowReuse
-        ? currentDb.topics
-        : currentDb.topics.map((t) =>
-            t.id === chosen.id
-              ? {
-                  ...t,
-                  status: 'used' as const,
-                  usedByParticipantId: targetStation.activeParticipantId || undefined,
-                  usedByParticipantName: targetStation.activeParticipant?.name || undefined,
-                  usedAt: new Date().toISOString(),
-                }
-              : t
-          );
-
-      const updatedStation: StationState = {
-        ...targetStation,
-        currentRound: 2,
-        selectedTopicId: null,
-        selectedTopic: null,
-        pendingTopic: chosen,
-        status: 'SPINNING',
-        activeWheelTopics: candidates,
-        wheelSpin: {
-          isSpinning: true,
-          targetTopicId: chosen.id,
-          targetTopicTitle: chosen.topic,
-          targetTopicCategory: chosen.category,
-          targetSliceIndex: targetIndex >= 0 ? targetIndex : 0,
-          wheelTopics: candidates,
-          startedAt,
-          durationMs: spinDurationMs,
-        },
-      };
-
-      const stations = { ...(currentDb.stations || {}), [stId]: updatedStation };
-      const updatedDb: AppDatabase = { ...currentDb, topics: updatedTopics, stations };
-      dbRef.current = updatedDb;
-      setDb(updatedDb);
-      saveCachedDb(updatedDb).catch(() => {});
-
-      const spinData = {
-        stationId: stId,
-        topic: chosen,
-        targetTopicId: chosen.id,
-        targetIndex: targetIndex >= 0 ? targetIndex : 0,
-        wheelTopics: candidates,
-        startedAt,
-        durationMs: spinDurationMs,
-      };
-
-      broadcastStationLocal('wheel_spin_started', { spinData });
-      broadcastStationLocal('station_updated', { station: updatedStation });
-      broadcastStationLocal('topics_updated', { topics: updatedTopics });
-
-      const localSpinResult = {
-        topic: chosen,
-        targetIndex: targetIndex >= 0 ? targetIndex : 0,
-        wheelTopics: candidates,
-        startedAt,
-        durationMs: spinDurationMs,
-        station: updatedStation,
-      };
-
-      try {
-        const res = await api.spinStationTopic(
-          stId,
-          targetStation.activeParticipantId || undefined,
-          targetStation.activeParticipant?.name || undefined,
-          wheelTopicIds
-        );
-        return res;
-      } catch (err) {
-        console.warn('[Offline] spinStationTopic processed offline locally:', err);
-        return localSpinResult;
-      }
-    },
-    [db, broadcastStationLocal]
-  );
-
-  const completeStationSpin = useCallback(
-    async (stationId: string) => {
-      const currentDb = dbRef.current || db;
-      const stId = stationId && stationId !== 'all' ? stationId : (currentDb?.settings?.stations?.[0]?.id || 'station-a');
+      const station = db?.stations?.[stationId];
+      const res = await api.spinStationTopic(
+        stationId,
+        station?.activeParticipantId || undefined,
+        station?.activeParticipant?.name || undefined,
+        wheelTopicIds
+      );
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stId];
-        if (!targetStation) return prev;
-
-        const winningTopic =
-          targetStation.pendingTopic ||
-          targetStation.selectedTopic ||
-          prev.topics.find((t) => t.id === targetStation.wheelSpin?.targetTopicId);
-
-        if (!winningTopic) return prev;
-
-        let currentWheel = (targetStation.activeWheelTopics || targetStation.wheelSpin?.wheelTopics || []).filter(Boolean);
-        const targetIdx = currentWheel.findIndex((t) => t && t.id === winningTopic.id);
-        if (targetIdx !== -1) {
-          const replacement = prev.topics.find(
-            (t) => t && t.status === 'available' && t.id !== winningTopic.id && !currentWheel.some((w) => w && w.id === t.id)
-          );
-          if (replacement) {
-            currentWheel[targetIdx] = replacement;
-          }
-        }
-
-        const updatedStation: StationState = {
-          ...targetStation,
-          status: 'SPEAKING',
-          selectedTopic: winningTopic,
-          selectedTopicId: winningTopic.id,
-          activeWheelTopics: currentWheel,
-          wheelSpin: null,
+        const updatedTopics = prev.topics.map((t) => (t.id === res.topic.id ? res.topic : t));
+        return {
+          ...prev,
+          topics: updatedTopics,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
         };
-
-        const stations = { ...(prev.stations || {}), [stId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        dbRef.current = updatedDb;
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
       });
-
-      try {
-        await api.completeStationSpin(stId);
-      } catch (err) {
-        console.warn('[Offline] completeStationSpin processed locally:', err);
-      }
+      return res;
     },
-    [db, broadcastStationLocal]
+    [db?.stations]
   );
+
+  const completeStationSpin = useCallback(async (stationId: string) => {
+    const res = await api.completeStationSpin(stationId);
+    setDb((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        stations: { ...(prev.stations || {}), [stationId]: res.station },
+      };
+    });
+  }, []);
 
   const replaceStationWheelTopic = useCallback(
     async (stationId: string, usedTopicId: string, replacementTopicId?: string) => {
-      const currentDb = dbRef.current || db;
-      const stId = stationId && stationId !== 'all' ? stationId : (currentDb?.settings?.stations?.[0]?.id || 'station-a');
-      let localStation: StationState | null = null;
-      let activeWheelTopics: Topic[] = [];
-
+      const res = await api.replaceStationWheelTopic(stationId, usedTopicId, replacementTopicId);
       setDb((prev) => {
         if (!prev) return prev;
-        const targetStation = prev.stations?.[stId];
-        if (!targetStation) return prev;
-
-        let wheel = [...(targetStation.activeWheelTopics || [])];
-        const idx = wheel.findIndex((t) => t.id === usedTopicId);
-        if (idx !== -1) {
-          const replacement = replacementTopicId
-            ? prev.topics.find((t) => t.id === replacementTopicId)
-            : prev.topics.find((t) => t.status === 'available' && !wheel.some((w) => w.id === t.id));
-          if (replacement) {
-            wheel[idx] = replacement;
-          }
-        }
-
-        const updatedStation: StationState = {
-          ...targetStation,
-          activeWheelTopics: wheel,
+        return {
+          ...prev,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
         };
-        localStation = updatedStation;
-        activeWheelTopics = wheel;
-
-        const stations = { ...(prev.stations || {}), [stId]: updatedStation };
-        const updatedDb = { ...prev, stations };
-        dbRef.current = updatedDb;
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updatedStation });
-        return updatedDb;
       });
-
-      try {
-        const res = await api.replaceStationWheelTopic(stId, usedTopicId, replacementTopicId);
-        return res;
-      } catch (err) {
-        console.warn('[Offline] replaceStationWheelTopic processed locally:', err);
-        return { success: true, station: localStation!, activeWheelTopics };
-      }
+      return res;
     },
-    [db, broadcastStationLocal]
+    []
   );
 
   const sendStationTimerAction = useCallback(
@@ -1477,42 +756,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         startedAt?: number;
       }
     ) => {
-      const now = getServerNow();
+      const serverNow = getServerNow();
       const finalPayload = {
         ...payload,
-        startedAt: payload.action === 'start' ? (payload.startedAt || now) : payload.startedAt,
+        startedAt: payload.action === 'start' ? (payload.startedAt || serverNow) : payload.startedAt,
       };
 
-      // Natural Time Up buzzer
+      // Immediate local zero-delay buzzer trigger ONLY on natural Time Up (Stop button must NOT play buzzer)
       if (payload.action === 'time_up') {
         const roundNum = db?.stations?.[stationId]?.currentRound || 1;
         const roundSettings = (db?.settings as any)?.[`round${roundNum}`] || db?.settings?.round1;
         if (roundSettings?.buzzerEnabled !== false) {
           const localEventId = `buzzer-${Date.now()}-${stationId}`;
           playBuzzerWithDebounce(localEventId);
-          broadcastStationLocal('buzzer_trigger', { payload: { stationId, eventId: localEventId } });
         }
       }
 
-      // Optimistic & offline-first local state update
-      setDb((prev) => {
-        if (!prev) return prev;
-        const targetStation = prev.stations?.[stationId];
-        if (!targetStation) return prev;
-
-        const roundNum = targetStation.currentRound || 1;
-        const roundSettings = (prev.settings as any)?.[`round${roundNum}`] || prev.settings?.round1;
-        let updated: StationState = { ...targetStation };
-
-        if (payload.action === 'start') {
-          const activePhase = payload.phase || targetStation.timerMode || (roundSettings?.prepEnabled ? 'prep' : 'speech');
-          const defaultSec = activePhase === 'prep' ? (roundSettings?.prepTimeSeconds || 30) : (roundSettings?.speechTimeSeconds || 120);
-          const duration = payload.totalSeconds || targetStation.timerDuration || defaultSec;
+      // Optimistic local state update for instant zero-lag response
+      if (payload.action === 'start') {
+        setDb((prev) => {
+          if (!prev) return prev;
+          const targetStation = prev.stations?.[stationId];
+          if (!targetStation) return prev;
+          const duration = payload.totalSeconds || targetStation.timerDuration || 120;
           const rem = typeof payload.remainingSeconds === 'number' ? payload.remainingSeconds : duration;
-
-          updated = {
+          const updated: StationState = {
             ...targetStation,
-            timerMode: activePhase,
+            timerMode: payload.phase || targetStation.timerMode || 'speech',
             timerDuration: duration,
             timerTotalSeconds: duration,
             timerRemainingSeconds: rem,
@@ -1521,103 +791,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             timerStartTime: finalPayload.startedAt,
             timerStartedAt: finalPayload.startedAt,
             timerAccumulatedMs: rem < duration ? Math.max(0, (duration - rem) * 1000) : 0,
-            timerEndsAt: (finalPayload.startedAt || now) + rem * 1000,
+            timerEndsAt: (finalPayload.startedAt || serverNow) + rem * 1000,
             timerStopTime: null,
-            status: activePhase === 'prep' ? 'PREPARING' : 'SPEAKING',
+            status: (payload.phase || targetStation.timerMode) === 'prep' ? 'PREPARING' : 'SPEAKING',
             buzzerPlayed: false,
             isOvertime: false,
             overtimeSeconds: 0,
           };
-        } else if (payload.action === 'pause') {
-          const runMs = targetStation.timerStartTime ? now - targetStation.timerStartTime : 0;
-          const accum = (targetStation.timerAccumulatedMs || 0) + runMs;
-          const totalElapsedSec = Math.floor(accum / 1000);
-          const rem = Math.max(0, (targetStation.timerDuration || 120) - totalElapsedSec);
+          const stations = { ...(prev.stations || {}), [stationId]: updated };
+          return {
+            ...prev,
+            stations,
+            liveSync: {
+              ...prev.liveSync,
+              stationStates: stations,
+            },
+          };
+        });
+      }
 
-          updated = {
-            ...targetStation,
-            timerAccumulatedMs: accum,
-            timerStartTime: null,
-            timerStartedAt: null,
-            timerEndsAt: null,
-            timerStatus: 'paused',
-            isTimerRunning: false,
-            status: 'PAUSED',
-            timerRemainingSeconds: rem,
-          };
-        } else if (payload.action === 'stop' || payload.action === 'stop_with_buzzer') {
-          const runMs = targetStation.timerStartTime ? now - targetStation.timerStartTime : 0;
-          const accum = (targetStation.timerAccumulatedMs || 0) + runMs;
-          const totalElapsedSec = Math.floor(accum / 1000);
-          const duration = targetStation.timerDuration || 120;
-          const isOver = totalElapsedSec > duration;
-
-          updated = {
-            ...targetStation,
-            timerAccumulatedMs: accum,
-            timerStartTime: null,
-            timerStartedAt: null,
-            timerStopTime: now,
-            timerEndsAt: null,
-            isTimerRunning: false,
-            timerStatus: 'stopped',
-            status: 'TIME_UP',
-            isOvertime: isOver,
-            overtimeSeconds: isOver ? totalElapsedSec - duration : 0,
-          };
-        } else if (payload.action === 'reset') {
-          const initSec = (roundSettings?.prepEnabled && (roundSettings?.prepTimeSeconds || 0) > 0)
-            ? roundSettings.prepTimeSeconds
-            : (roundSettings?.speechTimeSeconds || 120);
-
-          updated = {
-            ...targetStation,
-            isTimerRunning: false,
-            timerStatus: 'idle',
-            status: 'WAITING',
-            timerMode: 'idle',
-            timerDuration: initSec,
-            timerTotalSeconds: initSec,
-            timerRemainingSeconds: initSec,
-            timerAccumulatedMs: 0,
-            timerStartTime: null,
-            timerStartedAt: null,
-            timerEndsAt: null,
-            timerStopTime: null,
-            buzzerPlayed: false,
-            isOvertime: false,
-            overtimeSeconds: 0,
-          };
-        } else if (payload.action === 'transition_to_speech') {
-          const speechSec = roundSettings?.speechTimeSeconds || 120;
-          updated = {
-            ...targetStation,
-            timerMode: 'speech',
-            timerDuration: speechSec,
-            timerTotalSeconds: speechSec,
-            timerRemainingSeconds: speechSec,
-            isTimerRunning: true,
-            timerStatus: 'running',
-            timerStartTime: now,
-            timerStartedAt: now,
-            timerAccumulatedMs: 0,
-            timerEndsAt: now + speechSec * 1000,
-            timerStopTime: null,
-            status: 'SPEAKING',
-            buzzerPlayed: false,
-            isOvertime: false,
-            overtimeSeconds: 0,
-          };
-        } else if (payload.action === 'time_up') {
-          updated = {
-            ...targetStation,
-            buzzerPlayed: true,
-            isOvertime: true,
-          };
-        }
-
-        const stations = { ...(prev.stations || {}), [stationId]: updated };
-        const updatedDb = {
+      const res = await api.sendStationTimerAction(stationId, finalPayload);
+      if (res.serverTime) recordServerTimestamp(res.serverTime);
+      setDb((prev) => {
+        if (!prev) return prev;
+        const stations = { ...(prev.stations || {}), [stationId]: res.station };
+        return {
           ...prev,
           stations,
           liveSync: {
@@ -1625,20 +823,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stationStates: stations,
           },
         };
-
-        saveCachedDb(updatedDb).catch(() => {});
-        broadcastStationLocal('station_updated', { station: updated });
-        return updatedDb;
       });
-
-      try {
-        const res = await api.sendStationTimerAction(stationId, finalPayload);
-        if (res.serverTime) recordServerTimestamp(res.serverTime);
-      } catch (err) {
-        console.warn('[Offline] sendStationTimerAction processed locally:', err);
-      }
     },
-    [db?.stations, db?.settings, playBuzzerWithDebounce, broadcastStationLocal]
+    [playBuzzerWithDebounce]
   );
 
   // RESET ALL STATUSES (Master / Admin)
@@ -1656,62 +843,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [resetStatusesModal]);
 
   const executeResetAllStatuses = useCallback(async () => {
-    setDb((prev) => {
-      if (!prev) return prev;
-      const participants = prev.participants.map((p) => ({
-        ...p,
-        round1Qualified: 'pending' as const,
-        round2Qualified: 'pending' as const,
-        round3Qualified: 'pending' as const,
-      }));
-      const images = prev.images.map((img) => ({
-        ...img,
-        status: 'available' as const,
-        usedByParticipantId: undefined,
-        usedByParticipantName: undefined,
-        usedAt: undefined,
-      }));
-      const topics = prev.topics.map((t) => ({
-        ...t,
-        status: 'available' as const,
-        usedByParticipantId: undefined,
-        usedByParticipantName: undefined,
-        usedAt: undefined,
-      }));
-      const updatedStations = { ...prev.stations };
-      Object.keys(updatedStations).forEach((key) => {
-        const s = updatedStations[key];
-        updatedStations[key] = {
-          ...s,
-          selectedImageId: null,
-          selectedImage: null,
-          selectedTopicId: null,
-          selectedTopic: null,
-          activeParticipantId: null,
-          activeParticipant: null,
-          status: 'WAITING',
-          wheelSpin: null,
-        };
-      });
-      const updatedDb = { ...prev, participants, images, topics, stations: updatedStations };
-      dbRef.current = updatedDb;
-      saveCachedDb(updatedDb).catch(() => {});
-      broadcastStationLocal('db_sync', { db: updatedDb });
-      return updatedDb;
-    });
+    const res = await api.resetAllStatuses();
+    setDb(res.db);
     setActiveParticipant(null);
-
-    try {
-      const res = await api.resetAllStatuses();
-      if (res?.db) {
-        setDb(res.db);
-        dbRef.current = res.db;
-        saveCachedDb(res.db).catch(() => {});
-      }
-    } catch (err) {
-      console.warn('[Offline] resetAllStatuses processed locally:', err);
-    }
-  }, [broadcastStationLocal]);
+  }, []);
 
   // Real-time SSE Connection
   useEffect(() => {
@@ -1722,14 +857,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (projectorDeviceId) {
         sseUrl.searchParams.set('projector_device_id', projectorDeviceId);
       }
-      const effectiveRole = currentPage === 'master' ? 'master' : currentPage === 'projector' ? 'projector' : deviceRole;
+      const effectiveRole = currentPage === 'master' ? 'master' : deviceRole;
       if (effectiveRole === 'master') {
         sseUrl.searchParams.set('type', 'master');
-      } else if (effectiveRole === 'projector') {
-        sseUrl.searchParams.set('type', 'projector');
-        if (currentStationId && currentStationId !== 'all') {
-          sseUrl.searchParams.set('station', currentStationId);
-        }
       } else {
         if (currentStationId && currentStationId !== 'all') {
           sseUrl.searchParams.set('station', currentStationId);
@@ -1802,7 +932,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setDb((prev) => {
             if (!prev) return prev;
             const stations = { ...(prev.stations || {}), [updatedStation.id]: updatedStation };
-            const updated = {
+            return {
               ...prev,
               stations,
               liveSync: {
@@ -1810,9 +940,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 stationStates: stations,
               },
             };
-            dbRef.current = updated;
-            saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-            return updated;
           });
         } catch (err) {
           console.error(err);
@@ -1829,7 +956,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             stationList.forEach((s) => {
               stations[s.id] = s;
             });
-            const updated = {
+            return {
               ...prev,
               stations,
               liveSync: {
@@ -1837,9 +964,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 stationStates: stations,
               },
             };
-            dbRef.current = updated;
-            saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-            return updated;
           });
         } catch (err) {
           console.error(err);
@@ -2034,126 +1158,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
 
-      eventSource.addEventListener('participant_created', (e) => {
-        try {
-          const participant: Participant = JSON.parse(e.data);
-          setDb((prev) => {
-            if (!prev) return prev;
-            if (prev.participants.some((p) => p.id === participant.id)) return prev;
-            const updated = { ...prev, participants: [...prev.participants, participant] };
-            saveCachedDb(updated).catch(() => {});
-            return updated;
-          });
-        } catch (err) {
-          console.error('Failed to handle participant_created SSE:', err);
-        }
-      });
-
-      eventSource.addEventListener('participant_updated', (e) => {
-        try {
-          const participant: Participant = JSON.parse(e.data);
-          setDb((prev) => {
-            if (!prev) return prev;
-            const updated = {
-              ...prev,
-              participants: prev.participants.map((p) => (p.id === participant.id ? { ...p, ...participant } : p)),
-            };
-            saveCachedDb(updated).catch(() => {});
-            return updated;
-          });
-          setActiveParticipant((curr) => (curr?.id === participant.id ? { ...curr, ...participant } : curr));
-        } catch (err) {
-          console.error('Failed to handle participant_updated SSE:', err);
-        }
-      });
-
-      eventSource.addEventListener('participant_deleted', (e) => {
-        try {
-          const { id } = JSON.parse(e.data);
-          setDb((prev) => {
-            if (!prev) return prev;
-            const updated = {
-              ...prev,
-              participants: prev.participants.filter((p) => p.id !== id),
-            };
-            saveCachedDb(updated).catch(() => {});
-            return updated;
-          });
-          setActiveParticipant((curr) => (curr?.id === id ? null : curr));
-        } catch (err) {
-          console.error('Failed to handle participant_deleted SSE:', err);
-        }
-      });
-
-      eventSource.addEventListener('participants_batch_imported', (e) => {
-        try {
-          const { participants } = JSON.parse(e.data);
-          if (Array.isArray(participants)) {
-            setDb((prev) => {
-              if (!prev) return prev;
-              const map = new Map(participants.map((p: Participant) => [p.id, p]));
-              const existingUpdated = prev.participants.map((p) => map.has(p.id) ? (map.get(p.id) as Participant) : p);
-              const newItems = participants.filter((p: Participant) => !prev.participants.some((ep) => ep.id === p.id));
-              const updated = {
-                ...prev,
-                participants: [...existingUpdated, ...newItems],
-              };
-              dbRef.current = updated;
-              saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-              return updated;
-            });
-          }
-        } catch (err) {
-          console.error('Failed to handle participants_batch_imported SSE:', err);
-        }
-      });
-
-      eventSource.addEventListener('result_added', (e) => {
-        try {
-          const { round, result } = JSON.parse(e.data);
-          setDb((prev) => {
-            if (!prev) return prev;
-            const key = round === 1 ? 'round1Results' : round === 2 ? 'round2Results' : 'round3Results';
-            const list = (prev as any)[key] || [];
-            const updated = {
-              ...prev,
-              [key]: [...list.filter((r: any) => r.id !== result.id), result],
-            };
-            dbRef.current = updated;
-            saveCachedDb(updated, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-            return updated;
-          });
-        } catch (err) {
-          console.error('Failed to handle result_added SSE:', err);
-        }
-      });
-
-      eventSource.addEventListener('sync_update', (e) => {
-        try {
-          const { db: freshDb } = JSON.parse(e.data);
-          if (freshDb) {
-            setDb(freshDb);
-            dbRef.current = freshDb;
-            saveCachedDb(freshDb, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          }
-        } catch (err) {
-          console.error('Failed to handle sync_update SSE:', err);
-        }
-      });
-
-      eventSource.addEventListener('db_sync', (e) => {
-        try {
-          const freshDb = JSON.parse(e.data);
-          if (freshDb && freshDb.stations) {
-            setDb(freshDb);
-            dbRef.current = freshDb;
-            saveCachedDb(freshDb, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-          }
-        } catch (err) {
-          console.error('Failed to handle db_sync SSE:', err);
-        }
-      });
-
       eventSource.onerror = () => {
         setIsConnected(false);
         eventSource?.close();
@@ -2167,57 +1171,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       eventSource?.close();
     };
   }, [playBuzzerWithDebounce, currentStationId, deviceRole, projectorDeviceId, currentPage]);
-
-  // Continuous Background State Synchronization & Auto-Refresher:
-  // Runs continuously every 1000ms so that ANY backend change (direct edit, script, offline device sync, or station update)
-  // is guaranteed to appear on the Projector and all views automatically without requiring manual F5 reload.
-  useEffect(() => {
-    let isPolling = false;
-
-    const poll = async () => {
-      if (isPolling) return;
-      isPolling = true;
-      try {
-        const fresh = await api.getState(800);
-        if (fresh && fresh.stations) {
-          setDb((prev) => {
-            if (!prev) {
-              saveCachedDb(fresh, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-              return fresh;
-            }
-            if (JSON.stringify(prev) === JSON.stringify(fresh)) {
-              return prev;
-            }
-            saveCachedDb(fresh, { skipBroadcast: true, skipPulse: true }).catch(() => {});
-            return fresh;
-          });
-          dbRef.current = fresh;
-        }
-      } catch {
-        // AUTOMATIC OFFLINE REFRESHER:
-        // When server is offline, unreachable, or in local offline venue mode,
-        // actively pull from IndexedDB so the Projector and all views stay 100% updated without F5!
-        try {
-          const cached = await getCachedDb();
-          if (cached && cached.stations) {
-            setDb((prev) => {
-              if (!prev) return cached;
-              if (JSON.stringify(prev) === JSON.stringify(cached)) {
-                return prev;
-              }
-              return cached;
-            });
-            dbRef.current = cached;
-          }
-        } catch {}
-      } finally {
-        isPolling = false;
-      }
-    };
-
-    const timer = setInterval(poll, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Fullscreen helper
   const toggleFullscreen = useCallback(() => {
@@ -2349,29 +1302,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Atomic Round 1 image assignment
   const assignRound1Image = useCallback(
     async (stationId?: string) => {
-      const stId = stationId || currentStationId || 'station-a';
-      return assignStationImage(stId);
+      const res = await api.assignRound1Image({
+        participantId: activeParticipant?.id,
+        participantName: activeParticipant?.name,
+        stationId,
+      });
+      setDb((prev) => {
+        if (!prev) return prev;
+        const updatedImages = prev.images.map((img) => (img.id === res.image.id ? res.image : img));
+        return { ...prev, images: updatedImages, liveSync: res.liveSync };
+      });
+      return res.image;
     },
-    [assignStationImage, currentStationId]
+    [activeParticipant?.id, activeParticipant?.name]
   );
 
   // Atomic Round 2 topic spin
   const spinRound2Topic = useCallback(
     async (stationId?: string) => {
-      const stId = stationId || currentStationId || 'station-a';
-      const res = await spinStationTopic(stId);
-      return { topic: res.topic, startedAt: res.startedAt, durationMs: res.durationMs };
+      const res = await api.spinRound2Topic({
+        participantId: activeParticipant?.id,
+        participantName: activeParticipant?.name,
+        stationId,
+      });
+      setDb((prev) => {
+        if (!prev) return prev;
+        const updatedTopics = prev.topics.map((t) => (t.id === res.topic.id ? res.topic : t));
+        return { ...prev, topics: updatedTopics, liveSync: res.liveSync };
+      });
+      return res;
     },
-    [spinStationTopic, currentStationId]
+    [activeParticipant?.id, activeParticipant?.name]
   );
 
   // Start fresh event
   const startNewEvent = useCallback(async () => {
-    try {
-      await api.startNewEvent();
-    } catch (err) {
-      console.warn('[Offline] startNewEvent ignored error:', err);
-    }
+    await api.startNewEvent();
     await reloadState();
   }, [reloadState]);
 
@@ -2380,17 +1346,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (reason: string = 'Manual Buzzer', round: string = 'General') => {
       unlockSound();
       playBuzzerLocal();
-      try {
-        await api.triggerBuzzer({
-          source: 'organizer',
-          reason,
-          round,
-          participantName: activeParticipant?.name,
-          stationId: currentStationId || undefined,
-        });
-      } catch (err) {
-        console.warn('[Offline] triggerBuzzer handled locally:', err);
-      }
+      await api.triggerBuzzer({
+        source: 'organizer',
+        reason,
+        round,
+        participantName: activeParticipant?.name,
+        stationId: currentStationId || undefined,
+      });
     },
     [activeParticipant?.name, currentStationId, unlockSound, playBuzzerLocal]
   );
@@ -2427,122 +1389,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [triggerBuzzer, toggleFullscreen, selectNextParticipant]);
 
-  // Participants actions (Offline-First: Save locally to IndexedDB first, then sync)
+  // Participants actions
   const addParticipant = useCallback(async (p: Partial<Participant>) => {
-    const recordId = p.id || generateUUID();
-    const nowIso = new Date().toISOString();
-    const count = (db?.participants.length || 0) + 1;
-    const participantNumber = p.participantNumber || `M2M-${String(count).padStart(3, '0')}`;
-
-    const newParticipant: Participant = {
-      id: recordId,
-      participantNumber,
-      name: p.name?.trim() || 'New Participant',
-      mobile: p.mobile?.trim() || p.phone?.trim() || (p.customData as any)?.phone || (p.customData as any)?.mobile || '',
-      phone: p.phone?.trim() || p.mobile?.trim() || (p.customData as any)?.phone || (p.customData as any)?.mobile || '',
-      stationId: p.stationId || '',
-      stationName: p.stationName || '',
-      status: p.status || 'active',
-      round1Status: p.round1Status || 'pending',
-      round2Status: p.round2Status || 'pending',
-      round3Status: p.round3Status || 'pending',
-      customData: p.customData || {},
-      createdAt: p.createdAt || nowIso,
-      updatedAt: nowIso,
-    };
-
-    // 1. Save locally to IndexedDB queue first
-    await syncEngine.enqueue({
-      id: recordId,
-      entityType: 'participant',
-      action: 'create',
-      deviceId,
-      data: newParticipant,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      syncStatus: 'pending',
-      syncAttempts: 0,
-    });
-
-    // 2. Optimistically update local React state and IndexedDB cache
-    setDb((prev) => {
-      if (!prev) return prev;
-      const nextDb: AppDatabase = {
-        ...prev,
-        participants: [...prev.participants.filter((item) => item.id !== recordId), newParticipant],
-      };
-      saveCachedDb(nextDb).catch(() => {});
-      broadcastStationLocal('participant_created', { participant: newParticipant });
-      broadcastStationLocal('db_sync', { db: nextDb });
-      return nextDb;
-    });
-
-    setActiveParticipant((curr) => curr || newParticipant);
-    return newParticipant;
-  }, [db?.participants?.length, deviceId, broadcastStationLocal]);
+    const created = await api.addParticipant(p);
+    setDb((prev) => (prev ? { ...prev, participants: [...prev.participants, created] } : prev));
+    setActiveParticipant((curr) => curr || created);
+    return created;
+  }, []);
 
   const updateParticipant = useCallback(async (id: string, p: Partial<Participant>) => {
-    const nowIso = new Date().toISOString();
-    const updatedData = { ...p, id, updatedAt: nowIso };
-
-    // 1. Save locally to IndexedDB queue first
-    await syncEngine.enqueue({
-      id,
-      entityType: 'participant',
-      action: 'update',
-      deviceId,
-      data: updatedData,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      syncStatus: 'pending',
-      syncAttempts: 0,
-    });
-
-    // 2. Optimistically update local React state and IndexedDB cache
-    setDb((prev) => {
-      if (!prev) return prev;
-      const nextDb: AppDatabase = {
-        ...prev,
-        participants: prev.participants.map((item) => (item.id === id ? { ...item, ...updatedData } : item)),
-      };
-      saveCachedDb(nextDb).catch(() => {});
-      broadcastStationLocal('participant_updated', { participant: updatedData });
-      broadcastStationLocal('db_sync', { db: nextDb });
-      return nextDb;
-    });
-
-    setActiveParticipant((curr) => (curr?.id === id ? ({ ...curr, ...updatedData } as Participant) : curr));
-    return updatedData as Participant;
-  }, [deviceId, broadcastStationLocal]);
+    const updated = await api.updateParticipant(id, p);
+    setDb((prev) =>
+      prev
+        ? {
+            ...prev,
+            participants: prev.participants.map((item) => (item.id === id ? updated : item)),
+          }
+        : prev
+    );
+    setActiveParticipant((curr) => (curr?.id === id ? updated : curr));
+    return updated;
+  }, []);
 
   const deleteParticipant = useCallback(async (id: string) => {
-    const nowIso = new Date().toISOString();
-    await syncEngine.enqueue({
-      id,
-      entityType: 'participant',
-      action: 'delete',
-      deviceId,
-      data: { id },
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      syncStatus: 'pending',
-      syncAttempts: 0,
-    });
-
-    setDb((prev) => {
-      if (!prev) return prev;
-      const nextDb: AppDatabase = {
-        ...prev,
-        participants: prev.participants.filter((item) => item.id !== id),
-      };
-      saveCachedDb(nextDb).catch(() => {});
-      broadcastStationLocal('participant_deleted', { id });
-      broadcastStationLocal('db_sync', { db: nextDb });
-      return nextDb;
-    });
-
+    await api.deleteParticipant(id);
+    setDb((prev) =>
+      prev
+        ? {
+            ...prev,
+            participants: prev.participants.filter((item) => item.id !== id),
+          }
+        : prev
+    );
     setActiveParticipant((curr) => (curr?.id === id ? null : curr));
-  }, [deviceId, broadcastStationLocal]);
+  }, []);
 
   const importParticipants = useCallback(async (list: Partial<Participant>[]) => {
     const res = await api.batchAddParticipants(list);
@@ -2614,83 +1494,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   }, []);
 
-  // Topics (Offline-First)
-  const addTopic = useCallback(
-    async (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => {
-      const recordId = generateUUID();
-      const nowIso = new Date().toISOString();
-      const count = (db?.topics.length || 0) + 1;
-      const resolvedTopicId = topicId || `TOP-${String(count).padStart(3, '0')}`;
+  // Topics
+  const addTopic = useCallback(async (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => {
+    const created = await api.addTopic({ topic, category, topicId, stationId, stationName });
+    setDb((prev) => (prev ? { ...prev, topics: [...prev.topics, created] } : prev));
+    return created;
+  }, []);
 
-      const newTopic: Topic = {
-        id: recordId,
-        topicId: resolvedTopicId,
-        topic,
-        category,
-        stationId,
-        stationName,
-        status: 'available',
-      };
-
-      await syncEngine.enqueue({
-        id: recordId,
-        entityType: 'topic',
-        action: 'create',
-        deviceId,
-        data: newTopic,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
-
-      setDb((prev) => {
-        if (!prev) return prev;
-        const nextDb = { ...prev, topics: [...prev.topics.filter((t) => t.id !== recordId), newTopic] };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('topics_updated', { topics: nextDb.topics });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
-      });
-
-      return newTopic;
-    },
-    [db?.topics?.length, deviceId, broadcastStationLocal]
-  );
-
-  const updateTopic = useCallback(
-    async (id: string, updates: Partial<Topic>) => {
-      const nowIso = new Date().toISOString();
-      const updatedData = { ...updates, id };
-
-      await syncEngine.enqueue({
-        id,
-        entityType: 'topic',
-        action: 'update',
-        deviceId,
-        data: updatedData,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
-
-      setDb((prev) => {
-        if (!prev) return prev;
-        const nextDb = {
-          ...prev,
-          topics: prev.topics.map((t) => (t.id === id ? { ...t, ...updatedData } : t)),
-        };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('topics_updated', { topics: nextDb.topics });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
-      });
-
-      return updatedData as Topic;
-    },
-    [deviceId, broadcastStationLocal]
-  );
+  const updateTopic = useCallback(async (id: string, updates: Partial<Topic>) => {
+    const updated = await api.updateTopic(id, updates);
+    setDb((prev) =>
+      prev
+        ? {
+            ...prev,
+            topics: prev.topics.map((t) => (t.id === id ? updated : t)),
+          }
+        : prev
+    );
+    return updated;
+  }, []);
 
   const deleteTopic = useCallback(async (id: string) => {
     await api.deleteTopic(id);
@@ -2713,106 +1535,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const resetTopicsStatus = useCallback(async () => {
-    setDb((prev) => {
-      if (!prev) return prev;
-      const topics = prev.topics.map((t) => ({
-        ...t,
-        status: 'available' as const,
-        usedByParticipantId: undefined,
-        usedByParticipantName: undefined,
-        usedAt: undefined,
-      }));
-      const updatedDb = { ...prev, topics };
-      dbRef.current = updatedDb;
-      saveCachedDb(updatedDb).catch(() => {});
-      broadcastStationLocal('topics_updated', { topics });
-      return updatedDb;
-    });
+    await api.resetTopicsStatus();
+    await reloadState();
+  }, [reloadState]);
 
-    try {
-      await api.resetTopicsStatus();
-    } catch (err) {
-      console.warn('[Offline] resetTopicsStatus processed locally:', err);
-    }
-  }, [broadcastStationLocal]);
+  // Images
+  const addImage = useCallback(async (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => {
+    const created = await api.addImage({ imageId: imageIdOrName, name: imageIdOrName, url, stationId, stationName });
+    setDb((prev) => (prev ? { ...prev, images: [...prev.images, created] } : prev));
+    return created;
+  }, []);
 
-  // Images (Offline-First)
-  const addImage = useCallback(
-    async (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => {
-      const recordId = generateUUID();
-      const nowIso = new Date().toISOString();
-      const count = (db?.images.length || 0) + 1;
-      const resolvedImageId = imageIdOrName || `IMG-${String(count).padStart(3, '0')}`;
-
-      const newImage: EventImage = {
-        id: recordId,
-        imageId: resolvedImageId,
-        name: resolvedImageId,
-        url,
-        stationId,
-        stationName,
-        status: 'available',
-      };
-
-      await syncEngine.enqueue({
-        id: recordId,
-        entityType: 'image',
-        action: 'create',
-        deviceId,
-        data: newImage,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
-
-      setDb((prev) => {
-        if (!prev) return prev;
-        const nextDb = { ...prev, images: [...prev.images.filter((i) => i.id !== recordId), newImage] };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('images_updated', { images: nextDb.images });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
-      });
-
-      return newImage;
-    },
-    [db?.images?.length, deviceId, broadcastStationLocal]
-  );
-
-  const updateImage = useCallback(
-    async (id: string, updates: Partial<EventImage>) => {
-      const nowIso = new Date().toISOString();
-      const updatedData = { ...updates, id };
-
-      await syncEngine.enqueue({
-        id,
-        entityType: 'image',
-        action: 'update',
-        deviceId,
-        data: updatedData,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
-
-      setDb((prev) => {
-        if (!prev) return prev;
-        const nextDb = {
-          ...prev,
-          images: prev.images.map((img) => (img.id === id ? { ...img, ...updatedData } : img)),
-        };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('images_updated', { images: nextDb.images });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
-      });
-
-      return updatedData as EventImage;
-    },
-    [deviceId, broadcastStationLocal]
-  );
+  const updateImage = useCallback(async (id: string, updates: Partial<EventImage>) => {
+    const updated = await api.updateImage(id, updates);
+    setDb((prev) =>
+      prev
+        ? {
+            ...prev,
+            images: prev.images.map((img) => (img.id === id ? updated : img)),
+          }
+        : prev
+    );
+    return updated;
+  }, []);
 
   const uploadImages = useCallback(
     async (payload: {
@@ -2841,286 +1586,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteImage = useCallback(async (id: string) => {
     await api.deleteImage(id);
-    setDb((prev) => {
-      if (!prev) return prev;
-      const nextDb = { ...prev, images: prev.images.filter((img) => img.id !== id) };
-      saveCachedDb(nextDb).catch(() => {});
-      broadcastStationLocal('images_updated', { images: nextDb.images });
-      broadcastStationLocal('db_sync', { db: nextDb });
-      return nextDb;
-    });
-  }, [broadcastStationLocal]);
+    setDb((prev) => (prev ? { ...prev, images: prev.images.filter((img) => img.id !== id) } : prev));
+  }, []);
 
   const resetImagesStatus = useCallback(async () => {
-    setDb((prev) => {
-      if (!prev) return prev;
-      const images = prev.images.map((img) => ({
-        ...img,
-        status: 'available' as const,
-        usedByParticipantId: undefined,
-        usedByParticipantName: undefined,
-        usedAt: undefined,
-      }));
-      const updatedDb = { ...prev, images };
-      dbRef.current = updatedDb;
-      saveCachedDb(updatedDb).catch(() => {});
-      broadcastStationLocal('images_updated', { images });
-      return updatedDb;
-    });
-
-    try {
-      await api.resetImagesStatus();
-    } catch (err) {
-      console.warn('[Offline] resetImagesStatus processed locally:', err);
-    }
-  }, [broadcastStationLocal]);
+    await api.resetImagesStatus();
+    await reloadState();
+  }, [reloadState]);
 
   // Settings
   const updateSettings = useCallback(async (updates: Partial<EventSettings>) => {
-    setDb((prev) => {
-      if (!prev) return prev;
-      const nextDb = { ...prev, settings: { ...prev.settings, ...updates } };
-      saveCachedDb(nextDb).catch(() => {});
-      broadcastStationLocal('settings_updated', { settings: nextDb.settings });
-      broadcastStationLocal('db_sync', { db: nextDb });
-      return nextDb;
-    });
+    const updated = await api.updateSettings(updates);
+    setDb((prev) => (prev ? { ...prev, settings: updated } : prev));
+    return updated;
+  }, []);
 
-    try {
-      const updated = await api.updateSettings(updates);
-      setDb((prev) => (prev ? { ...prev, settings: updated } : prev));
-      return updated;
-    } catch (err) {
-      console.warn('[Offline] updateSettings applied locally:', err);
-      return updates as EventSettings;
-    }
-  }, [broadcastStationLocal]);
+  // Results
+  const saveRound1Result = useCallback(async (res: Omit<Round1Result, 'id'>) => {
+    const saved = await api.saveRound1Result(res);
+    await reloadState();
+    return saved;
+  }, [reloadState]);
 
-  // Results (Offline-First: Save locally to IndexedDB first, then sync)
-  const saveRound1Result = useCallback(
-    async (res: Omit<Round1Result, 'id'>) => {
-      const recordId = (res as any).id || generateUUID();
-      const nowIso = new Date().toISOString();
-      const fullResult: Round1Result = {
-        ...res,
-        id: recordId,
-        startTime: res.startTime || nowIso,
-        endTime: res.endTime || nowIso,
-        deviceId,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-      };
+  const saveRound2Result = useCallback(async (res: Omit<Round2Result, 'id'>) => {
+    const saved = await api.saveRound2Result(res);
+    await reloadState();
+    return saved;
+  }, [reloadState]);
 
-      // 1. Save locally to IndexedDB queue first
-      await syncEngine.enqueue({
-        id: recordId,
-        entityType: 'round1Result',
-        action: 'create',
-        deviceId,
-        data: fullResult,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
+  const saveRound3Result = useCallback(async (res: Omit<Round3Result, 'id'>) => {
+    const saved = await api.saveRound3Result(res);
+    await reloadState();
+    return saved;
+  }, [reloadState]);
 
-      // 2. Optimistically update local React state and IndexedDB cache
-      setDb((prev) => {
-        if (!prev) return prev;
-        const updatedP = prev.participants.map((p) => {
-          if (p.id === fullResult.participantId) {
-            return {
-              ...p,
-              round1Status: fullResult.status,
-              round1ImageId: fullResult.imageId || fullResult.imageName,
-              round1Qualified: fullResult.qualification || p.round1Qualified,
-              status:
-                fullResult.qualification === 'disqualified'
-                  ? 'eliminated'
-                  : fullResult.qualification === 'qualified' && p.status === 'eliminated'
-                  ? 'active'
-                  : p.status,
-              updatedAt: nowIso,
-            };
-          }
-          return p;
-        });
-
-        const updatedImages = !prev.settings.round1.allowImageReuse
-          ? prev.images.map((img) =>
-              img.id === fullResult.imageId || img.imageId === fullResult.imageId
-                ? {
-                    ...img,
-                    status: 'used' as const,
-                    usedByParticipantId: fullResult.participantId,
-                    usedByParticipantName: fullResult.participantName,
-                    usedAt: nowIso,
-                  }
-                : img
-            )
-          : prev.images;
-
-        const nextDb: AppDatabase = {
-          ...prev,
-          round1Results: [...prev.round1Results.filter((r) => r.id !== recordId), fullResult],
-          participants: updatedP,
-          images: updatedImages,
-        };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('result_added', { round: 1, result: fullResult });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
-      });
-
-      return fullResult;
-    },
-    [deviceId, broadcastStationLocal]
-  );
-
-  const saveRound2Result = useCallback(
-    async (res: Omit<Round2Result, 'id'>) => {
-      const recordId = (res as any).id || generateUUID();
-      const nowIso = new Date().toISOString();
-      const fullResult: Round2Result = {
-        ...res,
-        id: recordId,
-        startTime: res.startTime || nowIso,
-        endTime: res.endTime || nowIso,
-        deviceId,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-      };
-
-      await syncEngine.enqueue({
-        id: recordId,
-        entityType: 'round2Result',
-        action: 'create',
-        deviceId,
-        data: fullResult,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
-
-      setDb((prev) => {
-        if (!prev) return prev;
-        const updatedP = prev.participants.map((p) => {
-          if (p.id === fullResult.participantId) {
-            return {
-              ...p,
-              round2Status: fullResult.status,
-              round2TopicId: fullResult.topicId,
-              round2Qualified: fullResult.qualification || p.round2Qualified,
-              status:
-                fullResult.qualification === 'disqualified'
-                  ? 'eliminated'
-                  : fullResult.qualification === 'qualified' && p.status === 'eliminated'
-                  ? 'active'
-                  : p.status,
-              updatedAt: nowIso,
-            };
-          }
-          return p;
-        });
-
-        const updatedTopics = !prev.settings.round2.topicReuseAllowed
-          ? prev.topics.map((top) =>
-              top.id === fullResult.topicId || top.topicId === fullResult.topicId
-                ? {
-                    ...top,
-                    status: 'used' as const,
-                    usedByParticipantId: fullResult.participantId,
-                    usedByParticipantName: fullResult.participantName,
-                    usedAt: nowIso,
-                  }
-                : top
-            )
-          : prev.topics;
-
-        const nextDb: AppDatabase = {
-          ...prev,
-          round2Results: [...prev.round2Results.filter((r) => r.id !== recordId), fullResult],
-          participants: updatedP,
-          topics: updatedTopics,
-        };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('result_added', { round: 2, result: fullResult });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
-      });
-
-      return fullResult;
-    },
-    [deviceId, broadcastStationLocal]
-  );
-
-  const saveRound3Result = useCallback(
-    async (res: Omit<Round3Result, 'id'>) => {
-      const recordId = (res as any).id || generateUUID();
-      const nowIso = new Date().toISOString();
-      const fullResult: Round3Result = {
-        ...res,
-        id: recordId,
-        startTime: res.startTime || nowIso,
-        endTime: res.endTime || nowIso,
-        deviceId,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-      };
-
-      await syncEngine.enqueue({
-        id: recordId,
-        entityType: 'round3Result',
-        action: 'create',
-        deviceId,
-        data: fullResult,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
-
-      setDb((prev) => {
-        if (!prev) return prev;
-        const updatedP = prev.participants.map((p) => {
-          if (p.id === fullResult.participantId) {
-            return {
-              ...p,
-              round3Status: fullResult.status,
-              round3Qualified: fullResult.qualification || p.round3Qualified,
-              status:
-                fullResult.qualification === 'disqualified'
-                  ? 'eliminated'
-                  : fullResult.qualification === 'qualified' && p.status === 'eliminated'
-                  ? 'active'
-                  : p.status,
-              updatedAt: nowIso,
-            };
-          }
-          return p;
-        });
-
-        const nextDb: AppDatabase = {
-          ...prev,
-          round3Results: [...prev.round3Results.filter((r) => r.id !== recordId), fullResult],
-          participants: updatedP,
-        };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('result_added', { round: 3, result: fullResult });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
-      });
-
-      return fullResult;
-    },
-    [deviceId, broadcastStationLocal]
-  );
-
-  // Qualification methods (Offline-First)
+  // Qualification methods
   const setQualification = useCallback(
     async (
       participantId: string,
@@ -3128,47 +1628,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'qualified' | 'disqualified' | 'pending',
       reason?: string
     ) => {
-      const nowIso = new Date().toISOString();
-      const queueId = generateUUID();
-
-      // 1. Save to local IndexedDB queue first
-      await syncEngine.enqueue({
-        id: queueId,
-        entityType: 'qualification',
-        action: 'update',
-        deviceId,
-        data: { participantId, round, status, reason },
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        syncStatus: 'pending',
-        syncAttempts: 0,
-      });
-
-      // 2. Optimistically update local React state and IndexedDB cache
-      let updatedParticipantObj: Participant | null = null;
+      const res = await api.updateQualification({ participantId, round, status, reason });
       setDb((prev) => {
         if (!prev) return prev;
-        const updatedParticipants = prev.participants.map((p) => {
-          if (p.id === participantId) {
-            const up: Participant = {
-              ...p,
-              ...(round === 1 ? { round1Qualified: status } : {}),
-              ...(round === 2 ? { round2Qualified: status } : {}),
-              ...(round === 3 ? { round3Qualified: status } : {}),
-              status:
-                status === 'disqualified'
-                  ? 'eliminated'
-                  : status === 'qualified' && p.status === 'eliminated'
-                  ? 'active'
-                  : p.status,
-              qualificationReason: reason,
-              updatedAt: nowIso,
-            };
-            updatedParticipantObj = up;
-            return up;
-          }
-          return p;
-        });
+        const updatedParticipants = prev.participants.map((p) =>
+          p.id === participantId ? res.participant : p
+        );
         const updatedR1 =
           round === 1
             ? prev.round1Results.map((r) =>
@@ -3193,26 +1658,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   : r
               )
             : prev.round3Results;
-
-        const nextDb: AppDatabase = {
+        return {
           ...prev,
           participants: updatedParticipants,
           round1Results: updatedR1,
           round2Results: updatedR2,
           round3Results: updatedR3,
         };
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('qualification_updated', { participant: updatedParticipantObj });
-        broadcastStationLocal('db_sync', { db: nextDb });
-        return nextDb;
       });
-
-      if (updatedParticipantObj) {
-        setActiveParticipant((curr) => (curr?.id === participantId ? updatedParticipantObj : curr));
-      }
-      return updatedParticipantObj as any;
+      setActiveParticipant((curr) => (curr?.id === participantId ? res.participant : curr));
+      return res.participant;
     },
-    [deviceId, broadcastStationLocal]
+    []
   );
 
   const batchSetQualification = useCallback(
@@ -3221,44 +1678,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       round: 1 | 2 | 3,
       status: 'qualified' | 'disqualified' | 'pending'
     ) => {
-      let updatedParticipants: Participant[] = [];
-      const field = round === 1 ? 'round1Qualified' : round === 2 ? 'round2Qualified' : 'round3Qualified';
-
-      setDb((prev) => {
-        if (!prev) return prev;
-        const nextParticipants = prev.participants.map((p) => {
-          if (participantIds.includes(p.id)) {
-            return {
-              ...p,
-              [field]: status,
-              status:
-                status === 'disqualified'
-                  ? 'eliminated'
-                  : status === 'qualified' && p.status === 'eliminated'
-                  ? 'active'
-                  : p.status,
-              updatedAt: new Date().toISOString(),
-            };
-          }
-          return p;
-        });
-        updatedParticipants = nextParticipants;
-        const nextDb = { ...prev, participants: nextParticipants };
-        dbRef.current = nextDb;
-        saveCachedDb(nextDb).catch(() => {});
-        broadcastStationLocal('participants_batch_updated', { participants: nextParticipants });
-        return nextDb;
-      });
-
-      try {
-        const res = await api.batchUpdateQualification({ participantIds, round, status });
-        return res.participants;
-      } catch (err) {
-        console.warn('[Offline] batchSetQualification applied locally:', err);
-        return updatedParticipants;
-      }
+      const res = await api.batchUpdateQualification({ participantIds, round, status });
+      await reloadState();
+      return res.participants;
     },
-    [broadcastStationLocal]
+    [reloadState]
   );
 
   // Live Sync
@@ -3297,10 +1721,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isFullscreen,
         toggleFullscreen,
 
-        // Offline & Synchronization State
-        syncState,
-        syncNow,
-
         // Station & Device Management
         deviceId,
         deviceRole,
@@ -3331,7 +1751,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateStationHandler,
         pingStation,
         assignStationImage,
-        setStationImage,
         rotateStationImage,
         spinStationTopic,
         completeStationSpin,

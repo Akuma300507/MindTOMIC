@@ -34,7 +34,7 @@ import { useApp } from '../context/AppContext';
 import { computeStationTimer } from '../lib/timerUtils';
 import { getServerNow } from '../lib/timeSync';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
-import type { StationState, StationStatus, Participant, ProjectorDevice } from '../types';
+import type { StationState, StationStatus, Participant } from '../types';
 
 export const Master: React.FC = () => {
   const {

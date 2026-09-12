@@ -9,20 +9,11 @@ import type {
   LiveSyncState,
   StationState,
   ProjectorDevice,
-  SyncBatchRequest,
-  SyncBatchResponse,
 } from '../types';
 import { getServerNow, recordServerTimestamp } from './timeSync';
 
 // Scoped fetch wrapper attaching unique projector device ID header if present in localStorage
 const nativeFetch = typeof window !== 'undefined' ? window.fetch.bind(window) : globalThis.fetch;
-
-export const isLocalhostAddress = (): boolean => {
-  if (typeof window === 'undefined') return true;
-  const host = window.location.hostname;
-  return host === 'localhost' || host === '127.0.0.1' || host === '' || host.startsWith('192.168.') || host.startsWith('10.');
-};
-
 const fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const headers = new Headers(init?.headers);
   try {
@@ -44,28 +35,10 @@ export const api = {
   },
 
   // State
-  async getState(timeoutMs: number = 800): Promise<AppDatabase> {
-    if (typeof navigator !== 'undefined' && !navigator.onLine && !isLocalhostAddress()) {
-      throw new Error('Network offline');
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const res = await fetch(`/api/state?_t=${Date.now()}`, {
-        cache: 'no-store',
-        signal: controller.signal,
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          Pragma: 'no-cache',
-        },
-      });
-      if (!res.ok) throw new Error('Failed to load database state');
-      return await res.json();
-    } finally {
-      clearTimeout(timeoutId);
-    }
+  async getState(): Promise<AppDatabase> {
+    const res = await fetch('/api/state');
+    if (!res.ok) throw new Error('Failed to load database state');
+    return res.json();
   },
 
   async resetData(): Promise<void> {
@@ -774,20 +747,6 @@ export const api = {
       body: JSON.stringify({ message }),
     });
     if (!res.ok) throw new Error('Failed to ping projector');
-    return res.json();
-  },
-
-  // Batch Offline Sync
-  async syncBatch(payload: SyncBatchRequest): Promise<SyncBatchResponse> {
-    const res = await fetch('/api/sync/batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.error || `Failed to sync batch (HTTP ${res.status})`);
-    }
     return res.json();
   },
 };

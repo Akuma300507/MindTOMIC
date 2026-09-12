@@ -214,11 +214,7 @@ export const Round2: React.FC = () => {
     } catch (err: any) {
       setIsSpinning(false);
       setLockedWheelTopics(null);
-      if (err?.message && !err.message.includes('fetch') && !err.message.includes('Network') && !err.message.includes('Failed')) {
-        setPoolNotice(err.message);
-      } else {
-        console.warn('Topic spin offline warning:', err);
-      }
+      setPoolNotice(err.message || 'No unused topics remaining. Please reset topic pool or allow reuse.');
       return;
     }
 

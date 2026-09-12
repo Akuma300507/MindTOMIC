@@ -90,10 +90,6 @@ export interface Round1Result {
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;
-  deviceId?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
 }
 
 export interface Round2Result {
@@ -115,10 +111,6 @@ export interface Round2Result {
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;
-  deviceId?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
 }
 
 export interface Round3Result {
@@ -136,10 +128,6 @@ export interface Round3Result {
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;
-  deviceId?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
 }
 
 export interface EventStation {
@@ -381,61 +369,3 @@ export interface ProjectorDevice {
   ip?: string;
   userAgent?: string;
 }
-
-// Offline-First Synchronization Types
-export type SyncStatus = 'pending' | 'syncing' | 'synced' | 'failed';
-
-export type SyncEntityType =
-  | 'participant'
-  | 'round1Result'
-  | 'round2Result'
-  | 'round3Result'
-  | 'topic'
-  | 'image'
-  | 'qualification'
-  | 'log'
-  | 'settings';
-
-export type SyncAction = 'create' | 'update' | 'delete';
-
-export interface SyncMetadata {
-  id: string; // Globally unique UUID
-  eventId?: string;
-  deviceId?: string;
-  createdAt: string;
-  updatedAt?: string;
-  syncStatus?: SyncStatus;
-  syncAttempts?: number;
-  syncedAt?: string;
-}
-
-export interface SyncQueueItem {
-  id: string; // globally unique record/event UUID
-  entityType: SyncEntityType;
-  action: SyncAction;
-  deviceId: string;
-  eventId?: string;
-  data: any;
-  createdAt: string;
-  updatedAt: string;
-  syncStatus: SyncStatus;
-  syncAttempts: number;
-  lastAttemptAt?: string;
-  syncedAt?: string;
-  error?: string;
-}
-
-export interface SyncBatchRequest {
-  deviceId: string;
-  items: SyncQueueItem[];
-}
-
-export interface SyncBatchResponse {
-  success: boolean;
-  syncedIds: string[];
-  failedIds?: string[];
-  serverTime: number;
-  state?: AppDatabase;
-  message?: string;
-}
-

@@ -19,12 +19,6 @@ import type {
   StationStatus,
   StationWheelSpin,
   ProjectorDevice,
-  Round1Result,
-  Round2Result,
-  Round3Result,
-  SyncBatchRequest,
-  SyncBatchResponse,
-  SyncQueueItem,
 } from './src/types';
 
 const app = express();
@@ -512,7 +506,6 @@ async function initMongo() {
 
 // Helper to persist data to disk and MongoDB Atlas
 let saveTimeout: NodeJS.Timeout | null = null;
-let isSelfWriting = false;
 function persistDB() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
@@ -520,9 +513,7 @@ function persistDB() {
       if (db.stations) {
         db.liveSync.stationStates = db.stations;
       }
-      isSelfWriting = true;
       fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
-      setTimeout(() => { isSelfWriting = false; }, 350);
 
       if (mongoDb) {
         await mongoDb.collection('app_state').updateOne(
@@ -532,7 +523,6 @@ function persistDB() {
         );
       }
     } catch (err) {
-      isSelfWriting = false;
       console.error('Failed to persist database:', err);
     }
   }, 100);
@@ -548,9 +538,7 @@ function persistDBSync() {
     if (db.stations) {
       db.liveSync.stationStates = db.stations;
     }
-    isSelfWriting = true;
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
-    setTimeout(() => { isSelfWriting = false; }, 350);
     if (mongoDb) {
       mongoDb.collection('app_state').updateOne(
         { _id: 'current_state' },
@@ -559,7 +547,6 @@ function persistDBSync() {
       ).catch((e: any) => console.error('[mongodb] sync persist error:', e));
     }
   } catch (err) {
-    isSelfWriting = false;
     console.error('Failed to persist database synchronously:', err);
   }
 }
@@ -587,39 +574,6 @@ function broadcastSSE(event: string, data: any) {
       // client dropped
     }
   });
-}
-
-// Watch data/db.json for external backend changes or direct edits
-let reloadDebounce: NodeJS.Timeout | null = null;
-try {
-  fs.watch(DB_FILE, (eventType) => {
-    if (eventType !== 'change') return;
-    if (isSelfWriting) return;
-
-    if (reloadDebounce) clearTimeout(reloadDebounce);
-    reloadDebounce = setTimeout(() => {
-      try {
-        if (!fs.existsSync(DB_FILE)) return;
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        const freshDb: AppDatabase = JSON.parse(raw);
-        if (freshDb && freshDb.stations) {
-          db = freshDb;
-          console.log('[server] Detected external change to data/db.json, syncing clients & projector...');
-          broadcastSSE('db_sync', db);
-          broadcastSSE('stations_updated', Object.values(db.stations));
-          if (db.settings) broadcastSSE('settings_updated', db.settings);
-          if (db.topics) broadcastSSE('topics_updated', db.topics);
-          if (db.images) broadcastSSE('images_updated', db.images);
-          if (db.participants) broadcastSSE('participants_batch_updated', { updatedList: db.participants });
-        }
-      } catch (err) {
-        console.warn('[server] Error reloading external db.json change:', err);
-      }
-    }, 200);
-  });
-  console.log('[server] File watcher active on data/db.json for real-time offline sync');
-} catch (err) {
-  console.warn('[server] Could not attach watcher to db.json:', err);
 }
 
 function broadcastToChannel(channel: string, event: string, data: any) {
@@ -652,14 +606,12 @@ function broadcastStationUpdate(stationId: string, event: string, data: any) {
       return;
     }
 
-    // State, timer, and metadata updates: broadcast to station subscribers, master supervisors, organizer consoles, and projectors
+    // State, timer, and metadata updates: broadcast to station subscribers, master supervisors, and organizer consoles
     if (
       client.channels.has(targetChannel) ||
       client.channels.has('master') ||
       client.type === 'master' ||
       client.type === 'organizer' ||
-      client.type === 'projector' ||
-      client.channels.has('projector') ||
       client.channels.has('global')
     ) {
       try {
@@ -745,9 +697,6 @@ app.get('/api/health', (req: Request, res: Response) => {
 
 // Full state
 app.get('/api/state', (req: Request, res: Response) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
   res.json(db);
 });
 
@@ -835,12 +784,8 @@ app.get('/api/events', (req: Request, res: Response) => {
   const channels = new Set<string>();
   channels.add('global');
 
-  if (type === 'master' || type === 'organizer' || type === 'projector' || !stationId || stationId === 'all') {
+  if (type === 'master' || type === 'organizer' || !stationId || stationId === 'all') {
     channels.add('master');
-  }
-
-  if (type === 'projector') {
-    channels.add('projector');
   }
 
   if (stationId && stationId !== 'all') {
@@ -2248,13 +2193,7 @@ app.post('/api/participants', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Name is required' });
   }
 
-  const newId = p.id || `p-${Date.now()}`;
-  const existingIdx = db.participants.findIndex((item) => item.id === newId);
-  if (existingIdx >= 0) {
-    // Idempotent: record already exists, return existing or updated record
-    return res.json(db.participants[existingIdx]);
-  }
-
+  const newId = `p-${Date.now()}`;
   const count = db.participants.length + 1;
   const participantNumber = p.participantNumber || `M2M-${String(count).padStart(3, '0')}`;
 
@@ -2271,8 +2210,8 @@ app.post('/api/participants', (req: Request, res: Response) => {
     round2Status: p.round2Status || 'pending',
     round3Status: p.round3Status || 'pending',
     customData: p.customData || {},
-    createdAt: p.createdAt || new Date().toISOString(),
-    updatedAt: p.updatedAt || new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
   db.participants.push(newParticipant);
@@ -2925,218 +2864,9 @@ app.get('/api/results', (req: Request, res: Response) => {
   });
 });
 
-// BATCH SYNC API: Idempotent multi-device offline synchronization
-app.post('/api/sync/batch', (req: Request, res: Response) => {
-  const { deviceId, items } = req.body as SyncBatchRequest;
-  if (!Array.isArray(items)) {
-    return res.status(400).json({ success: false, error: 'Expected items array' });
-  }
-
-  const syncedIds: string[] = [];
-  const failedIds: string[] = [];
-
-  for (const item of items) {
-    try {
-      if (!item || !item.id) continue;
-
-      const { entityType, action, data } = item;
-
-      if (entityType === 'participant') {
-        if (action === 'delete') {
-          db.participants = db.participants.filter((p) => p.id !== item.id);
-          broadcastSSE('participant_deleted', { id: item.id });
-        } else {
-          const participantData = data as Participant;
-          participantData.id = item.id;
-          const idx = db.participants.findIndex((p) => p.id === item.id);
-          if (idx >= 0) {
-            // Last-Write-Wins based on updatedAt
-            const existingTime = new Date(db.participants[idx].updatedAt || 0).getTime();
-            const incomingTime = new Date(item.updatedAt || participantData.updatedAt || 0).getTime();
-            if (incomingTime >= existingTime) {
-              db.participants[idx] = {
-                ...db.participants[idx],
-                ...participantData,
-                id: item.id,
-                updatedAt: new Date().toISOString(),
-              };
-              broadcastSSE('participant_updated', db.participants[idx]);
-            }
-          } else {
-            db.participants.push(participantData);
-            broadcastSSE('participant_created', participantData);
-          }
-        }
-        syncedIds.push(item.id);
-      } else if (entityType === 'round1Result') {
-        const result = data as Round1Result;
-        result.id = item.id;
-        const existingIdx = db.round1Results.findIndex((r) => r.id === item.id);
-        if (existingIdx >= 0) {
-          // Idempotent: already exists, don't duplicate
-          syncedIds.push(item.id);
-        } else {
-          db.round1Results.push(result);
-          const p = db.participants.find((item) => item.id === result.participantId);
-          if (p) {
-            p.round1Status = result.status;
-            p.round1ImageId = result.imageId || result.imageName;
-            if (result.qualification) {
-              p.round1Qualified = result.qualification;
-              if (result.qualification === 'disqualified') p.status = 'eliminated';
-              else if (result.qualification === 'qualified' && p.status === 'eliminated') p.status = 'active';
-            }
-          }
-          if (!db.settings.round1.allowImageReuse) {
-            const img = db.images.find((i) => i.id === result.imageId || i.imageId === result.imageId);
-            if (img) {
-              img.status = 'used';
-              img.usedByParticipantId = result.participantId;
-              img.usedByParticipantName = result.participantName;
-              img.usedAt = new Date().toISOString();
-            }
-          }
-          logAction('Round 1 Completed', `Participant ${result.participantName} completed Round 1 speech (${result.speechDurationSeconds}s)`, 'Round 1', result.participantId, result.participantName);
-          broadcastSSE('result_added', { round: 1, result });
-          syncedIds.push(item.id);
-        }
-      } else if (entityType === 'round2Result') {
-        const result = data as Round2Result;
-        result.id = item.id;
-        const existingIdx = db.round2Results.findIndex((r) => r.id === item.id);
-        if (existingIdx >= 0) {
-          syncedIds.push(item.id);
-        } else {
-          db.round2Results.push(result);
-          const p = db.participants.find((item) => item.id === result.participantId);
-          if (p) {
-            p.round2Status = result.status;
-            p.round2TopicId = result.topicId;
-            if (result.qualification) {
-              p.round2Qualified = result.qualification;
-              if (result.qualification === 'disqualified') p.status = 'eliminated';
-              else if (result.qualification === 'qualified' && p.status === 'eliminated') p.status = 'active';
-            }
-          }
-          if (!db.settings.round2.topicReuseAllowed) {
-            const top = db.topics.find((t) => t.id === result.topicId || t.topicId === result.topicId);
-            if (top) {
-              top.status = 'used';
-              top.usedByParticipantId = result.participantId;
-              top.usedByParticipantName = result.participantName;
-              top.usedAt = new Date().toISOString();
-            }
-          }
-          logAction('Round 2 Completed', `Participant ${result.participantName} completed Round 2 on topic "${result.topic}" (${result.speechDurationSeconds}s)`, 'Round 2', result.participantId, result.participantName);
-          broadcastSSE('result_added', { round: 2, result });
-          syncedIds.push(item.id);
-        }
-      } else if (entityType === 'round3Result') {
-        const result = data as Round3Result;
-        result.id = item.id;
-        const existingIdx = db.round3Results.findIndex((r) => r.id === item.id);
-        if (existingIdx >= 0) {
-          syncedIds.push(item.id);
-        } else {
-          db.round3Results.push(result);
-          const p = db.participants.find((item) => item.id === result.participantId);
-          if (p) {
-            p.round3Status = result.status;
-            if (result.qualification) {
-              p.round3Qualified = result.qualification;
-              if (result.qualification === 'disqualified') p.status = 'eliminated';
-              else if (result.qualification === 'qualified' && p.status === 'eliminated') p.status = 'active';
-            }
-          }
-          logAction('Round 3 Completed', `Participant ${result.participantName} completed Round 3 speech (${result.speechDurationSeconds}s)`, 'Round 3', result.participantId, result.participantName);
-          broadcastSSE('result_added', { round: 3, result });
-          syncedIds.push(item.id);
-        }
-      } else if (entityType === 'qualification') {
-        const { participantId, round, status, reason } = data;
-        const p = db.participants.find((item) => item.id === participantId);
-        if (p) {
-          if (round === 1) {
-            p.round1Qualified = status;
-            const r = db.round1Results.find((res) => res.participantId === participantId);
-            if (r) { r.qualification = status; r.qualificationReason = reason; }
-          } else if (round === 2) {
-            p.round2Qualified = status;
-            const r = db.round2Results.find((res) => res.participantId === participantId);
-            if (r) { r.qualification = status; r.qualificationReason = reason; }
-          } else if (round === 3) {
-            p.round3Qualified = status;
-            const r = db.round3Results.find((res) => res.participantId === participantId);
-            if (r) { r.qualification = status; r.qualificationReason = reason; }
-          }
-          if (status === 'disqualified') p.status = 'eliminated';
-          else if (status === 'qualified' && p.status === 'eliminated') p.status = 'active';
-          p.qualificationReason = reason;
-          p.updatedAt = new Date().toISOString();
-        }
-        syncedIds.push(item.id);
-      } else if (entityType === 'topic') {
-        const topic = data as Topic;
-        topic.id = item.id;
-        const idx = db.topics.findIndex((t) => t.id === item.id);
-        if (idx >= 0) {
-          db.topics[idx] = { ...db.topics[idx], ...topic };
-        } else {
-          db.topics.push(topic);
-        }
-        syncedIds.push(item.id);
-      } else if (entityType === 'image') {
-        const img = data as EventImage;
-        img.id = item.id;
-        const idx = db.images.findIndex((i) => i.id === item.id);
-        if (idx >= 0) {
-          db.images[idx] = { ...db.images[idx], ...img };
-        } else {
-          db.images.push(img);
-        }
-        syncedIds.push(item.id);
-      } else if (entityType === 'log') {
-        const log = data as EventLog;
-        log.id = item.id;
-        if (!db.history.some((h) => h.id === item.id)) {
-          db.history.push(log);
-        }
-        syncedIds.push(item.id);
-      } else {
-        syncedIds.push(item.id);
-      }
-    } catch (err: any) {
-      console.error(`[sync/batch] Error processing item ${item?.id}:`, err);
-      failedIds.push(item.id);
-    }
-  }
-
-  if (syncedIds.length > 0) {
-    persistDB();
-    broadcastSSE('sync_update', { syncedCount: syncedIds.length, deviceId, db });
-    broadcastSSE('db_sync', db);
-    broadcastSSE('stations_updated', Object.values(db.stations || {}));
-    broadcastSSE('participants_batch_updated', { updatedList: db.participants });
-  }
-
-  return res.json({
-    success: true,
-    syncedIds,
-    failedIds,
-    serverTime: Date.now(),
-    state: db,
-  });
-});
-
 app.post('/api/results/round1', (req: Request, res: Response) => {
   const result = req.body;
-  result.id = result.id || `r1-${Date.now()}`;
-
-  const existingIdx = db.round1Results.findIndex((r) => r.id === result.id);
-  if (existingIdx >= 0) {
-    // Idempotent: already exists, return existing record
-    return res.json(db.round1Results[existingIdx]);
-  }
+  result.id = `r1-${Date.now()}`;
 
   // Update participant status
   const p = db.participants.find((item) => item.id === result.participantId);
@@ -3173,13 +2903,7 @@ app.post('/api/results/round1', (req: Request, res: Response) => {
 
 app.post('/api/results/round2', (req: Request, res: Response) => {
   const result = req.body;
-  result.id = result.id || `r2-${Date.now()}`;
-
-  const existingIdx = db.round2Results.findIndex((r) => r.id === result.id);
-  if (existingIdx >= 0) {
-    // Idempotent: already exists
-    return res.json(db.round2Results[existingIdx]);
-  }
+  result.id = `r2-${Date.now()}`;
 
   const p = db.participants.find((item) => item.id === result.participantId);
   if (p) {
@@ -3215,13 +2939,7 @@ app.post('/api/results/round2', (req: Request, res: Response) => {
 
 app.post('/api/results/round3', (req: Request, res: Response) => {
   const result = req.body;
-  result.id = result.id || `r3-${Date.now()}`;
-
-  const existingIdx = db.round3Results.findIndex((r) => r.id === result.id);
-  if (existingIdx >= 0) {
-    // Idempotent: already exists
-    return res.json(db.round3Results[existingIdx]);
-  }
+  result.id = `r3-${Date.now()}`;
 
   const p = db.participants.find((item) => item.id === result.participantId);
   if (p) {

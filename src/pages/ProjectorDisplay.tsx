@@ -50,15 +50,7 @@ export const ProjectorDisplay: React.FC = () => {
     projectorDeviceId,
     projectorPingNotification,
     clearProjectorPingNotification,
-    reloadState,
   } = useApp();
-
-  // Ensure freshest state on projector mount; continuous updates are handled reactively by AppContext
-  useEffect(() => {
-    if (reloadState) {
-      reloadState().catch(() => {});
-    }
-  }, [reloadState]);
 
   useEffect(() => {
     if (projectorPingNotification) {
@@ -149,16 +141,11 @@ export const ProjectorDisplay: React.FC = () => {
       const match = db.participants.find((p) => p.id === currentStationState.activeParticipantId);
       if (match) return match;
     }
-    // Fallback: match the first participant assigned to this station if not yet explicitly selected
-    if (selectedStationId && selectedStationId !== 'all' && db?.participants) {
-      const stationMatches = db.participants.filter((p) => p.stationId === selectedStationId);
-      if (stationMatches.length > 0) return stationMatches[0];
-    }
     return null;
-  }, [currentStationState, db?.participants, selectedStationId]);
+  }, [currentStationState, db?.participants]);
 
-  const eventName = db?.settings?.event?.name || 'MIND TO MIC';
-  const tagline = db?.settings?.event?.tagline || 'THINK. SPEAK. EXPRESS.';
+  const eventName = db?.settings.event.name || 'MIND TO MIC';
+  const tagline = db?.settings.event.tagline || 'THINK. SPEAK. EXPRESS.';
 
   // STRICT STATION ISOLATION: Round number for this station
   const currentRound = useMemo(() => {
@@ -168,52 +155,24 @@ export const ProjectorDisplay: React.FC = () => {
   // STRICT STATION ISOLATION: Active displayed item (image or topic)
   const activeItem = useMemo(() => {
     if (!currentStationState) return null;
-
-    const hasImage = Boolean(currentStationState.selectedImage || currentStationState.selectedImageId);
-    const hasTopic = Boolean(currentStationState.selectedTopic || currentStationState.selectedTopicId || currentStationState.wheelSpin?.isSpinning);
-
-    if (currentRound === 1 || (hasImage && !hasTopic)) {
-      if (hasImage) {
-        const selectedImg =
-          currentStationState.selectedImage ||
-          (db?.images
-            ? db.images.find(
-                (img) =>
-                  img.id === currentStationState.selectedImageId ||
-                  img.imageId === currentStationState.selectedImageId
-              )
-            : null);
-        if (selectedImg) {
-          const imageId = selectedImg.imageId || selectedImg.name;
-          return {
-            type: 'image' as const,
-            title: `IMAGE ID: ${imageId}`,
-            mediaUrl: selectedImg.url,
-            id: selectedImg.id,
-            rotation: currentStationState.imageRotation ?? selectedImg.rotation ?? 0,
-          };
-        }
-      }
+    if (currentRound === 1 && currentStationState.selectedImage) {
+      const imageId = currentStationState.selectedImage.imageId || currentStationState.selectedImage.name;
+      return {
+        type: 'image' as const,
+        title: `IMAGE ID: ${imageId}`,
+        mediaUrl: currentStationState.selectedImage.url,
+        id: currentStationState.selectedImage.id,
+        rotation: currentStationState.imageRotation ?? currentStationState.selectedImage.rotation ?? 0,
+      };
     }
-
-    if (currentRound === 2 || hasTopic) {
-      if (hasTopic) {
-        const selectedTop =
-          currentStationState.selectedTopic ||
-          (db?.topics
-            ? db.topics.find((t) => t.id === currentStationState.selectedTopicId)
-            : null);
-        if (selectedTop) {
-          return {
-            type: 'topic' as const,
-            title: selectedTop.topic,
-            id: selectedTop.id,
-            category: selectedTop.category,
-          };
-        }
-      }
+    if (currentRound === 2 && currentStationState.selectedTopic) {
+      return {
+        type: 'topic' as const,
+        title: currentStationState.selectedTopic.topic,
+        id: currentStationState.selectedTopic.id,
+        category: currentStationState.selectedTopic.category,
+      };
     }
-
     if (currentRound === 3) {
       return {
         type: 'final' as const,
@@ -221,7 +180,7 @@ export const ProjectorDisplay: React.FC = () => {
       };
     }
     return null;
-  }, [currentStationState, currentRound, db?.images, db?.topics]);
+  }, [currentStationState, currentRound]);
 
   // Real-time Timer Interpolation using shared backend timestamps (zero-drift, clock-synced)
   const [nowMs, setNowMs] = useState<number>(() => getServerNow());
@@ -256,12 +215,10 @@ export const ProjectorDisplay: React.FC = () => {
 
   // Image rotation state (0, 90, 180, 270 degrees)
   const [localImageRotation, setLocalImageRotation] = useState<number>(0);
-  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
 
   // Reset local rotation when active image changes
   useEffect(() => {
     setLocalImageRotation(0);
-    setImageLoadError(false);
   }, [activeItem?.id]);
 
   // Combined rotation between local display and station saved rotation
@@ -331,10 +288,10 @@ export const ProjectorDisplay: React.FC = () => {
   // STRICT STATION ISOLATION: Default active topics for this station
   const stationDefaultWheelTopics = useMemo(() => {
     if (!db?.topics) return [];
-    const count = db?.settings?.round2?.activeWheelTopicCount || 20;
+    const count = db.settings.round2.activeWheelTopicCount || 20;
 
     if (selectedStationId) {
-      const station = db?.stations?.[selectedStationId];
+      const station = db.stations?.[selectedStationId];
       const stationName = station?.name;
       // Dedicated topics assigned to this station
       const dedicated = db.topics.filter(
@@ -355,7 +312,7 @@ export const ProjectorDisplay: React.FC = () => {
 
     const available = db.topics.filter((t) => t.status === 'available');
     return (available.length > 0 ? available : db.topics).slice(0, count);
-  }, [db?.topics, db?.settings?.round2?.activeWheelTopicCount, selectedStationId, db?.stations]);
+  }, [db?.topics, db?.settings.round2.activeWheelTopicCount, selectedStationId, db?.stations]);
 
   // The topics currently rendered on the projector wheel
   const activeTopics = useMemo(() => {
@@ -535,20 +492,14 @@ export const ProjectorDisplay: React.FC = () => {
   // Strictly hidden until wheel spin is fully finished!
   const currentRoundTopic = useMemo(() => {
     if (isSpinActive) return null;
-    const resolvedTopic =
-      currentStationState?.selectedTopic ||
-      (currentStationState?.selectedTopicId && db?.topics
-        ? db.topics.find((t) => t.id === currentStationState.selectedTopicId)
-        : null);
-
     if (
-      resolvedTopic &&
-      currentStationState?.status !== 'WAITING' &&
-      currentStationState?.status !== 'SPINNING'
+      currentStationState?.selectedTopic &&
+      currentStationState.status !== 'WAITING' &&
+      currentStationState.status !== 'SPINNING'
     ) {
       return {
-        title: resolvedTopic.topic,
-        category: resolvedTopic.category,
+        title: currentStationState.selectedTopic.topic,
+        category: currentStationState.selectedTopic.category,
       };
     }
     if (
@@ -570,27 +521,7 @@ export const ProjectorDisplay: React.FC = () => {
     currentStationState?.selectedTopic,
     currentStationState?.status,
     currentStationState?.selectedTopicId,
-    db?.topics,
   ]);
-
-  if (!db) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-8 select-none font-['Outfit'] relative overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-purple-600/15 rounded-full blur-[140px] pointer-events-none" />
-        <div className="flex flex-col items-center space-y-6 text-center z-10 animate-in fade-in duration-300">
-          <MindToMicLogo size={80} className="drop-shadow-[0_0_30px_rgba(168,85,247,0.5)] animate-pulse" />
-          <InspireLogo size={70} showGlow={true} />
-          <div className="space-y-2">
-            <h1 className="text-3xl font-black tracking-tight text-white">PROJECTOR STAGE</h1>
-            <p className="text-xs font-mono text-purple-300 uppercase tracking-widest flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" />
-              Loading Offline Stage...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between p-6 sm:p-10 relative overflow-hidden select-none font-['Outfit']">
@@ -727,16 +658,15 @@ export const ProjectorDisplay: React.FC = () => {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${
               isConnected
                 ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-300'
-                : 'bg-indigo-950/80 border-indigo-600/80 text-indigo-200'
+                : 'bg-amber-950/70 border-amber-800/80 text-amber-300 animate-pulse'
             }`}
-            title={isConnected ? 'Real-Time SSE Connected' : 'Continuous Offline Auto-Refresher Active (Syncs every 1s without F5)'}
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)] animate-pulse'
+                isConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'bg-amber-400'
               }`}
             />
-            <span className="hidden md:inline">{isConnected ? 'LIVE SYNC' : 'OFFLINE AUTO-REFRESH'}</span>
+            <span className="hidden md:inline">{isConnected ? 'LIVE SYNC' : 'RECONNECTING'}</span>
           </div>
 
           {/* Top-Right Corner Small Clock for Round 1 & Round 2 */}
@@ -989,35 +919,18 @@ export const ProjectorDisplay: React.FC = () => {
 
                 {/* Main Big Image Viewport */}
                 <div className="w-full max-h-[66vh] sm:max-h-[72vh] xl:max-h-[75vh] min-h-[40vh] flex items-center justify-center bg-black/60 overflow-hidden p-2 sm:p-3 relative">
-                  {imageLoadError ? (
-                    <div className="flex flex-col items-center justify-center p-8 text-center space-y-4">
-                      <div className="p-6 rounded-3xl bg-purple-950/80 border-2 border-purple-500/60 shadow-[0_0_50px_rgba(168,85,247,0.4)]">
-                        <ImageIcon className="w-20 h-20 text-purple-300" />
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-xs font-mono font-bold text-purple-400 uppercase tracking-widest">
-                          VISUAL PROMPT (OFFLINE)
-                        </span>
-                        <h3 className="text-3xl sm:text-5xl font-black text-white font-mono tracking-wider">
-                          {activeItem.title}
-                        </h3>
-                      </div>
-                    </div>
-                  ) : (
-                    <img
-                      src={activeItem.mediaUrl}
-                      alt={activeItem.title}
-                      onError={() => setImageLoadError(true)}
-                      style={{
-                        transform: `rotate(${totalRotation}deg)`,
-                        transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                        maxHeight: totalRotation % 180 !== 0 ? '58vw' : '70vh',
-                        maxWidth: totalRotation % 180 !== 0 ? '60vh' : '100%',
-                      }}
-                      className="w-auto h-auto object-contain transition-transform duration-500 rounded-2xl drop-shadow-2xl"
-                      referrerPolicy="no-referrer"
-                    />
-                  )}
+                  <img
+                    src={activeItem.mediaUrl}
+                    alt={activeItem.title}
+                    style={{
+                      transform: `rotate(${totalRotation}deg)`,
+                      transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      maxHeight: totalRotation % 180 !== 0 ? '58vw' : '70vh',
+                      maxWidth: totalRotation % 180 !== 0 ? '60vh' : '100%',
+                    }}
+                    className="w-auto h-auto object-contain transition-transform duration-500 rounded-2xl drop-shadow-2xl"
+                    referrerPolicy="no-referrer"
+                  />
                 </div>
 
                 {/* Prominent Image ID Bottom Bar */}
