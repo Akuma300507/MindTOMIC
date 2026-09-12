@@ -681,6 +681,23 @@ export const api = {
     return res.json();
   },
 
+  // Custom Mid-Round Timing Warning Buzzer Audio
+  async uploadCustomWarningBuzzer(audioData: string, fileName?: string) {
+    const res = await fetch('/api/buzzer/warning-custom-sound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioData, fileName }),
+    });
+    if (!res.ok) throw new Error('Failed to upload warning buzzer audio');
+    return res.json();
+  },
+
+  async resetCustomWarningBuzzer() {
+    const res = await fetch('/api/buzzer/warning-custom-sound', { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to reset warning buzzer');
+    return res.json();
+  },
+
   // Custom Official Logo Management
   async uploadCustomLogo(logoData: string, fileName?: string) {
     const res = await fetch('/api/settings/logo', {

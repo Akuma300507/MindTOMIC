@@ -74,6 +74,8 @@ const defaultSettings: EventSettings = {
     buzzerEnabled: true,
     buzzerTimeSeconds: 120,
     allowImageReuse: false,
+    warningBuzzerEnabled: true,
+    warningTimeSeconds: 30,
   },
   round2: {
     prepEnabled: false, // Round 2 starts speaking immediately
@@ -83,6 +85,8 @@ const defaultSettings: EventSettings = {
     buzzerTimeSeconds: 120,
     activeWheelTopicCount: 16,
     topicReuseAllowed: false,
+    warningBuzzerEnabled: true,
+    warningTimeSeconds: 30,
   },
   round3: {
     prepEnabled: false,
@@ -90,6 +94,8 @@ const defaultSettings: EventSettings = {
     speechTimeSeconds: 120,
     buzzerEnabled: true,
     buzzerTimeSeconds: 120,
+    warningBuzzerEnabled: true,
+    warningTimeSeconds: 30,
   },
   buzzer: {
     laptopBuzzer: true,
@@ -99,6 +105,8 @@ const defaultSettings: EventSettings = {
     autoBuzzerOnZero: true,
     prepSound: 'dual_alert',
     prepVolume: 85,
+    warningSound: 'double_beep',
+    warningVolume: 85,
   },
   stations: [
     { id: 'station-a', name: 'Station A', location: 'Room 101', handlerName: 'Alex Rivera', handlerPhone: '+1 (555) 234-5678', handlerRole: 'Stage Lead', handlerStatus: 'ready' },
@@ -108,16 +116,7 @@ const defaultSettings: EventSettings = {
   ],
 };
 
-const defaultCustomFields: CustomFieldDefinition[] = [
-  {
-    id: 'f_phone',
-    name: 'Phone Number',
-    key: 'phone',
-    type: 'text',
-    required: false,
-    isSystem: false,
-  },
-];
+const defaultCustomFields: CustomFieldDefinition[] = [];
 
 const defaultParticipants: Participant[] = [
   {
@@ -458,6 +457,28 @@ try {
         t.topicId = `TOP-${String(idx + 1).padStart(3, '0')}`;
       }
     });
+
+    // Clean up redundant default phone number custom field
+    if (db.customFields) {
+      db.customFields = db.customFields.filter(
+        (cf) => cf.id !== 'f_phone' && cf.key !== 'phone' && cf.name?.toLowerCase() !== 'phone number'
+      );
+    }
+
+    // Ensure warning buzzer defaults exist on loaded db settings
+    if (db.settings) {
+      ['round1', 'round2', 'round3'].forEach((rnd) => {
+        const r = (db.settings as any)[rnd];
+        if (r) {
+          if (r.warningBuzzerEnabled === undefined) r.warningBuzzerEnabled = true;
+          if (r.warningTimeSeconds === undefined) r.warningTimeSeconds = 30;
+        }
+      });
+      if (db.settings.buzzer) {
+        if (!db.settings.buzzer.warningSound) db.settings.buzzer.warningSound = 'double_beep';
+        if (db.settings.buzzer.warningVolume === undefined) db.settings.buzzer.warningVolume = 85;
+      }
+    }
 
     if (!db.liveSync) db.liveSync = getInitialDatabase().liveSync;
     db.liveSync.stationStates = db.stations;
@@ -841,15 +862,17 @@ app.get('/api/events', (req: Request, res: Response) => {
 
 // Buzzer trigger
 app.post('/api/buzzer/trigger', (req: Request, res: Response) => {
-  const { source, reason, round, participantName, stationId } = req.body;
+  const { source, reason, round, participantName, stationId, soundType } = req.body;
+  const isWarning = soundType === 'warning' || source === 'warning_buzzer';
   const triggerPayload = {
     timestamp: Date.now(),
     eventId: `buzzer-${Date.now()}-${stationId || 'global'}`,
     source: source || 'organizer',
-    reason: reason || 'Manual Buzzer',
+    soundType: isWarning ? 'warning' : 'main',
+    reason: reason || (isWarning ? 'Mid-Round Timing Warning' : 'Manual Buzzer'),
     round: round || 'General',
-    sound: db.settings.buzzer.sound,
-    volume: db.settings.buzzer.volume,
+    sound: isWarning ? (db.settings.buzzer.warningSound || 'double_beep') : db.settings.buzzer.sound,
+    volume: isWarning ? (db.settings.buzzer.warningVolume ?? 85) : db.settings.buzzer.volume,
     stationId: stationId || undefined,
   };
 
@@ -926,6 +949,42 @@ app.delete('/api/buzzer/prep-custom-sound', (req: Request, res: Response) => {
 
   persistDB();
   logAction('Prep Buzzer Reset', 'Custom preparation buzzer reset to energetic dual alert');
+  broadcastSSE('settings_updated', db.settings);
+  res.json({ success: true, buzzer: db.settings.buzzer });
+});
+
+// Warning Buzzer Sound Upload / Management
+app.post('/api/buzzer/warning-custom-sound', (req: Request, res: Response) => {
+  const { audioData, fileName } = req.body;
+  if (!audioData) {
+    return res.status(400).json({ error: 'Audio data is required' });
+  }
+
+  if (!db.settings.buzzer) {
+    db.settings.buzzer = { ...defaultSettings.buzzer };
+  }
+
+  db.settings.buzzer.warningSound = 'custom';
+  db.settings.buzzer.warningCustomAudioUrl = audioData;
+  db.settings.buzzer.warningCustomAudioName = fileName || 'custom_warning_buzzer_audio';
+
+  persistDB();
+  logAction('Warning Buzzer Updated', `Custom warning buzzer uploaded: ${fileName || 'custom audio'}`);
+  broadcastSSE('settings_updated', db.settings);
+  res.json({ success: true, buzzer: db.settings.buzzer });
+});
+
+app.delete('/api/buzzer/warning-custom-sound', (req: Request, res: Response) => {
+  if (!db.settings.buzzer) {
+    db.settings.buzzer = { ...defaultSettings.buzzer };
+  }
+
+  db.settings.buzzer.warningSound = 'double_beep';
+  delete db.settings.buzzer.warningCustomAudioUrl;
+  delete db.settings.buzzer.warningCustomAudioName;
+
+  persistDB();
+  logAction('Warning Buzzer Reset', 'Custom warning buzzer reset to double beep');
   broadcastSSE('settings_updated', db.settings);
   res.json({ success: true, buzzer: db.settings.buzzer });
 });
@@ -1964,6 +2023,23 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     station.buzzerPlayed = false;
     station.isOvertime = false;
     station.overtimeSeconds = 0;
+  } else if (action === 'warning_buzzer') {
+    if (roundSettings.warningBuzzerEnabled !== false) {
+      const eventId = `warning-${now}-${station.id}`;
+      broadcastStationUpdate(station.id, 'buzzer_trigger', {
+        timestamp: now,
+        eventId,
+        stationId: station.id,
+        stationName: station.name,
+        source: 'warning_buzzer',
+        soundType: 'warning',
+        reason: 'Mid-Round Timing Warning',
+        round: round || `Round ${station.currentRound}`,
+        participantName: station.activeParticipant?.name,
+        sound: db.settings.buzzer.warningSound || 'double_beep',
+        volume: db.settings.buzzer.warningVolume ?? 85,
+      });
+    }
   } else if (action === 'limit_reached' || action === 'time_up') {
     // TIME LIMIT REACHED: trigger buzzer once, BUT KEEP TIMER RUNNING IN OVERTIME!
     station.buzzerPlayed = true;

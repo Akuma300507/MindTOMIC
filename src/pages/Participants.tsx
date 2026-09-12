@@ -136,7 +136,13 @@ export const Participants: React.FC = () => {
   const [newFieldOptions, setNewFieldOptions] = useState('');
   const [editingField, setEditingField] = useState<CustomFieldDefinition | null>(null);
 
-  const customFields = db?.customFields || [];
+  const rawCustomFields = db?.customFields || [];
+  // Exclude redundant phone number custom field, keeping only official Mobile Number column
+  const customFields = useMemo(() => {
+    return rawCustomFields.filter(
+      (cf) => cf.id !== 'f_phone' && cf.key !== 'phone' && cf.name?.toLowerCase().trim() !== 'phone number'
+    );
+  }, [rawCustomFields]);
 
   // Filtered & Sorted participants
   const filteredParticipants = useMemo(() => {

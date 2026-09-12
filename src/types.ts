@@ -158,6 +158,8 @@ export interface EventSettings {
     buzzerEnabled: boolean; // default true
     buzzerTimeSeconds: number; // default 120
     allowImageReuse: boolean;
+    warningBuzzerEnabled?: boolean; // default true
+    warningTimeSeconds?: number; // default 30 (seconds remaining)
   };
   round2: {
     prepEnabled: boolean; // default false (Round 2 starts speaking immediately)
@@ -167,6 +169,8 @@ export interface EventSettings {
     buzzerTimeSeconds: number; // default 120
     activeWheelTopicCount: number; // default 16
     topicReuseAllowed: boolean;
+    warningBuzzerEnabled?: boolean; // default true
+    warningTimeSeconds?: number; // default 30 (seconds remaining)
   };
   round3: {
     prepEnabled: boolean; // default false
@@ -174,6 +178,8 @@ export interface EventSettings {
     speechTimeSeconds: number; // default 120
     buzzerEnabled: boolean; // default true
     buzzerTimeSeconds: number; // default 120
+    warningBuzzerEnabled?: boolean; // default true
+    warningTimeSeconds?: number; // default 30 (seconds remaining)
   };
   buzzer: {
     laptopBuzzer: boolean;
@@ -190,6 +196,12 @@ export interface EventSettings {
     prepVolume?: number; // 0 - 100
     prepCustomAudioUrl?: string;
     prepCustomAudioName?: string;
+
+    // Mid-round timing warning buzzer
+    warningSound?: 'double_beep' | 'chime' | 'soft_bell' | 'klaxon' | 'custom';
+    warningVolume?: number; // 0 - 100
+    warningCustomAudioUrl?: string;
+    warningCustomAudioName?: string;
   };
   stations?: EventStation[];
 }

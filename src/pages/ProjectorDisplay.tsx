@@ -202,7 +202,14 @@ export const ProjectorDisplay: React.FC = () => {
   const isOvertime = computedTimer.isOvertime;
   const overtimeSeconds = computedTimer.overtimeSeconds;
   const progressPercent = computedTimer.progressPercent;
-  const isWarning = remainingSeconds <= 10 && remainingSeconds > 0 && isTimerRunning && !isOvertime;
+  const warningTimeSeconds = useMemo(() => {
+    if (currentRound === 1) return db?.settings.round1.warningTimeSeconds ?? 30;
+    if (currentRound === 2) return db?.settings.round2.warningTimeSeconds ?? 30;
+    if (currentRound === 3) return db?.settings.round3.warningTimeSeconds ?? 30;
+    return 30;
+  }, [currentRound, db?.settings]);
+
+  const isWarning = remainingSeconds <= warningTimeSeconds && remainingSeconds > 0 && isTimerRunning && !isOvertime;
   const isTimeUp = isOvertime || timerMode === 'time_up' || computedTimer.status === 'time_up';
 
   // Round 2 Wheel Animation in Projector View

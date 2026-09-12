@@ -164,10 +164,14 @@ interface AppContextType {
   // Buzzer & Sound
   triggerBuzzer: (reason?: string, round?: string) => Promise<void>;
   playBuzzerLocal: () => void;
+  triggerWarningBuzzer: (reason?: string, round?: string) => Promise<void>;
+  playWarningBuzzerLocal: () => void;
   uploadCustomBuzzer: (audioData: string, fileName?: string) => Promise<void>;
   resetCustomBuzzer: () => Promise<void>;
   uploadCustomPrepBuzzer: (audioData: string, fileName?: string) => Promise<void>;
   resetCustomPrepBuzzer: () => Promise<void>;
+  uploadCustomWarningBuzzer: (audioData: string, fileName?: string) => Promise<void>;
+  resetCustomWarningBuzzer: () => Promise<void>;
   uploadCustomLogo: (logoData: string, fileName?: string) => Promise<void>;
   resetCustomLogo: () => Promise<void>;
   uploadInspireLogo: (logoData: string, fileName?: string) => Promise<void>;
@@ -441,6 +445,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     lastPlayedBuzzerTime.current = now;
     playBuzzerLocal();
   }, [playBuzzerLocal]);
+
+  const playWarningBuzzerLocal = useCallback(() => {
+    setDb((currentDb) => {
+      if (currentDb?.settings.buzzer.laptopBuzzer !== false) {
+        soundEngine.playWarningBuzzer(
+          currentDb?.settings.buzzer.warningSound || 'double_beep',
+          currentDb?.settings.buzzer.warningVolume ?? 85,
+          currentDb?.settings.buzzer.warningCustomAudioUrl
+        );
+      }
+      return currentDb;
+    });
+  }, []);
+
+  const playWarningBuzzerWithDebounce = useCallback((eventId?: string) => {
+    const now = Date.now();
+    if (eventId && lastPlayedBuzzerEventId.current === eventId) {
+      return;
+    }
+    if (now - lastPlayedBuzzerTime.current < 1200) {
+      return;
+    }
+    if (eventId) {
+      lastPlayedBuzzerEventId.current = eventId;
+    }
+    lastPlayedBuzzerTime.current = now;
+    playWarningBuzzerLocal();
+  }, [playWarningBuzzerLocal]);
 
   const reloadState = useCallback(async () => {
     try {
@@ -919,7 +951,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           }
 
-          playBuzzerWithDebounce(payload?.eventId);
+          if (payload?.soundType === 'warning' || payload?.source === 'warning_buzzer') {
+            playWarningBuzzerWithDebounce(payload?.eventId);
+          } else {
+            playBuzzerWithDebounce(payload?.eventId);
+          }
         } catch (err) {
           console.error('Failed to handle buzzer SSE event:', err);
         }
@@ -1256,6 +1292,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDb((prev) => (prev ? { ...prev, settings: { ...prev.settings, buzzer: res.buzzer } } : prev));
   }, []);
 
+  // Custom Warning Timing Buzzer
+  const uploadCustomWarningBuzzer = useCallback(async (audioData: string, fileName?: string) => {
+    const res = await api.uploadCustomWarningBuzzer(audioData, fileName);
+    setDb((prev) => (prev ? { ...prev, settings: { ...prev.settings, buzzer: res.buzzer } } : prev));
+  }, []);
+
+  const resetCustomWarningBuzzer = useCallback(async () => {
+    const res = await api.resetCustomWarningBuzzer();
+    setDb((prev) => (prev ? { ...prev, settings: { ...prev.settings, buzzer: res.buzzer } } : prev));
+  }, []);
+
   // Custom Logo Management
   const uploadCustomLogo = useCallback(async (logoData: string, fileName?: string) => {
     const res = await api.uploadCustomLogo(logoData, fileName);
@@ -1355,6 +1402,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     },
     [activeParticipant?.name, currentStationId, unlockSound, playBuzzerLocal]
+  );
+
+  const triggerWarningBuzzer = useCallback(
+    async (reason: string = 'Warning Buzzer', round: string = 'General') => {
+      unlockSound();
+      playWarningBuzzerLocal();
+      await api.triggerBuzzer({
+        source: 'warning_buzzer',
+        reason,
+        round,
+        participantName: activeParticipant?.name,
+        stationId: currentStationId || undefined,
+      });
+    },
+    [activeParticipant?.name, currentStationId, unlockSound, playWarningBuzzerLocal]
   );
 
   // Keyboard shortcuts (SPACE, S, R, B, N, F)
@@ -1792,10 +1854,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         batchSetQualification,
         triggerBuzzer,
         playBuzzerLocal,
+        triggerWarningBuzzer,
+        playWarningBuzzerLocal,
         uploadCustomBuzzer,
         resetCustomBuzzer,
         uploadCustomPrepBuzzer,
         resetCustomPrepBuzzer,
+        uploadCustomWarningBuzzer,
+        resetCustomWarningBuzzer,
         uploadCustomLogo,
         resetCustomLogo,
         uploadInspireLogo,

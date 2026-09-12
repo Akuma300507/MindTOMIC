@@ -64,6 +64,8 @@ export const Round3: React.FC = () => {
 
   const speechSeconds = db?.settings.round3.speechTimeSeconds ?? 120;
   const buzzerEnabled = db?.settings.round3.buzzerEnabled ?? true;
+  const warningBuzzerEnabled = db?.settings.round3.warningBuzzerEnabled ?? true;
+  const warningTimeSeconds = db?.settings.round3.warningTimeSeconds ?? 30;
 
 
 
@@ -349,6 +351,8 @@ export const Round3: React.FC = () => {
             participantName={activeParticipant?.name}
             roundName="Round 3"
             buzzerEnabled={buzzerEnabled}
+            warningBuzzerEnabled={warningBuzzerEnabled}
+            warningTimeSeconds={warningTimeSeconds}
             stationId={currentStationId || undefined}
             onPhaseChange={setTimerPhase}
             onFinish={handleTimerFinish}

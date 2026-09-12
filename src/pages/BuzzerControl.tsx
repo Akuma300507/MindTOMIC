@@ -17,10 +17,11 @@ import { useApp } from '../context/AppContext';
 import { soundEngine } from '../lib/audio';
 
 export const BuzzerControl: React.FC = () => {
-  const { db, triggerBuzzer, isConnected, soundUnlocked, unlockSound, updateSettings } = useApp();
+  const { db, triggerBuzzer, triggerWarningBuzzer, isConnected, soundUnlocked, unlockSound, updateSettings } = useApp();
 
   const [copied, setCopied] = useState(false);
   const [buzzerFiring, setBuzzerFiring] = useState(false);
+  const [warningBuzzerFiring, setWarningBuzzerFiring] = useState(false);
   const [selectedSound, setSelectedSound] = useState<'horn' | 'digital' | 'alarm' | 'siren' | 'custom'>(
     db?.settings.buzzer.sound || 'horn'
   );
@@ -40,6 +41,13 @@ export const BuzzerControl: React.FC = () => {
     setBuzzerFiring(true);
     await triggerBuzzer('Buzzer Center Action');
     setTimeout(() => setBuzzerFiring(false), 500);
+  };
+
+  const handleFireWarningBuzzer = async () => {
+    unlockSound();
+    setWarningBuzzerFiring(true);
+    await triggerWarningBuzzer('Buzzer Center Warning Action');
+    setTimeout(() => setWarningBuzzerFiring(false), 500);
   };
 
   const handleTestSpecificSound = (snd: 'horn' | 'digital' | 'alarm' | 'siren' | 'custom') => {
@@ -178,6 +186,21 @@ export const BuzzerControl: React.FC = () => {
           <Zap className="w-10 h-10 sm:w-12 sm:h-12 fill-current animate-pulse" />
           <span>BUZZER</span>
           <span className="text-[10px] font-mono tracking-widest text-rose-200/80">HOTKEY: [B]</span>
+        </button>
+
+        {/* TRIGGER WARNING BUZZER BUTTON */}
+        <button
+          onClick={handleFireWarningBuzzer}
+          disabled={warningBuzzerFiring}
+          className={`z-10 px-6 py-3 rounded-2xl font-bold text-xs tracking-wider uppercase transition-all flex items-center gap-2 border border-blue-500/50 shadow-lg cursor-pointer ${
+            warningBuzzerFiring
+              ? 'bg-blue-500 text-white shadow-[0_0_30px_rgba(59,130,246,0.8)] scale-95'
+              : 'bg-blue-600/30 hover:bg-blue-600/50 text-blue-200 hover:text-white shadow-blue-950/50'
+          }`}
+          title="Trigger Warning Buzzer on all connected stations and phones"
+        >
+          <Bell className="w-4 h-4 text-blue-400" />
+          <span>{warningBuzzerFiring ? 'Broadcasting Warning...' : 'Trigger Warning Buzzer'}</span>
         </button>
       </div>
 
@@ -320,7 +343,7 @@ export const BuzzerControl: React.FC = () => {
               <span>Stage Audio Cues & Timer Buzzer Sequence</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Preview the 3 distinct stage sound cues and verify the silent manual stop behavior.
+              Preview the 4 distinct stage sound cues and verify the silent manual stop behavior.
             </p>
           </div>
           <span className="px-3 py-1 rounded-full bg-purple-950/80 text-purple-300 border border-purple-800 text-[10px] font-mono font-bold self-start sm:self-auto">
@@ -328,7 +351,7 @@ export const BuzzerControl: React.FC = () => {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Cue 1: Prep Over Buzzer */}
           <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-3">
             <div className="space-y-1">
@@ -343,7 +366,13 @@ export const BuzzerControl: React.FC = () => {
               </p>
             </div>
             <button
-              onClick={() => soundEngine.playPrepOverBuzzer('dual_alert', volume)}
+              onClick={() =>
+                soundEngine.playPrepOverBuzzer(
+                  db?.settings.buzzer.prepSound || 'dual_alert',
+                  volume,
+                  db?.settings.buzzer.prepCustomAudioUrl
+                )
+              }
               className="w-full py-2 px-3 rounded-xl bg-amber-950/60 hover:bg-amber-900/80 text-amber-200 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
             >
               <Volume2 className="w-3.5 h-3.5" />
@@ -351,34 +380,62 @@ export const BuzzerControl: React.FC = () => {
             </button>
           </div>
 
-          {/* Cue 2: Warning Hint Tick */}
+          {/* Cue 2: Mid-Round Warning Buzzer */}
           <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-3">
             <div className="space-y-1">
               <div className="flex items-center gap-1.5 text-xs font-bold text-blue-400">
                 <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-300 flex items-center justify-center text-[10px] font-mono font-black">
                   2
                 </span>
+                <span>Warning Timing Buzzer</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Crisp audio cue triggered automatically when remaining time hits the warning mark (e.g. 30s remaining).
+              </p>
+            </div>
+            <button
+              onClick={() =>
+                soundEngine.playWarningBuzzer(
+                  db?.settings.buzzer.warningSound || 'double_beep',
+                  db?.settings.buzzer.warningVolume ?? volume,
+                  db?.settings.buzzer.warningCustomAudioUrl
+                )
+              }
+              className="w-full py-2 px-3 rounded-xl bg-blue-950/60 hover:bg-blue-900/80 text-blue-200 border border-blue-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+              <span>Test Warning Buzzer</span>
+            </button>
+          </div>
+
+          {/* Cue 3: Warning Countdown Tick */}
+          <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-400">
+                <span className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center text-[10px] font-mono font-black">
+                  3
+                </span>
                 <span>Warning Countdown Tick</span>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                Small audible clock tick giving the speaker a clear hint that time is about to finish (last 10 seconds).
+                Audible clock ticks giving the speaker a clear hint that speech time is nearly finished (last 10 seconds).
               </p>
             </div>
             <button
               onClick={() => soundEngine.playWarningTick(volume)}
-              className="w-full py-2 px-3 rounded-xl bg-blue-950/60 hover:bg-blue-900/80 text-blue-200 border border-blue-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+              className="w-full py-2 px-3 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-200 border border-indigo-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
             >
               <Clock className="w-3.5 h-3.5" />
               <span>Test Warning Tick</span>
             </button>
           </div>
 
-          {/* Cue 3: Time Up Finish Buzzer */}
+          {/* Cue 4: Time Up Finish Buzzer */}
           <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-3">
             <div className="space-y-1">
               <div className="flex items-center gap-1.5 text-xs font-bold text-rose-400">
                 <span className="w-5 h-5 rounded-full bg-rose-500/20 text-rose-300 flex items-center justify-center text-[10px] font-mono font-black">
-                  3
+                  4
                 </span>
                 <span>Time Up Finish Buzzer</span>
               </div>

@@ -387,6 +387,164 @@ class SoundEngine {
     });
   }
 
+  // Mid-round timing warning buzzer (played at configured warning time in every round)
+  public playWarningBuzzer(
+    sound: 'double_beep' | 'chime' | 'soft_bell' | 'klaxon' | 'custom' = 'double_beep',
+    volumePercent: number = 85,
+    customAudioUrl?: string
+  ) {
+    this.initContext();
+    const vol = Math.max(0, Math.min(1, volumePercent / 100));
+
+    if (sound === 'custom' && customAudioUrl) {
+      try {
+        const audio = new Audio(customAudioUrl);
+        audio.volume = vol;
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Custom warning audio playback failed, falling back to synthesizer:', err);
+            if (this.ctx) {
+              this.playWarningDoubleBeep(this.ctx.currentTime, vol);
+            }
+          });
+        }
+        return;
+      } catch (err) {
+        console.warn('Error loading custom warning audio:', err);
+      }
+    }
+
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    switch (sound) {
+      case 'chime':
+        this.playWarningChime(now, vol);
+        break;
+      case 'soft_bell':
+        this.playWarningSoftBell(now, vol);
+        break;
+      case 'klaxon':
+        this.playWarningKlaxon(now, vol);
+        break;
+      case 'double_beep':
+      default:
+        this.playWarningDoubleBeep(now, vol);
+        break;
+    }
+  }
+
+  // Two crisp energetic warning beeps (classic competition warning signal)
+  private playWarningDoubleBeep(now: number, vol: number) {
+    if (!this.ctx) return;
+    const beeps = [
+      { startOffset: 0, duration: 0.12, freq: 800 },
+      { startOffset: 0.16, duration: 0.18, freq: 1000 },
+    ];
+
+    beeps.forEach(({ startOffset, duration, freq }) => {
+      if (!this.ctx) return;
+      const startTime = now + startOffset;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, startTime);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.05, startTime + duration);
+
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(vol * 0.45, startTime + 0.015);
+      gain.gain.setValueAtTime(vol * 0.45, startTime + duration - 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(startTime);
+      osc.stop(startTime + duration + 0.01);
+    });
+  }
+
+  // Two-tone harmonic warning chime
+  private playWarningChime(now: number, vol: number) {
+    if (!this.ctx) return;
+    const notes = [
+      { offset: 0, freq: 880 },
+      { offset: 0.18, freq: 1320 },
+    ];
+    notes.forEach(({ offset, freq }) => {
+      if (!this.ctx) return;
+      const t = now + offset;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(vol * 0.45, t + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(t);
+      osc.stop(t + 0.65);
+    });
+  }
+
+  // Soft resonant warning bell
+  private playWarningSoftBell(now: number, vol: number) {
+    if (!this.ctx) return;
+    const freqs = [659.25, 1318.5]; // E5 + E6
+    freqs.forEach((freq, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now);
+
+      const amp = (vol * 0.4) / (idx + 1);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(amp, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.95);
+    });
+  }
+
+  // Rapid electronic warning klaxon pulse
+  private playWarningKlaxon(now: number, vol: number) {
+    if (!this.ctx) return;
+    const pulses = [0, 0.14];
+    pulses.forEach((offset) => {
+      if (!this.ctx) return;
+      const t = now + offset;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(950, t);
+
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(vol * 0.35, t + 0.01);
+      gain.gain.setValueAtTime(vol * 0.35, t + 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(t);
+      osc.stop(t + 0.12);
+    });
+  }
+
   // 2. Small audible tick sound to give hint that time is going to finish
   public playWarningTick(volumePercent: number = 75) {
     this.initContext();

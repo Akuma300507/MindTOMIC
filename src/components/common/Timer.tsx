@@ -22,6 +22,8 @@ interface TimerProps {
   participantName?: string;
   roundName: 'Round 1' | 'Round 2' | 'Round 3';
   buzzerEnabled?: boolean;
+  warningBuzzerEnabled?: boolean;
+  warningTimeSeconds?: number;
   stationId?: string;
   onFinish?: (data: {
     status: 'completed' | 'completed_early' | 'time_up';
@@ -40,6 +42,8 @@ export const Timer: React.FC<TimerProps> = ({
   participantName,
   roundName,
   buzzerEnabled = true,
+  warningBuzzerEnabled = true,
+  warningTimeSeconds = 30,
   stationId,
   onFinish,
   onPhaseChange,
@@ -47,6 +51,7 @@ export const Timer: React.FC<TimerProps> = ({
   const {
     db,
     triggerBuzzer,
+    triggerWarningBuzzer,
     updateLiveSync,
     sendTimerAction,
     sendStationTimerAction,
@@ -56,6 +61,7 @@ export const Timer: React.FC<TimerProps> = ({
     setOnTimerReset,
     unlockSound,
     playBuzzerLocal,
+    playWarningBuzzerLocal,
   } = useApp();
 
   const activeStationId = stationId || currentStationId;
@@ -66,6 +72,13 @@ export const Timer: React.FC<TimerProps> = ({
     const customUrl = db?.settings?.buzzer?.prepCustomAudioUrl;
     soundEngine.playPrepOverBuzzer(prepSound, prepVol, customUrl);
   }, [db?.settings?.buzzer?.prepSound, db?.settings?.buzzer?.prepVolume, db?.settings?.buzzer?.prepCustomAudioUrl]);
+
+  const playCurrentWarningBuzzer = useCallback(() => {
+    const warnSound = db?.settings?.buzzer?.warningSound || 'double_beep';
+    const warnVol = db?.settings?.buzzer?.warningVolume ?? 85;
+    const customUrl = db?.settings?.buzzer?.warningCustomAudioUrl;
+    soundEngine.playWarningBuzzer(warnSound, warnVol, customUrl);
+  }, [db?.settings?.buzzer?.warningSound, db?.settings?.buzzer?.warningVolume, db?.settings?.buzzer?.warningCustomAudioUrl]);
 
   const [phase, setPhase] = useState<TimerPhase>('idle');
   const [isRunning, setIsRunning] = useState(false);
@@ -89,6 +102,7 @@ export const Timer: React.FC<TimerProps> = ({
   const pausedTimeRemainingRef = useRef<number>(remainingSeconds);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastTickedSecondRef = useRef<number | null>(null);
+  const warningBuzzerPlayedRef = useRef<boolean>(false);
 
   // Synchronize phase with parent
   useEffect(() => {
@@ -141,6 +155,29 @@ export const Timer: React.FC<TimerProps> = ({
         const diff = Math.max(0, Math.ceil((phaseEndTimestampRef.current - getServerNow()) / 1000));
         setRemainingSeconds(diff);
 
+        // Sound: Mid-Round Timing Warning Buzzer
+        // Plays when remaining speech countdown reaches configured warning time (e.g. 30s)
+        if (
+          tickerPhase === 'speech' &&
+          warningBuzzerEnabled &&
+          diff <= warningTimeSeconds &&
+          diff > 0 &&
+          !warningBuzzerPlayedRef.current
+        ) {
+          warningBuzzerPlayedRef.current = true;
+          playCurrentWarningBuzzer();
+          if (activeStationId && activeStationId !== 'all') {
+            sendStationTimerAction(activeStationId, {
+              action: 'warning_buzzer' as any,
+              phase: 'speech',
+              remainingSeconds: diff,
+              round: roundName,
+            }).catch(() => {});
+          } else {
+            triggerWarningBuzzer(`Mid-Round Timing Warning (${diff}s remaining)`, roundName);
+          }
+        }
+
         // Sound 2: Small audible tick sound to give hint that time is going to finish
         // Plays once per second in speech phase during the final 10 seconds (10..1)
         if (tickerPhase === 'speech' && diff <= 10 && diff > 0) {
@@ -175,7 +212,7 @@ export const Timer: React.FC<TimerProps> = ({
         }
       }, 100);
     },
-    [clearIntervalSafe, buzzerEnabled, triggerBuzzer, roundName, sendTimerAction, sendStationTimerAction, activeStationId, startOvertimeTicker]
+    [clearIntervalSafe, buzzerEnabled, triggerBuzzer, triggerWarningBuzzer, playCurrentPrepBuzzer, playCurrentWarningBuzzer, warningBuzzerEnabled, warningTimeSeconds, roundName, sendTimerAction, sendStationTimerAction, activeStationId, startOvertimeTicker]
   );
 
   // Transition to speech phase
@@ -184,6 +221,7 @@ export const Timer: React.FC<TimerProps> = ({
     clearIntervalSafe();
     // Sound 1: Buzzer sound when prep time is over
     playCurrentPrepBuzzer();
+    warningBuzzerPlayedRef.current = false;
 
     setPhase('speech');
     setTotalSecondsForPhase(speechDurationSeconds);
@@ -215,7 +253,7 @@ export const Timer: React.FC<TimerProps> = ({
     }
 
     startTicker(speechDurationSeconds, 'speech');
-  }, [clearIntervalSafe, speechDurationSeconds, activeStationId, sendStationTimerAction, sendTimerAction, roundName, startTicker]);
+  }, [clearIntervalSafe, speechDurationSeconds, activeStationId, sendStationTimerAction, sendTimerAction, roundName, startTicker, playCurrentPrepBuzzer, unlockSound]);
 
   useEffect(() => {
     transitionToSpeechRef.current = handleTransitionToSpeech;
@@ -227,6 +265,7 @@ export const Timer: React.FC<TimerProps> = ({
     if (isRunning) return;
 
     if (phase === 'idle') {
+      warningBuzzerPlayedRef.current = false;
       const startedAt = getServerNow();
       startTimeRef.current = new Date(startedAt).toISOString();
       if (hasPrepPhase) {
@@ -389,6 +428,7 @@ export const Timer: React.FC<TimerProps> = ({
     setIsOvertime(false);
     setOvertimeSeconds(0);
     overtimeStartTimestampRef.current = null;
+    warningBuzzerPlayedRef.current = false;
     const initialSeconds = hasPrepPhase ? prepDurationSeconds : speechDurationSeconds;
     setRemainingSeconds(initialSeconds);
     setTotalSecondsForPhase(initialSeconds);
@@ -450,6 +490,10 @@ export const Timer: React.FC<TimerProps> = ({
       ringColor = 'stroke-rose-500';
       badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-ping';
       phaseLabel = 'FINAL SECONDS';
+    } else if (warningBuzzerEnabled && remainingSeconds <= warningTimeSeconds) {
+      ringColor = 'stroke-amber-400';
+      badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse';
+      phaseLabel = `TIME WARNING (${remainingSeconds}s)`;
     } else {
       ringColor = 'stroke-emerald-400';
       badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';

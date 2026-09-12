@@ -42,6 +42,8 @@ export const Round1: React.FC = () => {
   const prepSeconds = db?.settings.round1.prepTimeSeconds ?? 30;
   const speechSeconds = db?.settings.round1.speechTimeSeconds ?? 120;
   const buzzerEnabled = db?.settings.round1.buzzerEnabled ?? true;
+  const warningBuzzerEnabled = db?.settings.round1.warningBuzzerEnabled ?? true;
+  const warningTimeSeconds = db?.settings.round1.warningTimeSeconds ?? 30;
 
   // Filter images eligible for the active station (never include images assigned to other stations)
   const stationImages = useMemo(() => {
@@ -418,6 +420,8 @@ export const Round1: React.FC = () => {
             participantName={activeParticipant?.name}
             roundName="Round 1"
             buzzerEnabled={buzzerEnabled}
+            warningBuzzerEnabled={warningBuzzerEnabled}
+            warningTimeSeconds={warningTimeSeconds}
             stationId={currentStationId || undefined}
             onPhaseChange={setTimerPhase}
             onFinish={handleTimerFinish}

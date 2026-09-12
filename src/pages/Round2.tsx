@@ -100,6 +100,8 @@ export const Round2: React.FC = () => {
   const wheelCount = db?.settings.round2.activeWheelTopicCount ?? 20;
   const speechSeconds = db?.settings.round2.speechTimeSeconds ?? 120;
   const buzzerEnabled = db?.settings.round2.buzzerEnabled ?? true;
+  const warningBuzzerEnabled = db?.settings.round2.warningBuzzerEnabled ?? true;
+  const warningTimeSeconds = db?.settings.round2.warningTimeSeconds ?? 30;
   const reuseAllowed = db?.settings.round2.topicReuseAllowed ?? false;
 
   // Sync winningTopic if currentStation already has a selectedTopic
@@ -689,6 +691,8 @@ export const Round2: React.FC = () => {
             participantName={activeParticipant?.name}
             roundName="Round 2"
             buzzerEnabled={buzzerEnabled}
+            warningBuzzerEnabled={warningBuzzerEnabled}
+            warningTimeSeconds={warningTimeSeconds}
             stationId={currentStationId || undefined}
             onPhaseChange={setTimerPhase}
             onFinish={handleTimerFinish}
