@@ -270,27 +270,56 @@ export const ProjectorDisplay: React.FC = () => {
     };
   }, []);
 
-  // Large responsive wheel size for projector display (centered and big)
-  const [wheelSize, setWheelSize] = useState<number>(() => {
+  // Document-level overflow lock: eliminate any window scrollbar while projector view is active
+  useEffect(() => {
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevBodyHeight = document.body.style.height;
+
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    document.body.style.height = '100vh';
+
+    return () => {
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      document.body.style.overflow = prevBodyOverflow;
+      document.body.style.height = prevBodyHeight;
+    };
+  }, []);
+
+  // Stage container reference and real-time bounding dimensions for zero-scroll scaling
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageDim, setStageDim] = useState<{ width: number; height: number }>(() => {
     if (typeof window !== 'undefined') {
-      return window.innerHeight < 800 ? 520 : 640;
+      return {
+        width: Math.max(300, window.innerWidth - 32),
+        height: Math.max(200, window.innerHeight - 130),
+      };
     }
-    return 600;
+    return { width: 800, height: 500 };
   });
 
   useEffect(() => {
-    const updateSize = () => {
-      const h = window.innerHeight;
-      const w = window.innerWidth;
-      const availableH = h - 200;
-      const availableW = w - 60;
-      const calculated = Math.min(availableW, availableH);
-      setWheelSize(Math.max(440, Math.min(700, calculated)));
-    };
-    updateSize();
-    window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
+    if (!stageRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setStageDim({ width, height });
+        }
+      }
+    });
+    ro.observe(stageRef.current);
+    return () => ro.disconnect();
   }, []);
+
+  // Dynamic responsive wheel size strictly computed from actual available stage dimensions
+  const wheelSize = useMemo(() => {
+    const availH = stageDim.height - 40; // leave room for badge above wheel
+    const availW = stageDim.width - 24;
+    const avail = Math.min(availW, availH);
+    return Math.max(260, Math.min(840, Math.floor(avail)));
+  }, [stageDim.width, stageDim.height]);
 
   // STRICT STATION ISOLATION: Default active topics for this station
   const stationDefaultWheelTopics = useMemo(() => {
@@ -531,7 +560,7 @@ export const ProjectorDisplay: React.FC = () => {
   ]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between p-6 sm:p-10 relative overflow-hidden select-none font-['Outfit']">
+    <div className="fixed inset-0 h-screen max-h-screen w-screen max-w-[100vw] bg-slate-950 text-white flex flex-col justify-between p-2.5 sm:p-3 md:p-4 relative overflow-hidden select-none font-['Outfit']">
       {/* Background ambient lighting effects */}
       <div className="absolute top-0 left-1/4 w-[700px] h-[700px] bg-purple-600/10 rounded-full blur-[160px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[700px] h-[700px] bg-blue-600/10 rounded-full blur-[160px] pointer-events-none" />
@@ -564,21 +593,18 @@ export const ProjectorDisplay: React.FC = () => {
       </AnimatePresence>
 
       {/* Top Bar: Event Branding, Top-Center Inspire 2K26 Logo, Station Selector, Connection & Exit */}
-      <header className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-4 border-b border-purple-900/40 pb-5">
+      <header className="relative z-10 flex items-center justify-between gap-2 sm:gap-4 border-b border-purple-900/40 pb-2 shrink-0">
         {/* Left: Event Logo & Name */}
-        <div className="flex items-center gap-3.5 flex-1 min-w-[260px] w-full lg:w-auto justify-start">
-          <MindToMicLogo size={56} className="drop-shadow-[0_0_20px_rgba(168,85,247,0.4)] shrink-0 transition-transform hover:scale-105" />
-          <div className="space-y-0.5">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white font-['Outfit'] drop-shadow-md leading-tight">
-              {eventName}
-            </h1>
-            <p className="text-[10px] sm:text-xs font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-indigo-200 to-blue-300 font-mono">
-              {tagline}
-            </p>
-            {/* Station / Room Selector */}
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-slate-800 text-xs shadow-inner">
-                <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+        <div className="flex items-center gap-2.5 sm:gap-3 flex-1 min-w-0 justify-start">
+          <MindToMicLogo size={44} className="drop-shadow-[0_0_15px_rgba(168,85,247,0.4)] shrink-0 transition-transform hover:scale-105" />
+          <div className="space-y-0.5 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg sm:text-xl font-black tracking-tight text-white font-['Outfit'] drop-shadow-md leading-tight truncate">
+                {eventName}
+              </h1>
+              {/* Station / Room Selector */}
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs shadow-inner">
+                <MapPin className="w-3 h-3 text-indigo-400 shrink-0" />
                 <select
                   id="projector-station-select"
                   value={selectedStationId}
@@ -592,44 +618,17 @@ export const ProjectorDisplay: React.FC = () => {
                   ))}
                 </select>
               </div>
-
-              {/* Dedicated Station Identity Badge */}
-              {currentStationState && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-indigo-950/90 to-purple-950/90 border border-indigo-500/40 text-xs shadow-md">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                  <span className="text-indigo-200 font-black tracking-wider uppercase">{currentStationState.name}</span>
-                  {currentStationState.location && (
-                    <span className="text-slate-400 text-[11px]">({currentStationState.location})</span>
-                  )}
-                </div>
-              )}
-
-              {/* Unique Scoped Device Screen ID */}
-              <div
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-cyan-800/40 text-xs shadow-inner"
-                title={`Unique Hardware/Device ID: ${projectorDeviceId}`}
-              >
-                <Monitor className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="text-slate-400 text-[11px]">Screen:</span>
-                <span className="text-cyan-300 font-mono font-bold">{projectorDeviceId.slice(-7)}</span>
-              </div>
-
-              {/* Station Handler Indicator */}
-              {currentStationState?.handlerName && (
-                <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-950/60 border border-purple-800/50 text-xs text-purple-200 font-medium">
-                  <span className={`w-1.5 h-1.5 rounded-full ${currentStationState.handlerStatus === 'on_break' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                  <span className="text-slate-400 text-[10px] uppercase font-bold">{currentStationState.handlerRole || 'Handler'}:</span>
-                  <span className="font-semibold text-white">{currentStationState.handlerName}</span>
-                </div>
-              )}
             </div>
+            <p className="hidden md:block text-[10px] font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-indigo-200 to-blue-300 font-mono">
+              {tagline}
+            </p>
           </div>
         </div>
 
         {/* TOP CENTER: Inspire 2K26 Logo & Active Round Indicator */}
-        <div className="flex flex-col items-center justify-center text-center shrink-0 px-2 py-0.5 group/center">
+        <div className="flex flex-col items-center justify-center text-center shrink-0 px-2 group/center">
           <div className="relative group/logo transition-transform duration-300 hover:scale-105">
-            <InspireLogo size={92} showGlow={true} />
+            <InspireLogo size={52} showGlow={true} />
             <input
               type="file"
               ref={inspireFileInputRef}
@@ -639,30 +638,30 @@ export const ProjectorDisplay: React.FC = () => {
             />
             <button
               onClick={() => inspireFileInputRef.current?.click()}
-              className="absolute -top-1.5 -right-2 p-1.5 rounded-full bg-slate-900/90 hover:bg-amber-600 text-slate-300 hover:text-white border border-amber-500/40 opacity-0 group-hover/logo:opacity-100 transition-all shadow-lg backdrop-blur-md cursor-pointer"
+              className="absolute -top-1.5 -right-2 p-1 rounded-full bg-slate-900/90 hover:bg-amber-600 text-slate-300 hover:text-white border border-amber-500/40 opacity-0 group-hover/logo:opacity-100 transition-all shadow-lg backdrop-blur-md cursor-pointer"
               title="Replace / Upload Exact Logo File"
             >
-              <Upload className="w-3.5 h-3.5" />
+              <Upload className="w-3 h-3" />
             </button>
           </div>
 
           {/* Arcade Illuminated Round Marquee Banner */}
-          <div className="mt-2 flex items-center gap-2 px-5 py-1.5 rounded-full bg-gradient-to-r from-amber-950/70 via-purple-950/90 to-amber-950/70 border border-amber-500/40 shadow-[0_0_24px_rgba(245,158,11,0.25)] backdrop-blur-md">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
-            <span className="text-xs sm:text-sm font-black tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-100 to-amber-300 font-['Outfit']">
+          <div className="mt-1 flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-gradient-to-r from-amber-950/70 via-purple-950/90 to-amber-950/70 border border-amber-500/40 shadow-[0_0_16px_rgba(245,158,11,0.25)] backdrop-blur-md">
+            <Sparkles className="w-3 h-3 text-amber-400 animate-pulse shrink-0" />
+            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-100 to-amber-300 font-['Outfit']">
               {currentRound === 1 && 'ROUND 1 • IMAGE TO SPEECH'}
               {currentRound === 2 && 'ROUND 2 • SPIN THE TOPIC WHEEL'}
               {currentRound === 3 && 'ROUND 3 • CHAMPIONSHIP FINALS'}
             </span>
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0 hidden sm:inline" />
+            <Sparkles className="w-3 h-3 text-amber-400 animate-pulse shrink-0 hidden sm:inline" />
           </div>
         </div>
 
-        {/* Right: Station Selector, Audio, Fullscreen & Exit */}
-        <div className="flex items-center justify-end gap-2 sm:gap-3 flex-1 min-w-[260px] w-full lg:w-auto">
+        {/* Right: Stage Clock, Audio, Fullscreen & Exit */}
+        <div className="flex items-center justify-end gap-1.5 sm:gap-2.5 flex-1 min-w-0">
           {/* Connection Status Pill */}
           <div
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-mono font-bold border transition-colors ${
               isConnected
                 ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-300'
                 : 'bg-amber-950/70 border-amber-800/80 text-amber-300 animate-pulse'
@@ -673,14 +672,14 @@ export const ProjectorDisplay: React.FC = () => {
                 isConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'bg-amber-400'
               }`}
             />
-            <span className="hidden md:inline">{isConnected ? 'LIVE SYNC' : 'RECONNECTING'}</span>
+            <span className="hidden xl:inline">{isConnected ? 'LIVE SYNC' : 'RECONNECTING'}</span>
           </div>
 
           {/* Top-Right Corner Small Clock for Round 1 & Round 2 */}
           {currentRound !== 3 && (
             <div
               id="projector-corner-clock"
-              className={`flex items-center gap-3 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-2xl border backdrop-blur-md transition-all shadow-xl ${
+              className={`flex items-center gap-2.5 px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-xl border backdrop-blur-md transition-all shadow-xl ${
                 isOvertime
                   ? 'bg-rose-950/90 border-rose-500 shadow-[0_0_25px_rgba(244,63,94,0.45)] ring-1 ring-rose-500/50'
                   : isTimeUp
@@ -695,9 +694,9 @@ export const ProjectorDisplay: React.FC = () => {
               }`}
             >
               <div className="flex flex-col items-start">
-                <div className="flex items-center gap-1.5">
-                  <Clock className={`w-3.5 h-3.5 ${isOvertime ? 'text-rose-400' : isWarning ? 'text-amber-400' : 'text-purple-400'}`} />
-                  <span className="text-[10px] font-mono font-bold tracking-wider uppercase text-slate-300">
+                <div className="flex items-center gap-1">
+                  <Clock className={`w-3 h-3 ${isOvertime ? 'text-rose-400' : isWarning ? 'text-amber-400' : 'text-purple-400'}`} />
+                  <span className="text-[9px] font-mono font-bold tracking-wider uppercase text-slate-300">
                     {isOvertime
                       ? 'OVERTIME'
                       : timerMode === 'prep'
@@ -711,7 +710,7 @@ export const ProjectorDisplay: React.FC = () => {
                       : 'STAGE CLOCK'}
                   </span>
                 </div>
-                <div className="w-16 sm:w-20 bg-slate-950 h-1.5 rounded-full overflow-hidden p-0.5 border border-slate-800 mt-1">
+                <div className="w-14 sm:w-16 bg-slate-950 h-1 rounded-full overflow-hidden border border-slate-800 mt-0.5">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
                       isOvertime
@@ -730,7 +729,7 @@ export const ProjectorDisplay: React.FC = () => {
               </div>
 
               <div
-                className={`font-mono text-2xl sm:text-3xl font-black tracking-tight leading-none pl-1 ${
+                className={`font-mono text-xl sm:text-2xl font-black tracking-tight leading-none pl-0.5 ${
                   isOvertime
                     ? 'text-rose-400 animate-pulse'
                     : isTimeUp
@@ -755,7 +754,7 @@ export const ProjectorDisplay: React.FC = () => {
               if (!soundUnlocked) unlockSound();
               setSoundMuted(!soundMuted);
             }}
-            className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+            className={`p-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
               soundMuted
                 ? 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-white'
                 : 'bg-purple-950/80 text-purple-300 border-purple-800/80 hover:bg-purple-900/80'
@@ -768,7 +767,7 @@ export const ProjectorDisplay: React.FC = () => {
           {/* Fullscreen Button */}
           <button
             onClick={toggleFullscreen}
-            className="p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors"
+            className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors cursor-pointer"
             title="Toggle Fullscreen (F)"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -777,58 +776,46 @@ export const ProjectorDisplay: React.FC = () => {
           {/* Dedicated Secure Exit Button */}
           <button
             onClick={() => setShowExitModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-xs font-bold transition-all shadow-md shadow-rose-950/50"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-xs font-bold transition-all shadow-md shadow-rose-950/50 cursor-pointer"
             title="Exit Projector Display Mode (Esc)"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Exit</span>
           </button>
         </div>
       </header>
 
-      {/* Main Center Stage Area */}
-      <main className="relative z-10 my-auto py-2 max-w-7xl mx-auto w-full flex flex-col items-center justify-center text-center space-y-4">
+      {/* Main Center Stage Area - Dynamic Zero-Scroll Viewport Fill */}
+      <main ref={stageRef} className="relative z-10 flex-1 min-h-0 w-full max-w-full mx-auto flex flex-col items-center justify-center text-center px-1 py-0.5 overflow-hidden">
         {/* Active Contestant Spotlight Banner */}
         {activeParticipant ? (
-          <div className="space-y-1.5 animate-in fade-in zoom-in-95 duration-500">
-            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-purple-400 font-mono bg-purple-950/60 px-3 py-1 rounded-full border border-purple-800/60">
-              CONTESTANT {activeParticipant.participantNumber} • {currentStationState?.name ? `${currentStationState.name.toUpperCase()} STAGE` : 'ON STAGE'}
+          <div className="shrink-0 flex items-center justify-center gap-2 py-0.5 animate-in fade-in zoom-in-95 duration-300">
+            <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-purple-300 font-mono bg-purple-950/80 px-2.5 py-0.5 rounded-full border border-purple-800/60 shadow">
+              CONTESTANT {activeParticipant.participantNumber} • {currentStationState?.name ? `${currentStationState.name.toUpperCase()}` : 'ON STAGE'}
             </span>
-            <h2 className="text-3xl sm:text-5xl md:text-6xl font-black text-white font-['Outfit'] tracking-tight drop-shadow-2xl">
+            <h2 className="text-lg sm:text-xl md:text-2xl font-black text-white font-['Outfit'] tracking-tight drop-shadow-lg truncate max-w-xl">
               {activeParticipant.name}
             </h2>
           </div>
         ) : (
-          <div className="text-slate-400 font-semibold text-base sm:text-lg flex items-center gap-2">
-            <Radio className="w-5 h-5 text-purple-400 animate-pulse" />
+          <div className="shrink-0 text-slate-400 font-semibold text-xs flex items-center gap-2 py-0.5">
+            <Radio className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
             <span>Awaiting Next Contestant{currentStationState ? ` for ${currentStationState.name}` : ''}...</span>
           </div>
         )}
 
-        {/* Big Live Synchronized Timer Display (PRESERVED UNTOUCHED FOR ROUND 3 ONLY) */}
+        {/* Round 3: Championship Finals Arena & Stage Timer (Single Unified Card, Fits All Screens) */}
         {currentRound === 3 && (
-          <div className="w-full max-w-2xl bg-slate-900/80 backdrop-blur-md border border-purple-900/40 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
-            {/* Phase Badge */}
-            <div className="flex items-center justify-between">
+          <div className="w-full max-w-xl bg-slate-900/90 backdrop-blur-md border border-emerald-500/40 rounded-3xl p-4 sm:p-5 shadow-2xl space-y-2.5 my-auto animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-purple-400" />
-                <span className="text-xs font-mono font-bold tracking-wider uppercase text-slate-400">
-                  {isOvertime
-                    ? 'OVERTIME (LIMIT REACHED)'
-                    : timerMode === 'prep'
-                    ? 'PREPARATION TIME'
-                    : timerMode === 'speech'
-                    ? 'SPEAKING TIME'
-                    : timerMode === 'stopped'
-                    ? 'TIMER PAUSED / STOPPED'
-                    : timerMode === 'time_up'
-                    ? "TIME'S UP"
-                    : 'STAGE TIMER'}
+                <Trophy className="w-5 h-5 text-amber-400 animate-bounce" />
+                <span className="text-xs font-mono font-black tracking-widest text-emerald-400 uppercase truncate max-w-md">
+                  FINALS ARENA • {activeItem?.title && activeItem.title !== 'Championship Finals Speech' ? activeItem.title : 'GRAND FINALS'}
                 </span>
               </div>
-
               <span
-                className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
                   isOvertime
                     ? 'bg-rose-950 text-rose-300 border-rose-600 animate-pulse'
                     : timerMode === 'speech'
@@ -846,17 +833,17 @@ export const ProjectorDisplay: React.FC = () => {
 
             {/* Large Digits */}
             <div
-              className={`font-mono text-7xl sm:text-8xl md:text-9xl font-black tracking-tight transition-colors duration-200 ${
+              className={`font-mono text-5xl sm:text-6xl md:text-7xl font-black tracking-tight leading-none transition-colors duration-200 ${
                 isOvertime
-                  ? 'text-rose-400 animate-pulse drop-shadow-[0_0_45px_rgba(244,63,94,0.7)]'
+                  ? 'text-rose-400 animate-pulse drop-shadow-[0_0_35px_rgba(244,63,94,0.7)]'
                   : isTimeUp
-                  ? 'text-rose-500 animate-pulse drop-shadow-[0_0_40px_rgba(244,63,94,0.6)]'
+                  ? 'text-rose-500 animate-pulse drop-shadow-[0_0_30px_rgba(244,63,94,0.6)]'
                   : isWarning
-                  ? 'text-amber-400 animate-pulse drop-shadow-[0_0_30px_rgba(251,191,36,0.5)]'
+                  ? 'text-amber-400 animate-pulse drop-shadow-[0_0_25px_rgba(251,191,36,0.5)]'
                   : timerMode === 'speech'
-                  ? 'text-emerald-400 drop-shadow-[0_0_30px_rgba(52,211,153,0.3)]'
+                  ? 'text-emerald-400 drop-shadow-[0_0_25px_rgba(52,211,153,0.3)]'
                   : timerMode === 'prep'
-                  ? 'text-blue-400 drop-shadow-[0_0_30px_rgba(96,165,250,0.3)]'
+                  ? 'text-blue-400 drop-shadow-[0_0_25px_rgba(96,165,250,0.3)]'
                   : 'text-white'
               }`}
             >
@@ -864,7 +851,7 @@ export const ProjectorDisplay: React.FC = () => {
             </div>
 
             {/* Progress Bar */}
-            <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden p-0.5 border border-slate-800">
+            <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   isOvertime
@@ -883,12 +870,12 @@ export const ProjectorDisplay: React.FC = () => {
 
             {/* Time's Up / Overtime Banner */}
             {isOvertime ? (
-              <div className="py-2.5 px-6 rounded-2xl bg-rose-600/30 border border-rose-500/60 text-rose-200 font-bold text-sm sm:text-base animate-pulse flex items-center justify-center gap-2">
+              <div className="py-1.5 px-3 rounded-xl bg-rose-600/30 border border-rose-500/60 text-rose-200 font-bold text-xs animate-pulse flex items-center justify-center gap-1.5">
                 <span>⚠️</span>
                 <span>SPEAKING LIMIT REACHED • OVERTIME ({computedTimer.formattedOvertime})</span>
               </div>
             ) : isTimeUp ? (
-              <div className="py-2.5 px-6 rounded-2xl bg-rose-600/30 border border-rose-500/60 text-rose-300 font-bold text-sm sm:text-base animate-bounce">
+              <div className="py-1.5 px-3 rounded-xl bg-rose-600/30 border border-rose-500/60 text-rose-300 font-bold text-xs animate-bounce">
                 ⚠️ TIME EXPIRED • BUZZER ACTIVE
               </div>
             ) : null}
@@ -896,27 +883,37 @@ export const ProjectorDisplay: React.FC = () => {
         )}
 
         {/* Dynamic Round Prompt Content Display */}
-        {/* Round 1: Assigned Image or Awaiting Card (Center & Big) */}
+        {/* Round 1: Assigned Image (Maximized Full Screen Viewport, Zero Black Space, Zero Scroll) */}
         {currentRound === 1 && (
           activeItem?.type === 'image' && activeItem.mediaUrl ? (
-            <div className="w-full max-w-6xl xl:max-w-7xl flex flex-col items-center justify-center animate-in zoom-in-95 duration-500 my-auto">
-              <div className="w-full rounded-3xl overflow-hidden border-2 border-purple-500/50 shadow-[0_0_90px_rgba(168,85,247,0.4)] bg-slate-950 relative group flex flex-col items-center justify-center">
-                {/* Floating quick rotation control button in top-right */}
-                <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+            <div className="w-full h-full flex-1 min-h-0 flex flex-col items-center justify-center relative p-1 animate-in zoom-in-95 duration-500">
+              <div className="relative w-full h-full flex-1 min-h-0 flex items-center justify-center overflow-hidden rounded-2xl border border-purple-900/40 bg-slate-950/60 shadow-[0_0_60px_rgba(168,85,247,0.25)] p-1 group">
+                {/* Floating Top-Left Prompt ID Badge */}
+                <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950/85 backdrop-blur-md border border-purple-500/50 shadow-xl pointer-events-none">
+                  <span className="text-[10px] font-mono font-bold text-purple-300 uppercase tracking-widest hidden sm:inline">
+                    VISUAL PROMPT:
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-blue-950/90 border border-blue-500/60 font-mono font-black text-blue-300 text-xs tracking-wider">
+                    {activeItem.title}
+                  </span>
+                </div>
+
+                {/* Floating Top-Right Rotation Controls */}
+                <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5">
                   <button
                     id="projector-quick-rotate-top-btn"
                     onClick={handleRotateImage}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-950/85 hover:bg-purple-950/95 text-purple-200 border border-purple-500/50 hover:border-purple-400 text-xs font-bold transition-all shadow-xl backdrop-blur-md active:scale-95 cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-950/85 hover:bg-purple-950/95 text-purple-200 border border-purple-500/50 hover:border-purple-400 text-xs font-bold transition-all shadow-xl backdrop-blur-md active:scale-95 cursor-pointer"
                     title="Rotate image 90° clockwise (Shortcut: R)"
                   >
-                    <RotateCw className="w-4 h-4 text-purple-400" />
+                    <RotateCw className="w-3.5 h-3.5 text-purple-400" />
                     <span>Rotate {totalRotation !== 0 ? `(${totalRotation}°)` : ''}</span>
                   </button>
                   {totalRotation !== 0 && (
                     <button
                       id="projector-quick-reset-top-btn"
                       onClick={handleResetImageRotation}
-                      className="px-2.5 py-2 rounded-xl bg-slate-950/85 hover:bg-slate-900 text-slate-300 border border-slate-700 hover:border-slate-500 text-xs font-semibold transition-all backdrop-blur-md cursor-pointer"
+                      className="px-2 py-1 rounded-xl bg-slate-950/85 hover:bg-slate-900 text-slate-300 border border-slate-700 hover:border-slate-500 text-xs font-semibold transition-all backdrop-blur-md cursor-pointer"
                       title="Reset rotation to 0°"
                     >
                       Reset
@@ -924,66 +921,41 @@ export const ProjectorDisplay: React.FC = () => {
                   )}
                 </div>
 
-                {/* Main Big Image Viewport */}
-                <div className="w-full max-h-[66vh] sm:max-h-[72vh] xl:max-h-[75vh] min-h-[40vh] flex items-center justify-center bg-black/60 overflow-hidden p-2 sm:p-3 relative">
-                  <img
-                    src={activeItem.mediaUrl}
-                    alt={activeItem.title}
-                    style={{
-                      transform: `rotate(${totalRotation}deg)`,
-                      transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                      maxHeight: totalRotation % 180 !== 0 ? '58vw' : '70vh',
-                      maxWidth: totalRotation % 180 !== 0 ? '60vh' : '100%',
-                    }}
-                    className="w-auto h-auto object-contain transition-transform duration-500 rounded-2xl drop-shadow-2xl"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
+                {/* Maximized Image dynamically bounded by stageDim so it NEVER exceeds the screen */}
+                {(() => {
+                  const isRotated = totalRotation % 180 !== 0;
+                  const maxImgWidth = isRotated
+                    ? Math.max(100, Math.floor(stageDim.height - 16))
+                    : Math.max(100, Math.floor(stageDim.width - 16));
+                  const maxImgHeight = isRotated
+                    ? Math.max(100, Math.floor(stageDim.width - 16))
+                    : Math.max(100, Math.floor(stageDim.height - 16));
 
-                {/* Prominent Image ID Bottom Bar */}
-                <div className="w-full p-3 sm:p-4 bg-gradient-to-t from-slate-950 via-slate-950/90 to-slate-950/60 border-t border-purple-900/40 flex items-center justify-between">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <span className="text-xs font-mono font-bold text-purple-300 uppercase tracking-widest hidden sm:inline">
-                      PROMPT:
-                    </span>
-                    <span className="px-3.5 py-1.5 rounded-xl bg-blue-950/90 border border-blue-500/60 font-mono font-black text-blue-300 text-base sm:text-xl tracking-wider shadow-lg">
-                      {activeItem.title}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      id="projector-rotate-image-bottom-btn"
-                      onClick={handleRotateImage}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 border border-purple-500/50 text-purple-200 text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
-                      title="Rotate image 90° clockwise (Shortcut: R)"
-                    >
-                      <RotateCw className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Rotate {totalRotation !== 0 ? `${totalRotation}°` : '90°'}</span>
-                    </button>
-                    {totalRotation !== 0 && (
-                      <button
-                        id="projector-reset-image-bottom-btn"
-                        onClick={handleResetImageRotation}
-                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-xs font-semibold transition-all cursor-pointer"
-                        title="Reset rotation to 0°"
-                      >
-                        Reset
-                      </button>
-                    )}
-                    <span className="text-xs font-mono text-slate-400 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800 hidden sm:inline-block">
-                      VISUAL PROMPT
-                    </span>
-                  </div>
-                </div>
+                  return (
+                    <img
+                      src={activeItem.mediaUrl}
+                      alt={activeItem.title}
+                      style={{
+                        transform: `rotate(${totalRotation}deg)`,
+                        transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                        maxWidth: `${maxImgWidth}px`,
+                        maxHeight: `${maxImgHeight}px`,
+                        width: 'auto',
+                        height: 'auto',
+                      }}
+                      className="object-contain rounded-xl drop-shadow-[0_0_50px_rgba(0,0,0,0.85)] select-none pointer-events-none"
+                      referrerPolicy="no-referrer"
+                    />
+                  );
+                })()}
               </div>
             </div>
           ) : (
-            <div className="w-full max-w-2xl p-10 sm:p-14 rounded-3xl bg-slate-900/60 border border-purple-900/30 text-slate-300 flex flex-col items-center space-y-4 animate-in fade-in my-auto">
-              <Sparkles className="w-14 h-14 text-purple-400 animate-pulse" />
-              <div className="space-y-2 text-center">
-                <h4 className="text-2xl sm:text-3xl font-bold text-white font-['Outfit']">ROUND 1 • IMAGE TO SPEECH</h4>
-                <p className="text-sm sm:text-base text-slate-400">
+            <div className="w-full max-w-xl p-6 rounded-3xl bg-slate-900/60 border border-purple-900/30 text-slate-300 flex flex-col items-center space-y-2.5 animate-in fade-in my-auto">
+              <Sparkles className="w-10 h-10 text-purple-400 animate-pulse" />
+              <div className="space-y-1 text-center">
+                <h4 className="text-lg sm:text-xl font-bold text-white font-['Outfit']">ROUND 1 • IMAGE TO SPEECH</h4>
+                <p className="text-xs text-slate-400">
                   Awaiting random image prompt assignment from {currentStationState?.name || 'operator station'}
                 </p>
               </div>
@@ -993,24 +965,24 @@ export const ProjectorDisplay: React.FC = () => {
 
         {/* Round 2: Wheel Spinning Animation, Selected Topic with Rotating Pop-Out, or Wheel Standby */}
         {currentRound === 2 && (
-          <div className="w-full max-w-6xl flex flex-col items-center justify-center my-auto relative">
+          <div className="w-full h-full flex-1 min-h-0 flex flex-col items-center justify-center relative">
             {isProjectorWheelSpinning ? (
-              <div className="flex flex-col items-center space-y-4 animate-in zoom-in-95 duration-300">
-                <span className="text-sm sm:text-base font-bold uppercase tracking-widest text-amber-400 animate-pulse flex items-center gap-2">
-                  <Disc className="w-5 h-5 animate-spin" />
+              <div className="flex flex-col items-center space-y-1.5 animate-in zoom-in-95 duration-300">
+                <span className="text-xs sm:text-sm font-bold uppercase tracking-widest text-amber-400 animate-pulse flex items-center gap-1.5">
+                  <Disc className="w-4 h-4 animate-spin" />
                   WHEEL IS SPINNING...
                 </span>
                 <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} />
               </div>
             ) : currentRoundTopic ? (
-              <div className="relative w-full flex flex-col items-center justify-center min-h-[480px]">
+              <div className="relative w-full h-full flex-1 min-h-0 flex flex-col items-center justify-center">
                 {/* Background Wheel: Centered and slightly scaled/blurred to provide depth */}
                 <div className="transition-all duration-700 scale-90 opacity-25 blur-[1px]">
                   <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} />
                 </div>
 
                 {/* Animated Topic: Bursts OUT from the wheel in a high-energy rotating motion */}
-                <div className="absolute inset-0 flex items-center justify-center p-4 z-20">
+                <div className="absolute inset-0 flex items-center justify-center p-2 z-20">
                   <motion.div
                     key={currentRoundTopic.title}
                     initial={{
@@ -1027,38 +999,38 @@ export const ProjectorDisplay: React.FC = () => {
                       duration: 1.15,
                       ease: [0.16, 1, 0.3, 1],
                     }}
-                    className="w-full max-w-3xl p-8 sm:p-12 rounded-3xl bg-gradient-to-r from-purple-950/95 via-slate-900/98 to-indigo-950/95 border-2 border-purple-400 shadow-[0_0_100px_rgba(168,85,247,0.5)] backdrop-blur-xl space-y-6 text-center relative overflow-hidden"
+                    className="w-full max-w-xl p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-purple-950/95 via-slate-900/98 to-indigo-950/95 border-2 border-purple-400 shadow-[0_0_100px_rgba(168,85,247,0.5)] backdrop-blur-xl space-y-3 text-center relative overflow-hidden max-h-[88%] overflow-y-auto"
                   >
                     {/* Pulsing neon radial aura */}
                     <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-pink-500 to-indigo-600 rounded-3xl blur-2xl opacity-40 -z-10 animate-pulse" />
 
                     <div className="flex items-center justify-between">
-                      <span className="text-xs sm:text-sm font-mono font-black uppercase tracking-widest text-amber-400 bg-amber-950/70 border border-amber-500/50 px-3.5 py-1.5 rounded-xl shadow-lg flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4 text-amber-400" />
+                      <span className="text-[10px] sm:text-xs font-mono font-black uppercase tracking-widest text-amber-400 bg-amber-950/70 border border-amber-500/50 px-2.5 py-1 rounded-xl shadow-lg flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                         SELECTED SPEECH THEME
                       </span>
                       {currentRoundTopic.category && (
-                        <span className="text-xs font-mono font-bold px-3 py-1.5 rounded-xl bg-purple-900/80 text-purple-200 border border-purple-500/50 shadow">
+                        <span className="text-[10px] sm:text-xs font-mono font-bold px-2 py-0.5 rounded-xl bg-purple-900/80 text-purple-200 border border-purple-500/50 shadow">
                           {currentRoundTopic.category}
                         </span>
                       )}
                     </div>
 
-                    <h3 className="text-3xl sm:text-5xl md:text-6xl font-black text-white font-['Outfit'] leading-tight drop-shadow-2xl">
+                    <h3 className="text-xl sm:text-3xl md:text-4xl font-black text-white font-['Outfit'] leading-tight drop-shadow-2xl">
                       "{currentRoundTopic.title}"
                     </h3>
 
-                    <div className="pt-2 flex items-center justify-center gap-2 text-xs font-mono text-emerald-300">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                    <div className="pt-0.5 flex items-center justify-center gap-2 text-xs font-mono text-emerald-300">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                       <span>Ready for Speech • Topic Replaced on Wheel</span>
                     </div>
                   </motion.div>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center space-y-4 animate-in fade-in">
-                <span className="text-xs sm:text-sm font-mono font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" />
+              <div className="flex flex-col items-center space-y-1.5 animate-in fade-in">
+                <span className="text-[10px] sm:text-xs font-mono font-bold text-purple-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
                   TOPIC WHEEL • READY TO SPIN
                 </span>
                 <WheelCanvas topics={activeTopics} rotationAngle={wheelAngle} size={wheelSize} />
@@ -1066,33 +1038,15 @@ export const ProjectorDisplay: React.FC = () => {
             )}
           </div>
         )}
-
-        {/* Round 3: Championship Finals Grand Stage */}
-        {currentRound === 3 && (
-          <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-indigo-950/60 border-2 border-emerald-500/40 shadow-2xl space-y-4 max-w-3xl animate-in zoom-in-95 duration-500">
-            <Trophy className="w-16 h-16 text-amber-400 mx-auto animate-bounce" />
-            <span className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-widest">
-              FINALS ARENA
-            </span>
-            <h3 className="text-3xl sm:text-5xl font-black text-white font-['Outfit']">
-              {activeItem?.title && activeItem.title !== 'Championship Finals Speech'
-                ? activeItem.title
-                : 'Championship Grand Finals'}
-            </h3>
-            <p className="text-base sm:text-lg text-slate-300 max-w-xl mx-auto">
-              Unrehearsed speaking championship. Think clearly, speak boldly, and express with conviction.
-            </p>
-          </div>
-        )}
       </main>
 
       {/* Bottom Footer Status Bar */}
-      <footer className="relative z-10 flex flex-wrap items-center justify-between gap-4 border-t border-purple-900/40 pt-5 text-xs text-slate-400 font-mono">
+      <footer className="relative z-10 flex items-center justify-between gap-2 border-t border-purple-900/40 pt-2 shrink-0 text-xs text-slate-400 font-mono">
         <div className="flex items-center gap-2">
-          <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
           <span>LIVE AUDIENCE BROADCAST • {isConnected ? 'SYNCHRONIZED' : 'CONNECTING'}</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <span>PRESS [F] FULLSCREEN</span>
           <span>•</span>
           <span>PRESS [ESC] EXIT DISPLAY</span>
