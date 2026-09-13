@@ -67,7 +67,11 @@ const AppContent: React.FC = () => {
               <Master />
             </ErrorBoundary>
           )}
-          {currentPage === 'participants' && <Participants />}
+          {currentPage === 'participants' && (
+            <ErrorBoundary fallbackTitle="Participant Management Error">
+              <Participants />
+            </ErrorBoundary>
+          )}
           {currentPage === 'topics' && <TopicsManager />}
           {currentPage === 'images' && <ImagesManager />}
           {currentPage === 'round1' && <Round1 />}

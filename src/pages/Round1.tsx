@@ -725,8 +725,8 @@ export const Round1: React.FC = () => {
                   if (checkInTab === 'awaiting' && isChecked) return false;
                   if (checkInSearch.trim()) {
                     const q = checkInSearch.toLowerCase().trim();
-                    const matchName = p.name.toLowerCase().includes(q);
-                    const matchNum = p.participantNumber.toLowerCase().includes(q);
+                    const matchName = (p.name || '').toLowerCase().includes(q);
+                    const matchNum = (p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
                     const matchOrg = p.organization?.toLowerCase().includes(q);
                     const matchMob = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
                     return matchName || matchNum || matchOrg || matchMob;

@@ -166,10 +166,13 @@ export const Participants: React.FC = () => {
     if (!db?.participants) return [];
     return db.participants
       .filter((p) => {
+        if (!p) return false;
+        const name = p.name || '';
+        const pNum = p.participantNumber || (p as any).chestNumber || (p as any).number || p.id || '';
         const mob = p.mobile || p.phone || p.customData?.mobile || p.customData?.phone || '';
         const matchesSearch =
-          p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          p.participantNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          pNum.toLowerCase().includes(searchTerm.toLowerCase()) ||
           mob.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (p.stationName && p.stationName.toLowerCase().includes(searchTerm.toLowerCase())) ||
           (p.stationId && p.stationId.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -198,9 +201,16 @@ export const Participants: React.FC = () => {
       })
       .sort((a, b) => {
         let comp = 0;
-        if (sortBy === 'number') comp = a.participantNumber.localeCompare(b.participantNumber);
-        if (sortBy === 'name') comp = a.name.localeCompare(b.name);
-        if (sortBy === 'status') comp = a.status.localeCompare(b.status);
+        const numA = a.participantNumber || (a as any).chestNumber || (a as any).number || a.id || '';
+        const numB = b.participantNumber || (b as any).chestNumber || (b as any).number || b.id || '';
+        const nameA = a.name || '';
+        const nameB = b.name || '';
+        const statusA = a.status || '';
+        const statusB = b.status || '';
+
+        if (sortBy === 'number') comp = numA.localeCompare(numB);
+        if (sortBy === 'name') comp = nameA.localeCompare(nameB);
+        if (sortBy === 'status') comp = statusA.localeCompare(statusB);
         if (sortBy === 'station') {
           const stA = a.stationName || a.stationId || 'zzz';
           const stB = b.stationName || b.stationId || 'zzz';
@@ -238,8 +248,8 @@ export const Participants: React.FC = () => {
   const openEditModal = (p: Participant) => {
     setEditingParticipant(p);
     setFormData({
-      name: p.name,
-      participantNumber: p.participantNumber,
+      name: p.name || '',
+      participantNumber: p.participantNumber || (p as any).chestNumber || p.id || '',
       mobile: p.mobile || p.phone || p.customData?.mobile || p.customData?.phone || '',
       stationId: p.stationId || '',
       stationName: p.stationName || '',
@@ -249,7 +259,7 @@ export const Participants: React.FC = () => {
       round2StationName: p.round2StationName || '',
       round3StationId: p.round3StationId || '',
       round3StationName: p.round3StationName || '',
-      status: p.status,
+      status: p.status || 'active',
       checkedIn: isParticipantCheckedIn(p),
       round1Qualified: p.round1Qualified || 'pending',
       round2Qualified: p.round2Qualified || 'pending',
@@ -978,7 +988,9 @@ export const Participants: React.FC = () => {
                                 </span>
                               )}
                             </div>
-                            <span className="text-[10px] font-mono text-purple-400">{p.participantNumber}</span>
+                            <span className="text-[10px] font-mono text-purple-400">
+                              {p.participantNumber || (p as any).chestNumber || p.id}
+                            </span>
                           </div>
                         </div>
                       </td>
@@ -1053,7 +1065,16 @@ export const Participants: React.FC = () => {
                             </span>
                             <span className="text-[9px] font-mono text-slate-400">
                               {p.checkedInAt
-                                ? new Date(p.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                ? (() => {
+                                    try {
+                                      const d = new Date(p.checkedInAt);
+                                      return isNaN(d.getTime())
+                                        ? 'Checked In'
+                                        : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                    } catch {
+                                      return 'Checked In';
+                                    }
+                                  })()
                                 : 'Checked In'}
                             </span>
                             <button
