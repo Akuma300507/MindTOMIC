@@ -462,6 +462,19 @@ try {
             station.activeParticipant = { ...p };
           }
         }
+
+        // Auto-stage first checked-in contestant allocated to this station if station is currently empty
+        if (!station.activeParticipantId) {
+          const checkedInP = db.participants.find(
+            (item) =>
+              (item.stationId === station.id || (!item.stationId && station.id === 'station-a')) &&
+              isParticipantCheckedIn(item)
+          );
+          if (checkedInP) {
+            station.activeParticipantId = checkedInP.id;
+            station.activeParticipant = { ...checkedInP };
+          }
+        }
       });
     }
 
@@ -2577,7 +2590,7 @@ app.post('/api/participants/:id/check-in', (req: Request, res: Response) => {
   }
   p.updatedAt = new Date().toISOString();
 
-  // Sync if staged on any active station
+  // Sync if staged on any active station or auto-stage on station if empty
   if (db.stations) {
     Object.values(db.stations).forEach((st) => {
       if (st.activeParticipantId === p.id) {
@@ -2587,6 +2600,14 @@ app.post('/api/participants/:id/check-in', (req: Request, res: Response) => {
           st.activeParticipantId = null;
           st.activeParticipant = null;
         }
+        broadcastStationUpdate(st.id, 'station_updated', st);
+      } else if (
+        checkedIn &&
+        !st.activeParticipantId &&
+        (p.stationId === st.id || targetStationId === st.id || (!p.stationId && st.id === 'station-a'))
+      ) {
+        st.activeParticipantId = p.id;
+        st.activeParticipant = { ...p };
         broadcastStationUpdate(st.id, 'station_updated', st);
       }
     });
@@ -2654,6 +2675,14 @@ app.post('/api/participants/check-in/batch', (req: Request, res: Response) => {
               st.activeParticipantId = null;
               st.activeParticipant = null;
             }
+            broadcastStationUpdate(st.id, 'station_updated', st);
+          } else if (
+            checkedIn &&
+            !st.activeParticipantId &&
+            (p.stationId === st.id || targetStationId === st.id || (!p.stationId && st.id === 'station-a'))
+          ) {
+            st.activeParticipantId = p.id;
+            st.activeParticipant = { ...p };
             broadcastStationUpdate(st.id, 'station_updated', st);
           }
         });

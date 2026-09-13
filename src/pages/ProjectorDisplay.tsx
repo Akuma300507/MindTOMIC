@@ -50,12 +50,7 @@ export const ProjectorDisplay: React.FC = () => {
     projectorPingNotification,
     clearProjectorPingNotification,
     updateSettings,
-    setDeviceRole,
   } = useApp();
-
-  useEffect(() => {
-    setDeviceRole('projector');
-  }, [setDeviceRole]);
 
   // Wheel topic font size adjustment state (synced with settings and localStorage)
   const wheelFontSize = useMemo(() => {
@@ -162,6 +157,20 @@ export const ProjectorDisplay: React.FC = () => {
         currentStationState.activeParticipant;
     }
 
+    // Direct Station Checked-In Fallback:
+    // If the station has no explicitly staged participant in station state yet,
+    // find the active checked-in participant allocated to this station so the projector view shows them!
+    if (!candidate && db?.participants && selectedStationId) {
+      candidate =
+        db.participants.find(
+          (p) =>
+            (p.stationId === selectedStationId ||
+              p.checkedInStationId === selectedStationId ||
+              (!p.stationId && (selectedStationId === 'station-a' || selectedStationId === allStations[0]?.id))) &&
+            isParticipantCheckedIn(p)
+        ) || null;
+    }
+
     if (candidate && isParticipantCheckedIn(candidate)) {
       return candidate;
     }
@@ -172,6 +181,8 @@ export const ProjectorDisplay: React.FC = () => {
     currentStationState?.activeParticipant?.checkedIn,
     currentStationState?.activeParticipant?.status,
     db?.participants,
+    selectedStationId,
+    allStations,
   ]);
 
   const eventName = db?.settings.event.name || 'MIND TO MIC';

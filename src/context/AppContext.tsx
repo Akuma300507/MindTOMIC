@@ -284,7 +284,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (urlPage === 'projector') return 'projector';
       if (urlPage === 'master') return 'master';
       const saved = localStorage.getItem('m2m_device_role') as DeviceRole | null;
-      if (saved && ['station', 'master', 'projector'].includes(saved)) return saved;
+      if (saved && ['station', 'master', 'projector'].includes(saved)) {
+        if (saved === 'projector' && urlPage && urlPage !== 'projector') return 'station';
+        return saved;
+      }
     } catch {}
     return 'station';
   });
@@ -1193,6 +1196,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (curr?.id === participant.id) {
               return isParticipantCheckedIn(participant) ? participant : null;
             }
+            if (!curr && isParticipantCheckedIn(participant)) {
+              return participant;
+            }
             return curr;
           });
         } catch (err) {
@@ -1231,7 +1237,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             };
           });
           setActiveParticipant((curr) => {
-            if (!curr) return curr;
+            if (!curr) {
+              const firstChecked = list.find((p) => isParticipantCheckedIn(p));
+              return firstChecked ?? null;
+            }
             const updated = map.get(curr.id);
             if (updated) {
               return isParticipantCheckedIn(updated) ? updated : null;
@@ -1632,6 +1641,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (curr?.id === id) {
           return isParticipantCheckedIn(res.participant) ? res.participant : null;
         }
+        if (!curr && isParticipantCheckedIn(res.participant)) {
+          return res.participant;
+        }
         return curr;
       });
       return res.participant;
@@ -1654,7 +1666,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       });
       setActiveParticipant((curr) => {
-        if (!curr) return curr;
+        if (!curr) {
+          const firstChecked = res.participants.find((p) => isParticipantCheckedIn(p));
+          return firstChecked ?? null;
+        }
         const updated = res.participants.find((p) => p.id === curr.id);
         if (updated) {
           return isParticipantCheckedIn(updated) ? updated : null;
