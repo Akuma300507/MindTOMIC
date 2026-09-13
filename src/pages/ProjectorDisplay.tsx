@@ -20,6 +20,7 @@ import {
   Bell,
   X,
   Monitor,
+  ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -38,6 +39,8 @@ export const ProjectorDisplay: React.FC = () => {
     allStations,
     currentStationId,
     setCurrentStationId,
+    selectNextParticipant,
+    activeParticipant: appActiveParticipant,
     rotateStationImage,
     isConnected,
     isFullscreen,
@@ -144,9 +147,7 @@ export const ProjectorDisplay: React.FC = () => {
   // Read current station-specific state strictly isolated to this projector's station
   const currentStationState = db?.stations ? db.stations[selectedStationId] : null;
 
-  // STRICT STATION ISOLATION: Find active participant for this station
-  // NEVER fall back to other stations or global liveSync
-  // ONLY display contestant IF they are currently checked in!
+  // Find active participant for this station
   const activeParticipant = useMemo(() => {
     let candidate: Participant | null = null;
     if (currentStationState?.activeParticipantId && db?.participants) {
@@ -157,9 +158,9 @@ export const ProjectorDisplay: React.FC = () => {
         currentStationState.activeParticipant;
     }
 
-    // Direct Station Checked-In Fallback:
+    // Direct Station Fallback:
     // If the station has no explicitly staged participant in station state yet,
-    // find the active checked-in participant allocated to this station so the projector view shows them!
+    // find the participant allocated to this station so the projector view shows them!
     if (!candidate && db?.participants && selectedStationId) {
       candidate =
         db.participants.find(
@@ -168,21 +169,32 @@ export const ProjectorDisplay: React.FC = () => {
               p.checkedInStationId === selectedStationId ||
               (!p.stationId && (selectedStationId === 'station-a' || selectedStationId === allStations[0]?.id))) &&
             isParticipantCheckedIn(p)
-        ) || null;
+        ) ||
+        db.participants.find(
+          (p) =>
+            p.stationId === selectedStationId ||
+            p.checkedInStationId === selectedStationId ||
+            (!p.stationId && (selectedStationId === 'station-a' || selectedStationId === allStations[0]?.id))
+        ) ||
+        null;
     }
 
-    if (candidate && isParticipantCheckedIn(candidate)) {
-      return candidate;
+    // If still not staged on station state, check app's active participant if matching station
+    if (!candidate && appActiveParticipant) {
+      if (!appActiveParticipant.stationId || appActiveParticipant.stationId === selectedStationId) {
+        candidate = appActiveParticipant;
+      }
     }
-    return null;
+
+    return candidate;
   }, [
     currentStationState?.activeParticipantId,
     currentStationState?.activeParticipant?.id,
-    currentStationState?.activeParticipant?.checkedIn,
-    currentStationState?.activeParticipant?.status,
+    currentStationState?.activeParticipant,
     db?.participants,
     selectedStationId,
     allStations,
+    appActiveParticipant,
   ]);
 
   const eventName = db?.settings.event.name || 'MIND TO MIC';
@@ -545,6 +557,8 @@ export const ProjectorDisplay: React.FC = () => {
         setShowExitModal(true);
       } else if (e.key === 'f' || e.key === 'F') {
         toggleFullscreen();
+      } else if (e.key === 'n' || e.key === 'N') {
+        selectNextParticipant();
       } else if (e.key === 'r' || e.key === 'R') {
         if (currentRound === 1 && activeItem?.type === 'image') {
           handleRotateImage();
@@ -553,7 +567,7 @@ export const ProjectorDisplay: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleFullscreen, currentRound, activeItem?.type, handleRotateImage]);
+  }, [toggleFullscreen, selectNextParticipant, currentRound, activeItem?.type, handleRotateImage]);
 
   // Format MM:SS
   const formatTime = (secs: number) => {
@@ -831,18 +845,33 @@ export const ProjectorDisplay: React.FC = () => {
       <main ref={stageRef} className="relative z-10 flex-1 min-h-0 w-full max-w-full mx-auto flex flex-col items-center justify-center text-center px-1 py-0.5 overflow-hidden">
         {/* Active Contestant Spotlight Banner */}
         {activeParticipant ? (
-          <div key={activeParticipant.id} className="shrink-0 flex items-center justify-center gap-2 py-0.5 animate-in fade-in zoom-in-95 duration-300">
+          <div key={activeParticipant.id} className="shrink-0 flex items-center justify-center gap-2 py-0.5 animate-in fade-in zoom-in-95 duration-300 group/banner">
             <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-purple-300 font-mono bg-purple-950/80 px-2.5 py-0.5 rounded-full border border-purple-800/60 shadow">
               CONTESTANT {activeParticipant.participantNumber} • {currentStationState?.name ? `${currentStationState.name.toUpperCase()}` : 'ON STAGE'}
             </span>
             <h2 className="text-lg sm:text-xl md:text-2xl font-black text-white font-['Outfit'] tracking-tight drop-shadow-lg truncate max-w-xl">
               {activeParticipant.name}
             </h2>
+            <button
+              onClick={() => selectNextParticipant()}
+              className="opacity-0 group-hover/banner:opacity-100 transition-opacity p-1 px-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-800 text-purple-200 border border-purple-700/60 text-xs flex items-center gap-0.5 cursor-pointer shadow-md"
+              title="Next Contestant (Shortcut: N)"
+            >
+              <span className="text-[10px] font-bold">Next</span>
+              <ChevronRight className="w-3 h-3" />
+            </button>
           </div>
         ) : (
           <div key="awaiting-contestant" className="shrink-0 text-slate-400 font-semibold text-xs flex items-center gap-2 py-0.5">
             <Radio className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
             <span>Awaiting Next Contestant{currentStationState ? ` for ${currentStationState.name}` : ''}...</span>
+            <button
+              onClick={() => selectNextParticipant()}
+              className="ml-2 px-2 py-0.5 rounded-md bg-purple-900/50 hover:bg-purple-800 text-purple-300 border border-purple-700/50 text-[10px] font-bold cursor-pointer transition-colors"
+              title="Stage First / Next Contestant"
+            >
+              Stage Next
+            </button>
           </div>
         )}
 

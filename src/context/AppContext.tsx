@@ -319,20 +319,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch {}
 
-    // Auto-switch active participant to match new station ONLY if checked-in contestants exist
+    // Auto-switch active participant to match new station
     if (id && id !== 'all') {
       setDb((currDb) => {
         if (currDb?.participants) {
+          const staged = currDb.stations?.[id]?.activeParticipant;
+          if (staged) {
+            setActiveParticipant(staged);
+            return currDb;
+          }
           const stationParticipants = currDb.participants.filter(
-            (p) => p.stationId === id && isParticipantCheckedIn(p)
+            (p) => p.stationId === id || p.checkedInStationId === id || !p.stationId
           );
           if (stationParticipants.length > 0) {
             setActiveParticipant((currPart) => {
-              if (currPart && currPart.stationId === id && isParticipantCheckedIn(currPart)) return currPart;
+              if (currPart && (currPart.stationId === id || currPart.checkedInStationId === id)) return currPart;
               return stationParticipants[0];
             });
-          } else {
-            setActiveParticipant(null);
           }
         }
         return currDb;
@@ -498,18 +501,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const state = await api.getState();
       setDb(state);
-      // Only set active participant if they are verified to be checked in
+      // Initialize active participant from staged station participant or station participant
       setActiveParticipant((current) => {
-        if (current && isParticipantCheckedIn(current)) return current;
+        if (current) return current;
         if (!state.participants || state.participants.length === 0) return null;
         if (currentStationId && currentStationId !== 'all') {
+          const staged = state.stations?.[currentStationId]?.activeParticipant;
+          if (staged) return staged;
           const stationMatch = state.participants.find(
-            (p) => p.stationId === currentStationId && isParticipantCheckedIn(p)
+            (p) => p.stationId === currentStationId
           );
           if (stationMatch) return stationMatch;
         }
-        const anyCheckedIn = state.participants.find((p) => isParticipantCheckedIn(p));
-        return anyCheckedIn ?? null;
+        return state.participants[0] ?? null;
       });
     } catch (err) {
       console.error('Failed to load initial state:', err);
@@ -546,10 +550,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return Object.values(db.stations);
   }, [db?.stations]);
 
+  const setStationParticipant = useCallback(
+    async (stationId: string, participantId: string | null) => {
+      const res = await api.setStationParticipant(stationId, participantId);
+      setDb((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          stations: { ...(prev.stations || {}), [stationId]: res.station },
+        };
+      });
+    },
+    []
+  );
+
   // Synchronize active participant across station (Operator station role only)
   useEffect(() => {
-    // Projector and Master must NEVER auto-sync active participant to station
-    if (deviceRole === 'projector' || currentPage === 'projector' || deviceRole === 'master') {
+    // Projector must NEVER auto-sync active participant to station
+    if (currentPage === 'projector') {
       return;
     }
 
@@ -559,25 +577,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const currentSt = db?.stations?.[currentStationId];
 
-    if (activeParticipant && isParticipantCheckedIn(activeParticipant)) {
+    if (activeParticipant) {
       // Only call API if station does NOT already have this participant staged
       if (currentSt?.activeParticipantId !== activeParticipant.id) {
-        api.setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
+        setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
       }
     } else if (!activeParticipant) {
-      // If there is no checked-in active contestant, ensure station state is cleared ONLY if currently staged
+      // If there is no active contestant, ensure station state is cleared ONLY if currently staged
       if (currentSt?.activeParticipantId || currentSt?.activeParticipant) {
-        api.setStationParticipant(currentStationId, null).catch(() => {});
+        setStationParticipant(currentStationId, null).catch(() => {});
       }
     }
   }, [
     activeParticipant?.id,
-    activeParticipant?.checkedIn,
-    activeParticipant?.status,
     currentStationId,
-    deviceRole,
     currentPage,
     db?.stations?.[currentStationId || '']?.activeParticipantId,
+    setStationParticipant,
   ]);
 
   // Synchronize round switch when operator navigates pages (Operator station role only)
@@ -676,20 +692,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setStationRound = useCallback(
     async (stationId: string, round: 1 | 2 | 3) => {
       const res = await api.setStationRound(stationId, round);
-      setDb((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
-        };
-      });
-    },
-    []
-  );
-
-  const setStationParticipant = useCallback(
-    async (stationId: string, participantId: string | null) => {
-      const res = await api.setStationParticipant(stationId, participantId);
       setDb((prev) => {
         if (!prev) return prev;
         return {
@@ -1194,9 +1196,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
           setActiveParticipant((curr) => {
             if (curr?.id === participant.id) {
-              return isParticipantCheckedIn(participant) ? participant : null;
+              return participant;
             }
-            if (!curr && isParticipantCheckedIn(participant)) {
+            if (!curr) {
               return participant;
             }
             return curr;
@@ -1238,12 +1240,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
           setActiveParticipant((curr) => {
             if (!curr) {
-              const firstChecked = list.find((p) => isParticipantCheckedIn(p));
-              return firstChecked ?? null;
+              return list[0] ?? null;
             }
             const updated = map.get(curr.id);
             if (updated) {
-              return isParticipantCheckedIn(updated) ? updated : null;
+              return updated;
             }
             return curr;
           });
@@ -1323,8 +1324,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDb((currentDb) => {
         if (!currentDb || currentDb.participants.length === 0) return currentDb;
 
+        const targetStationId =
+          currentStationId && currentStationId !== 'all'
+            ? currentStationId
+            : (allStations[0]?.id || 'station-a');
+
         let candidateList = customList;
-        if (!candidateList) {
+        if (!candidateList || candidateList.length === 0) {
           let pool = currentDb.participants;
           if (currentPage === 'round2') {
             // Round 2 is for contestants who qualified in Round 1
@@ -1347,8 +1353,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
 
           // If a station is selected, prioritize contestants assigned to this station
-          if (currentStationId) {
-            const stationSpecific = pool.filter((p) => p.stationId === currentStationId);
+          if (targetStationId) {
+            const stationSpecific = pool.filter(
+              (p) =>
+                p.stationId === targetStationId ||
+                p.checkedInStationId === targetStationId ||
+                !p.stationId
+            );
             candidateList = stationSpecific.length > 0 ? stationSpecific : pool;
           } else {
             candidateList = pool;
@@ -1357,17 +1368,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (!candidateList || candidateList.length === 0) return currentDb;
 
-        setActiveParticipant((curr) => {
-          const currentIdx = curr
-            ? candidateList!.findIndex((p) => p.id === curr.id)
-            : -1;
-          const nextIdx = (currentIdx + 1) % candidateList!.length;
-          return candidateList![nextIdx] ?? null;
-        });
+        // Current staged participant on this station or locally active
+        const stagedId =
+          currentDb.stations?.[targetStationId]?.activeParticipantId ||
+          currentDb.stations?.[targetStationId]?.activeParticipant?.id;
+
+        const currentIdx = stagedId
+          ? candidateList.findIndex((p) => p.id === stagedId)
+          : activeParticipant
+          ? candidateList.findIndex((p) => p.id === activeParticipant.id)
+          : -1;
+
+        const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % candidateList.length : 0;
+        const nextParticipant = candidateList[nextIdx] ?? null;
+
+        if (nextParticipant) {
+          setActiveParticipant(nextParticipant);
+
+          if (targetStationId) {
+            // Immediately stage on station and broadcast to projector
+            api.setStationParticipant(targetStationId, nextParticipant.id).then((res) => {
+              if (res?.station) {
+                setDb((prev) => {
+                  if (!prev) return prev;
+                  const updatedStations = { ...(prev.stations || {}), [targetStationId]: res.station };
+                  return {
+                    ...prev,
+                    stations: updatedStations,
+                    liveSync: {
+                      ...prev.liveSync,
+                      activeParticipantId: nextParticipant.id,
+                      stationStates: updatedStations,
+                    },
+                  };
+                });
+              }
+            }).catch((err) => {
+              console.error('Failed to stage next participant on station:', err);
+            });
+          }
+        }
+
         return currentDb;
       });
     },
-    [currentPage, currentStationId]
+    [currentPage, currentStationId, allStations, activeParticipant]
   );
 
   // Custom Buzzer
@@ -1639,9 +1684,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       setActiveParticipant((curr) => {
         if (curr?.id === id) {
-          return isParticipantCheckedIn(res.participant) ? res.participant : null;
+          return res.participant;
         }
-        if (!curr && isParticipantCheckedIn(res.participant)) {
+        if (!curr) {
           return res.participant;
         }
         return curr;
@@ -1667,12 +1712,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       setActiveParticipant((curr) => {
         if (!curr) {
-          const firstChecked = res.participants.find((p) => isParticipantCheckedIn(p));
-          return firstChecked ?? null;
+          return res.participants[0] ?? null;
         }
         const updated = res.participants.find((p) => p.id === curr.id);
         if (updated) {
-          return isParticipantCheckedIn(updated) ? updated : null;
+          return updated;
         }
         return curr;
       });

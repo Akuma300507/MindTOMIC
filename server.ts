@@ -442,12 +442,12 @@ try {
       }
     });
 
-    // Sanitize stations: ensure no non-checked-in participant is staged as active
+    // Ensure staged participants are valid
     if (db.stations) {
       Object.values(db.stations).forEach((station) => {
         if (station.activeParticipantId) {
           const p = db.participants.find((item) => item.id === station.activeParticipantId);
-          if (!p || !isParticipantCheckedIn(p)) {
+          if (!p) {
             station.activeParticipantId = null;
             station.activeParticipant = null;
           } else {
@@ -455,7 +455,7 @@ try {
           }
         } else if (station.activeParticipant) {
           const p = db.participants.find((item) => item.id === station.activeParticipant?.id);
-          if (!p || !isParticipantCheckedIn(p)) {
+          if (!p) {
             station.activeParticipantId = null;
             station.activeParticipant = null;
           } else {
@@ -463,16 +463,20 @@ try {
           }
         }
 
-        // Auto-stage first checked-in contestant allocated to this station if station is currently empty
+        // Auto-stage first contestant allocated to this station if station is currently empty
         if (!station.activeParticipantId) {
-          const checkedInP = db.participants.find(
-            (item) =>
-              (item.stationId === station.id || (!item.stationId && station.id === 'station-a')) &&
-              isParticipantCheckedIn(item)
-          );
-          if (checkedInP) {
-            station.activeParticipantId = checkedInP.id;
-            station.activeParticipant = { ...checkedInP };
+          const candidateP =
+            db.participants.find(
+              (item) =>
+                (item.stationId === station.id || (!item.stationId && station.id === 'station-a')) &&
+                isParticipantCheckedIn(item)
+            ) ||
+            db.participants.find(
+              (item) => item.stationId === station.id || (!item.stationId && station.id === 'station-a')
+            );
+          if (candidateP) {
+            station.activeParticipantId = candidateP.id;
+            station.activeParticipant = { ...candidateP };
           }
         }
       });
@@ -1666,15 +1670,20 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
   let assignedParticipant: Participant | null = null;
   if (participantId) {
     const p = db.participants.find((item) => item.id === participantId);
-    if (!p || !isParticipantCheckedIn(p)) {
-      station.activeParticipantId = null;
-      station.activeParticipant = null;
-      persistDB();
-      broadcastStationUpdate(station.id, 'station_updated', station);
-      return res.status(400).json({
-        error: 'Contestant must be checked in to the venue before being staged on a station.',
+    if (!p) {
+      return res.status(404).json({
+        error: 'Participant not found.',
         station,
       });
+    }
+    // Auto-mark checked-in when staged on station so check-in states remain consistent
+    if (!isParticipantCheckedIn(p)) {
+      p.checkedIn = true;
+      if (!p.status || p.status === 'registered' || (p.status as string) === 'awaiting_checkin') {
+        p.status = 'checked_in';
+      }
+      p.checkedInStationId = station.id;
+      p.checkedInAt = p.checkedInAt || new Date().toISOString();
     }
     assignedParticipant = p;
   }
@@ -1693,6 +1702,11 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
 
   station.activeParticipantId = targetParticipantId;
   station.activeParticipant = assignedParticipant ? { ...assignedParticipant } : null;
+
+  // Sync with global liveSync active participant if matching station
+  if (db.liveSync) {
+    db.liveSync.activeParticipantId = targetParticipantId;
+  }
 
   // Reset current station item if contestant changes
   station.selectedImageId = null;

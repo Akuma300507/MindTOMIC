@@ -43,6 +43,7 @@ export const Round2: React.FC = () => {
     allStations,
     setCurrentPage,
     updateSettings,
+    setStationParticipant,
   } = useApp();
 
   // Wheel topic font size adjustment state (synced with settings and localStorage)
@@ -93,21 +94,29 @@ export const Round2: React.FC = () => {
   }, [wheelFontSize, updateSettings, db?.settings]);
 
   // Round 1 qualification workflow:
-  // ONLY contestants who are qualified in Round 1 advance to Round 2 (Strict - no override)
+  // Contestants who are qualified in Round 1 advance to Round 2.
+  // If no one is marked qualified yet, allow station participants so round can still be operated.
   const round1Qualifiers = useMemo(() => {
     return (db?.participants || []).filter((p) => p.round1Qualified === 'qualified');
   }, [db?.participants]);
 
-  const eligibleRound2Participants = useMemo(() => {
-    return round1Qualifiers;
-  }, [round1Qualifiers]);
+  const stationParticipants = useMemo(() => {
+    if (!db?.participants) return [];
+    if (!currentStationId || currentStationId === 'all') return db.participants;
+    return db.participants.filter((p) => p.stationId === currentStationId);
+  }, [db?.participants, currentStationId]);
 
-  // Station-filtered eligible participants for Round 2 (strictly qualified only)
+  const eligibleRound2Participants = useMemo(() => {
+    return round1Qualifiers.length > 0 ? round1Qualifiers : stationParticipants;
+  }, [round1Qualifiers, stationParticipants]);
+
+  // Station-filtered eligible participants for Round 2
   const stationEligibleRound2Participants = useMemo(() => {
     if (!currentStationId || currentStationId === 'all') {
       return eligibleRound2Participants;
     }
-    return eligibleRound2Participants.filter((p) => p.stationId === currentStationId);
+    const filtered = eligibleRound2Participants.filter((p) => p.stationId === currentStationId);
+    return filtered.length > 0 ? filtered : eligibleRound2Participants;
   }, [eligibleRound2Participants, currentStationId]);
 
   // Auto-select first station-eligible Round 2 contestant
@@ -119,10 +128,10 @@ export const Round2: React.FC = () => {
       if (!isAlreadyEligible) {
         setActiveParticipant(stationEligibleRound2Participants[0]);
       }
-    } else if (activeParticipant) {
+    } else if (activeParticipant && (db?.participants || []).length === 0) {
       setActiveParticipant(null as any);
     }
-  }, [stationEligibleRound2Participants, activeParticipant, setActiveParticipant]);
+  }, [stationEligibleRound2Participants, activeParticipant, setActiveParticipant, db?.participants]);
 
   // Wheel state
   const [isSpinning, setIsSpinning] = useState(false);
@@ -475,9 +484,14 @@ export const Round2: React.FC = () => {
               value={activeParticipant?.id || ''}
               onChange={(e) => {
                 const p = db?.participants.find((item) => item.id === e.target.value);
-                if (p) setActiveParticipant(p);
+                if (p) {
+                  setActiveParticipant(p);
+                  if (currentStationId && currentStationId !== 'all') {
+                    setStationParticipant(currentStationId, p.id);
+                  }
+                }
               }}
-              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate"
+              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
               {stationEligibleRound2Participants.length === 0 ? (
                 <option value="" disabled className="bg-slate-900 text-amber-400">
@@ -503,8 +517,13 @@ export const Round2: React.FC = () => {
           </div>
 
           <button
-            onClick={() => selectNextParticipant(stationEligibleRound2Participants.length > 0 ? stationEligibleRound2Participants : undefined)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50"
+            onClick={() => {
+              const list = stationEligibleRound2Participants.length > 0
+                ? stationEligibleRound2Participants
+                : (stationParticipants.length > 0 ? stationParticipants : undefined);
+              selectNextParticipant(list);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 cursor-pointer"
             title="Next Participant (Shortcut: N)"
           >
             <span>Next</span>

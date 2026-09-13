@@ -26,24 +26,33 @@ export const Round3: React.FC = () => {
     currentStation,
     allStations,
     setCurrentPage,
+    setStationParticipant,
   } = useApp();
 
   // Round 2 to Round 3 qualification workflow:
-  // ONLY contestants who are qualified in Round 2 advance to Round 3 (Championship Finals) (Strict - no override)
+  // Contestants who are qualified in Round 2 advance to Round 3.
+  // If no one is marked qualified yet, allow station participants so round can still be operated.
   const round2Qualifiers = useMemo(() => {
     return (db?.participants || []).filter((p) => p.round2Qualified === 'qualified');
   }, [db?.participants]);
 
-  const eligibleRound3Participants = useMemo(() => {
-    return round2Qualifiers;
-  }, [round2Qualifiers]);
+  const stationParticipants = useMemo(() => {
+    if (!db?.participants) return [];
+    if (!currentStationId || currentStationId === 'all') return db.participants;
+    return db.participants.filter((p) => p.stationId === currentStationId);
+  }, [db?.participants, currentStationId]);
 
-  // Station-filtered eligible finalists for Round 3 (strictly qualified only)
+  const eligibleRound3Participants = useMemo(() => {
+    return round2Qualifiers.length > 0 ? round2Qualifiers : stationParticipants;
+  }, [round2Qualifiers, stationParticipants]);
+
+  // Station-filtered eligible finalists for Round 3
   const stationEligibleRound3Participants = useMemo(() => {
     if (!currentStationId || currentStationId === 'all') {
       return eligibleRound3Participants;
     }
-    return eligibleRound3Participants.filter((p) => p.stationId === currentStationId);
+    const filtered = eligibleRound3Participants.filter((p) => p.stationId === currentStationId);
+    return filtered.length > 0 ? filtered : eligibleRound3Participants;
   }, [eligibleRound3Participants, currentStationId]);
 
   // Auto-select first station-eligible Round 3 finalist
@@ -55,10 +64,10 @@ export const Round3: React.FC = () => {
       if (!isAlreadyEligible) {
         setActiveParticipant(stationEligibleRound3Participants[0]);
       }
-    } else if (activeParticipant) {
+    } else if (activeParticipant && (db?.participants || []).length === 0) {
       setActiveParticipant(null as any);
     }
-  }, [stationEligibleRound3Participants, activeParticipant, setActiveParticipant]);
+  }, [stationEligibleRound3Participants, activeParticipant, setActiveParticipant, db?.participants]);
 
   const [timerPhase, setTimerPhase] = useState<TimerPhase>('idle');
   const [lastSavedResult, setLastSavedResult] = useState<Round3Result | null>(null);
@@ -150,9 +159,14 @@ export const Round3: React.FC = () => {
               value={activeParticipant?.id || ''}
               onChange={(e) => {
                 const p = db?.participants.find((item) => item.id === e.target.value);
-                if (p) setActiveParticipant(p);
+                if (p) {
+                  setActiveParticipant(p);
+                  if (currentStationId && currentStationId !== 'all') {
+                    setStationParticipant(currentStationId, p.id);
+                  }
+                }
               }}
-              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate"
+              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
               {stationEligibleRound3Participants.length === 0 ? (
                 <option value="" disabled className="bg-slate-900 text-amber-400">
@@ -163,7 +177,7 @@ export const Round3: React.FC = () => {
                   const isR2Qual = p.round2Qualified === 'qualified';
                   return (
                     <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                      {p.participantNumber} — {p.name} {isR2Qual ? '★ [R2 QUALIFIED]' : ''}
+                      #{p.participantNumber} — {p.name} {isR2Qual ? '★ [R2 QUALIFIED]' : ''}
                     </option>
                   );
                 })
@@ -178,8 +192,13 @@ export const Round3: React.FC = () => {
           </div>
 
           <button
-            onClick={() => selectNextParticipant(stationEligibleRound3Participants.length > 0 ? stationEligibleRound3Participants : undefined)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50"
+            onClick={() => {
+              const list = stationEligibleRound3Participants.length > 0
+                ? stationEligibleRound3Participants
+                : (stationParticipants.length > 0 ? stationParticipants : undefined);
+              selectNextParticipant(list);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 cursor-pointer"
             title="Next Participant (Shortcut: N)"
           >
             <span>Next</span>

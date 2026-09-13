@@ -38,6 +38,7 @@ export const Round1: React.FC = () => {
     allStations,
     setCurrentPage,
     checkInParticipant,
+    setStationParticipant,
   } = useApp();
 
   const [selectedImage, setSelectedImage] = useState<EventImage | null>(null);
@@ -268,25 +269,34 @@ export const Round1: React.FC = () => {
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
             <span className="text-slate-400">Contestant:</span>
             <select
-              value={isCurrentParticipantCheckedIn ? (activeParticipant?.id || '') : ''}
+              value={activeParticipant?.id || ''}
               onChange={(e) => {
-                const p = checkedInStationParticipants.find((item) => item.id === e.target.value);
-                if (p) setActiveParticipant(p);
+                const p =
+                  stationParticipants.find((item) => item.id === e.target.value) ||
+                  checkedInStationParticipants.find((item) => item.id === e.target.value) ||
+                  db?.participants.find((item) => item.id === e.target.value);
+                if (p) {
+                  setActiveParticipant(p);
+                  if (currentStationId && currentStationId !== 'all') {
+                    setStationParticipant(currentStationId, p.id);
+                  }
+                }
               }}
               className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[220px] truncate cursor-pointer"
             >
-              {checkedInStationParticipants.length === 0 ? (
+              {stationParticipants.length === 0 ? (
                 <option value="" disabled className="bg-slate-900 text-amber-400">
-                  {stationParticipants.length === 0
-                    ? `No contestants in ${currentStation?.name || 'this station'}`
-                    : `No checked-in contestants (${stationParticipants.length} awaiting)`}
+                  No contestants in {currentStation?.name || 'this station'}
                 </option>
               ) : (
-                checkedInStationParticipants.map((p) => (
-                  <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                    #{p.participantNumber} — {p.name}
-                  </option>
-                ))
+                stationParticipants.map((p) => {
+                  const isChecked = isParticipantCheckedIn(p);
+                  return (
+                    <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                      #{p.participantNumber} — {p.name} {isChecked ? '✓' : ''}
+                    </option>
+                  );
+                })
               )}
             </select>
             <span
@@ -346,15 +356,17 @@ export const Round1: React.FC = () => {
 
           <button
             onClick={() => {
-              if (checkedInStationParticipants.length > 0) {
+              if (checkedInStationParticipants.length > 1) {
                 selectNextParticipant(checkedInStationParticipants);
+              } else if (stationParticipants.length > 0) {
+                selectNextParticipant(stationParticipants);
               } else {
-                setShowCheckInModal(true);
+                selectNextParticipant();
               }
             }}
-            disabled={checkedInStationParticipants.length === 0 && stationParticipants.length === 0}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 disabled:opacity-40"
-            title={checkedInStationParticipants.length > 0 ? "Next Checked-In Participant (Shortcut: N)" : "Check In Participants First"}
+            disabled={stationParticipants.length === 0 && (!db?.participants || db.participants.length === 0)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 disabled:opacity-40 cursor-pointer"
+            title="Next Participant (Shortcut: N)"
           >
             <span>Next</span>
             <ChevronRight className="w-4 h-4" />
