@@ -372,12 +372,13 @@ export const Master: React.FC = () => {
             return false;
           });
 
-          // Next pending contestant for this station
+          // Next pending contestant for this station (strictly only checked-in contestants!)
           const nextPendingContestant = stationParticipants.find((p) => {
+            if (!isParticipantCheckedIn(p)) return false;
             if (station.currentRound === 1) return p.round1Status === 'waiting' || p.round1Status === 'not_started' || p.round1Status === 'pending';
             if (station.currentRound === 2) return p.round2Status === 'waiting' || p.round2Status === 'not_started' || p.round2Status === 'pending';
             return p.round3Status === 'waiting' || p.round3Status === 'not_started' || p.round3Status === 'pending';
-          }) || stationParticipants[0];
+          });
 
           const stationInitial = (station.name || 'Station').substring((station.name || 'Station').length - 1) || 'S';
           const activeDeviceName = station.claimedByDeviceName || station.controllerDeviceName;
@@ -579,20 +580,36 @@ export const Master: React.FC = () => {
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
                       <select
                         id={`assign-contestant-select-${station.id}`}
-                        onChange={(e) => setStationParticipant(station.id, e.target.value || null)}
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          if (!val) {
+                            await setStationParticipant(station.id, null);
+                            return;
+                          }
+                          const targetP = (db?.participants || []).find((p) => p.id === val);
+                          if (targetP && !isParticipantCheckedIn(targetP)) {
+                            alert(`Contestant ${targetP.name} cannot be staged because they have not checked in.`);
+                            e.target.value = '';
+                            return;
+                          }
+                          await setStationParticipant(station.id, val);
+                        }}
                         className="bg-slate-900 border border-purple-800/40 text-xs text-slate-200 rounded-xl px-3 py-1.5 focus:border-purple-500 focus:outline-none flex-1 truncate"
                         defaultValue=""
                       >
                         <option value="">
                           {stationParticipants.length > 0
-                            ? `Assign Contestant (${stationParticipants.length} in station roster)...`
+                            ? `Assign Contestant (${stationParticipants.filter((p) => isParticipantCheckedIn(p)).length}/${stationParticipants.length} checked in)...`
                             : `No contestants allocated to ${station.name}`}
                         </option>
-                        {stationParticipants.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            #{p.participantNumber} - {p.name}
-                          </option>
-                        ))}
+                        {stationParticipants.map((p) => {
+                          const checked = isParticipantCheckedIn(p);
+                          return (
+                            <option key={p.id} value={p.id} disabled={!checked}>
+                              #{p.participantNumber} - {p.name} {checked ? '✓ (Checked In)' : '(Not Checked In)'}
+                            </option>
+                          );
+                        })}
                       </select>
 
                       {nextPendingContestant && stationParticipants.length > 0 && (
@@ -1293,13 +1310,22 @@ export const Master: React.FC = () => {
                               </button>
                             ) : (
                               <button
-                                onClick={() => {
-                                  setStationParticipant(rosterStation.id, p.id);
+                                onClick={async () => {
+                                  if (!isParticipantCheckedIn(p)) {
+                                    alert(`Contestant ${p.name} must be checked in to the venue before they can be staged.`);
+                                    return;
+                                  }
+                                  await setStationParticipant(rosterStation.id, p.id);
                                   setRosterStation(null);
                                   setToastMessage(`Staged ${p.name} on ${rosterStation.name}!`);
                                   setTimeout(() => setToastMessage(null), 3000);
                                 }}
-                                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
+                                className={`px-3 py-1.5 rounded-xl font-bold text-xs shadow-md transition-colors cursor-pointer ${
+                                  isParticipantCheckedIn(p)
+                                    ? 'bg-purple-600 hover:bg-purple-500 text-white'
+                                    : 'bg-slate-800 text-slate-500 hover:bg-slate-700'
+                                }`}
+                                title={!isParticipantCheckedIn(p) ? 'Must check in contestant before staging' : undefined}
                               >
                                 Stage Now
                               </button>

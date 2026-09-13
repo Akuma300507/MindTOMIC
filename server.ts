@@ -314,6 +314,12 @@ const defaultHistory: EventLog[] = [
   },
 ];
 
+function isParticipantCheckedIn(p?: Participant | null): boolean {
+  if (!p) return false;
+  if (p.checkedIn === false) return false;
+  return Boolean(p.checkedIn === true || p.status === 'checked_in' || p.checkedInAt);
+}
+
 function createInitialStationState(
   id: string,
   name: string,
@@ -435,6 +441,36 @@ try {
         db.stations![s.id].location = s.location;
       }
     });
+
+    // Sanitize stations: ensure no non-checked-in participant is staged as active
+    if (db.stations) {
+      Object.values(db.stations).forEach((station) => {
+        if (station.activeParticipantId) {
+          const p = db.participants.find((item) => item.id === station.activeParticipantId);
+          if (!p || !isParticipantCheckedIn(p)) {
+            station.activeParticipantId = null;
+            station.activeParticipant = null;
+          } else {
+            station.activeParticipant = { ...p };
+          }
+        } else if (station.activeParticipant) {
+          const p = db.participants.find((item) => item.id === station.activeParticipant?.id);
+          if (!p || !isParticipantCheckedIn(p)) {
+            station.activeParticipantId = null;
+            station.activeParticipant = null;
+          } else {
+            station.activeParticipant = { ...p };
+          }
+        }
+      });
+    }
+
+    if (db.liveSync?.activeParticipantId) {
+      const p = db.participants.find((item) => item.id === db.liveSync.activeParticipantId);
+      if (!p || !isParticipantCheckedIn(p)) {
+        db.liveSync.activeParticipantId = null;
+      }
+    }
 
     // Ensure participants have qualification defaults
     db.participants.forEach((p) => {
@@ -1609,10 +1645,24 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
   const { participantId } = req.body;
 
-  station.activeParticipantId = participantId || null;
-  station.activeParticipant = participantId
-    ? db.participants.find((p) => p.id === participantId) || null
-    : null;
+  let assignedParticipant: Participant | null = null;
+  if (participantId) {
+    const p = db.participants.find((item) => item.id === participantId);
+    if (!p || !isParticipantCheckedIn(p)) {
+      station.activeParticipantId = null;
+      station.activeParticipant = null;
+      persistDB();
+      broadcastStationUpdate(station.id, 'station_updated', station);
+      return res.status(400).json({
+        error: 'Contestant must be checked in to the venue before being staged on a station.',
+        station,
+      });
+    }
+    assignedParticipant = p;
+  }
+
+  station.activeParticipantId = assignedParticipant ? assignedParticipant.id : null;
+  station.activeParticipant = assignedParticipant ? { ...assignedParticipant } : null;
 
   // Reset current station item if contestant changes
   station.selectedImageId = null;
@@ -2260,7 +2310,7 @@ app.post('/api/event/start-new', (req: Request, res: Response) => {
   // Reset Live Sync
   db.liveSync = {
     currentRound: 1,
-    activeParticipantId: db.participants[0]?.id || null,
+    activeParticipantId: null,
     timerMode: 'idle',
     timerRemainingSeconds: db.settings.round1.speechTimeSeconds || 120,
     timerTotalSeconds: db.settings.round1.speechTimeSeconds || 120,
@@ -2514,7 +2564,12 @@ app.post('/api/participants/:id/check-in', (req: Request, res: Response) => {
   if (db.stations) {
     Object.values(db.stations).forEach((st) => {
       if (st.activeParticipantId === p.id) {
-        st.activeParticipant = { ...p };
+        if (checkedIn) {
+          st.activeParticipant = { ...p };
+        } else {
+          st.activeParticipantId = null;
+          st.activeParticipant = null;
+        }
         broadcastStationUpdate(st.id, 'station_updated', st);
       }
     });
@@ -2576,7 +2631,12 @@ app.post('/api/participants/check-in/batch', (req: Request, res: Response) => {
       if (db.stations) {
         Object.values(db.stations).forEach((st) => {
           if (st.activeParticipantId === p.id) {
-            st.activeParticipant = { ...p };
+            if (checkedIn) {
+              st.activeParticipant = { ...p };
+            } else {
+              st.activeParticipantId = null;
+              st.activeParticipant = null;
+            }
             broadcastStationUpdate(st.id, 'station_updated', st);
           }
         });
@@ -2589,7 +2649,7 @@ app.post('/api/participants/check-in/batch', (req: Request, res: Response) => {
     checkedIn ? 'Batch Participant Check-In' : 'Batch Check-In Revoked',
     `${checkedIn ? 'Checked in' : 'Revoked check-in for'} ${updated.length} participants at ${targetStationName || 'Location'}`
   );
-  broadcastSSE('participants_batch_updated', updated);
+  broadcastSSE('participants_batch_updated', { updatedList: updated, participants: updated });
   res.json({ success: true, count: updated.length, participants: updated });
 });
 

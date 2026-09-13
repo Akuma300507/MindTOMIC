@@ -51,7 +51,8 @@ export interface Participant {
 
 export function isParticipantCheckedIn(p?: Participant | null): boolean {
   if (!p) return false;
-  return Boolean(p.checkedIn || p.status === 'checked_in' || p.checkedInAt);
+  if (p.checkedIn === false) return false;
+  return Boolean(p.checkedIn === true || p.status === 'checked_in' || p.checkedInAt);
 }
 
 export interface Topic {

@@ -30,8 +30,7 @@ import { computeStationTimer, formatTimeMMSS } from '../lib/timerUtils';
 import { getServerNow } from '../lib/timeSync';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
 import { InspireLogo } from '../components/common/InspireLogo';
-import { SpinRevealCardModal } from '../components/common/SpinRevealCardModal';
-import type { Topic } from '../types';
+import { type Topic, type Participant, isParticipantCheckedIn } from '../types';
 
 export const ProjectorDisplay: React.FC = () => {
   const {
@@ -147,13 +146,19 @@ export const ProjectorDisplay: React.FC = () => {
 
   // STRICT STATION ISOLATION: Find active participant for this station
   // NEVER fall back to other stations or global liveSync
+  // ONLY display contestant IF they are currently checked in!
   const activeParticipant = useMemo(() => {
-    if (currentStationState?.activeParticipant) {
-      return currentStationState.activeParticipant;
-    }
+    let candidate: Participant | null = null;
     if (currentStationState?.activeParticipantId && db?.participants) {
-      const match = db.participants.find((p) => p.id === currentStationState.activeParticipantId);
-      if (match) return match;
+      candidate = db.participants.find((p) => p.id === currentStationState.activeParticipantId) || null;
+    } else if (currentStationState?.activeParticipant) {
+      candidate =
+        db?.participants?.find((p) => p.id === currentStationState.activeParticipant?.id) ||
+        currentStationState.activeParticipant;
+    }
+
+    if (candidate && isParticipantCheckedIn(candidate)) {
+      return candidate;
     }
     return null;
   }, [currentStationState, db?.participants]);

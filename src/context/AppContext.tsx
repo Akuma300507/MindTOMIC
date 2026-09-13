@@ -1,20 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type {
-  AppDatabase,
-  Participant,
-  Topic,
-  EventImage,
-  CustomFieldDefinition,
-  EventSettings,
-  EventLog,
-  LiveSyncState,
-  PageId,
-  Round1Result,
-  Round2Result,
-  Round3Result,
-  StationState,
-  DeviceRole,
-  ProjectorDevice,
+import {
+  type AppDatabase,
+  type Participant,
+  type Topic,
+  type EventImage,
+  type CustomFieldDefinition,
+  type EventSettings,
+  type EventLog,
+  type LiveSyncState,
+  type PageId,
+  type Round1Result,
+  type Round2Result,
+  type Round3Result,
+  type StationState,
+  type DeviceRole,
+  type ProjectorDevice,
+  isParticipantCheckedIn,
 } from '../types';
 import { api } from '../lib/api';
 import { soundEngine } from '../lib/audio';
@@ -311,16 +312,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch {}
 
-    // Auto-switch active participant to match new station if contestants exist
+    // Auto-switch active participant to match new station ONLY if checked-in contestants exist
     if (id && id !== 'all') {
       setDb((currDb) => {
         if (currDb?.participants) {
-          const stationParticipants = currDb.participants.filter((p) => p.stationId === id);
+          const stationParticipants = currDb.participants.filter(
+            (p) => p.stationId === id && isParticipantCheckedIn(p)
+          );
           if (stationParticipants.length > 0) {
             setActiveParticipant((currPart) => {
-              if (currPart && currPart.stationId === id) return currPart;
+              if (currPart && currPart.stationId === id && isParticipantCheckedIn(currPart)) return currPart;
               return stationParticipants[0];
             });
+          } else {
+            setActiveParticipant(null);
           }
         }
         return currDb;
@@ -486,22 +491,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const state = await api.getState();
       setDb(state);
-      // If no active participant yet and participants exist, set first active safely (respecting current station)
+      // Only set active participant if they are verified to be checked in
       setActiveParticipant((current) => {
-        if (current) return current;
+        if (current && isParticipantCheckedIn(current)) return current;
         if (!state.participants || state.participants.length === 0) return null;
         if (currentStationId && currentStationId !== 'all') {
-          const stationMatch = state.participants.find((p) => p.stationId === currentStationId);
+          const stationMatch = state.participants.find(
+            (p) => p.stationId === currentStationId && isParticipantCheckedIn(p)
+          );
           if (stationMatch) return stationMatch;
         }
-        return state.participants[0] ?? null;
+        const anyCheckedIn = state.participants.find((p) => isParticipantCheckedIn(p));
+        return anyCheckedIn ?? null;
       });
     } catch (err) {
       console.error('Failed to load initial state:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentStationId]);
 
   useEffect(() => {
     reloadState();
@@ -533,10 +541,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Synchronize active participant across station
   useEffect(() => {
-    if (activeParticipant && currentStationId) {
-      api.setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
+    if (currentStationId && currentStationId !== 'all') {
+      if (activeParticipant && isParticipantCheckedIn(activeParticipant)) {
+        api.setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
+      } else if (!activeParticipant) {
+        // If there is no checked-in active contestant, ensure station state is cleared
+        const currentSt = db?.stations?.[currentStationId];
+        if (currentSt?.activeParticipantId || currentSt?.activeParticipant) {
+          api.setStationParticipant(currentStationId, null).catch(() => {});
+        }
+      }
     }
-  }, [activeParticipant?.id, currentStationId]);
+  }, [activeParticipant?.id, activeParticipant?.checkedIn, activeParticipant?.status, currentStationId, db?.stations]);
 
   // Synchronize round switch when operator navigates pages
   useEffect(() => {
@@ -1122,7 +1138,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const resetDb = JSON.parse(e.data);
           setDb(resetDb);
-          setActiveParticipant(resetDb.participants[0] || null);
+          setActiveParticipant(null);
+        } catch (err) {
+          console.error(err);
+        }
+      });
+
+      eventSource.addEventListener('participant_updated', (e) => {
+        try {
+          const participant: Participant = JSON.parse(e.data);
+          setDb((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              participants: prev.participants.map((p) => (p.id === participant.id ? participant : p)),
+            };
+          });
+          setActiveParticipant((curr) => {
+            if (curr?.id === participant.id) {
+              return isParticipantCheckedIn(participant) ? participant : null;
+            }
+            return curr;
+          });
         } catch (err) {
           console.error(err);
         }
@@ -1146,14 +1183,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       eventSource.addEventListener('participants_batch_updated', (e) => {
         try {
-          const { updatedList } = JSON.parse(e.data);
-          const map = new Map(updatedList.map((p: Participant) => [p.id, p]));
+          const raw = JSON.parse(e.data);
+          const list: Participant[] = Array.isArray(raw)
+            ? raw
+            : raw?.updatedList || raw?.participants || [];
+          const map = new Map(list.map((p: Participant) => [p.id, p]));
           setDb((prev) => {
             if (!prev) return prev;
             return {
               ...prev,
               participants: prev.participants.map((p) => (map.has(p.id) ? (map.get(p.id) as Participant) : p)),
             };
+          });
+          setActiveParticipant((curr) => {
+            if (!curr) return curr;
+            const updated = map.get(curr.id);
+            if (updated) {
+              return isParticipantCheckedIn(updated) ? updated : null;
+            }
+            return curr;
           });
         } catch (err) {
           console.error(err);
@@ -1545,7 +1593,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           participants: prev.participants.map((p) => (p.id === id ? res.participant : p)),
         };
       });
-      setActiveParticipant((curr) => (curr?.id === id ? res.participant : curr));
+      setActiveParticipant((curr) => {
+        if (curr?.id === id) {
+          return isParticipantCheckedIn(res.participant) ? res.participant : null;
+        }
+        return curr;
+      });
       return res.participant;
     },
     []
@@ -1568,7 +1621,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveParticipant((curr) => {
         if (!curr) return curr;
         const updated = res.participants.find((p) => p.id === curr.id);
-        return updated || curr;
+        if (updated) {
+          return isParticipantCheckedIn(updated) ? updated : null;
+        }
+        return curr;
       });
       return { count: res.count, participants: res.participants };
     },
