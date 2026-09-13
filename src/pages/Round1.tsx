@@ -86,10 +86,12 @@ export const Round1: React.FC = () => {
     return db.participants.filter((p) => p.stationId === currentStationId);
   }, [db?.participants, currentStationId]);
 
-  const arrivedCount = useMemo(
-    () => stationParticipants.filter((p) => isParticipantCheckedIn(p)).length,
-    [stationParticipants]
-  );
+  // Strictly only participants who have checked in to the location appear in the Round 1 drop-down!
+  const checkedInStationParticipants = useMemo(() => {
+    return stationParticipants.filter((p) => isParticipantCheckedIn(p));
+  }, [stationParticipants]);
+
+  const arrivedCount = checkedInStationParticipants.length;
   const awaitingCount = stationParticipants.length - arrivedCount;
 
   const isCurrentParticipantCheckedIn = Boolean(
@@ -116,16 +118,22 @@ export const Round1: React.FC = () => {
     [allStations, currentStationId, checkInParticipant]
   );
 
-  // Keep activeParticipant synced to current station's participant pool
+  // Keep activeParticipant synced strictly to current station's checked-in participant pool
   useEffect(() => {
-    if (stationParticipants.length > 0) {
-      const isAlreadyInStation =
-        activeParticipant && stationParticipants.some((p) => p.id === activeParticipant.id);
-      if (!isAlreadyInStation) {
-        setActiveParticipant(stationParticipants[0]);
+    if (checkedInStationParticipants.length > 0) {
+      const isAlreadyValid =
+        activeParticipant &&
+        isParticipantCheckedIn(activeParticipant) &&
+        checkedInStationParticipants.some((p) => p.id === activeParticipant.id);
+      if (!isAlreadyValid) {
+        setActiveParticipant(checkedInStationParticipants[0]);
+      }
+    } else {
+      if (activeParticipant && !isParticipantCheckedIn(activeParticipant)) {
+        setActiveParticipant(null as any);
       }
     }
-  }, [currentStationId, stationParticipants, activeParticipant, setActiveParticipant]);
+  }, [currentStationId, checkedInStationParticipants, activeParticipant, setActiveParticipant]);
 
   // Sync with currentStation assignedImage if already set
   useEffect(() => {
@@ -260,33 +268,37 @@ export const Round1: React.FC = () => {
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
             <span className="text-slate-400">Contestant:</span>
             <select
-              value={activeParticipant?.id || ''}
+              value={isCurrentParticipantCheckedIn ? (activeParticipant?.id || '') : ''}
               onChange={(e) => {
-                const p = db?.participants.find((item) => item.id === e.target.value);
+                const p = checkedInStationParticipants.find((item) => item.id === e.target.value);
                 if (p) setActiveParticipant(p);
               }}
-              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[220px] truncate"
+              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[220px] truncate cursor-pointer"
             >
-              {stationParticipants.length === 0 ? (
+              {checkedInStationParticipants.length === 0 ? (
                 <option value="" disabled className="bg-slate-900 text-amber-400">
-                  No contestants in {currentStation?.name || 'this station'}
+                  {stationParticipants.length === 0
+                    ? `No contestants in ${currentStation?.name || 'this station'}`
+                    : `No checked-in contestants (${stationParticipants.length} awaiting)`}
                 </option>
               ) : (
-                stationParticipants.map((p) => {
-                  const checkedIn = isParticipantCheckedIn(p);
-                  return (
-                    <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                      {p.participantNumber} — {p.name} {checkedIn ? '✓ [Arrived]' : '⏳ [Awaiting]'}
-                    </option>
-                  );
-                })
+                checkedInStationParticipants.map((p) => (
+                  <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                    #{p.participantNumber} — {p.name}
+                  </option>
+                ))
               )}
             </select>
-            {stationParticipants.length > 0 && (
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-purple-950/80 text-purple-300 border border-purple-500/40 text-[10px] font-bold font-mono">
-                {stationParticipants.length}
-              </span>
-            )}
+            <span
+              className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${
+                arrivedCount > 0
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                  : 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+              }`}
+              title={`${arrivedCount} of ${stationParticipants.length} contestants arrived`}
+            >
+              {arrivedCount}/{stationParticipants.length}
+            </span>
           </div>
 
           {/* Quick Participant Check-In Pill */}
@@ -318,10 +330,14 @@ export const Round1: React.FC = () => {
           {/* Station Arrival Desk Button */}
           <button
             onClick={() => setShowCheckInModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-purple-300 border border-purple-800/50 text-xs font-bold transition-all shadow-md cursor-pointer"
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer ${
+              arrivedCount === 0 && stationParticipants.length > 0
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 hover:bg-amber-500/30 animate-pulse'
+                : 'bg-slate-950 hover:bg-slate-800 text-purple-300 border border-purple-800/50'
+            }`}
             title="Open Station Arrival & Check-In Desk"
           >
-            <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+            <MapPin className={`w-3.5 h-3.5 ${arrivedCount > 0 ? 'text-emerald-400' : 'text-amber-400'}`} />
             <span className="hidden md:inline">Arrival Desk</span>
             <span className="px-1.5 py-0.2 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono font-bold">
               {arrivedCount}/{stationParticipants.length}
@@ -329,9 +345,16 @@ export const Round1: React.FC = () => {
           </button>
 
           <button
-            onClick={() => selectNextParticipant(stationParticipants.length > 0 ? stationParticipants : undefined)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50"
-            title="Next Participant (Shortcut: N)"
+            onClick={() => {
+              if (checkedInStationParticipants.length > 0) {
+                selectNextParticipant(checkedInStationParticipants);
+              } else {
+                setShowCheckInModal(true);
+              }
+            }}
+            disabled={checkedInStationParticipants.length === 0 && stationParticipants.length === 0}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 disabled:opacity-40"
+            title={checkedInStationParticipants.length > 0 ? "Next Checked-In Participant (Shortcut: N)" : "Check In Participants First"}
           >
             <span>Next</span>
             <ChevronRight className="w-4 h-4" />
@@ -367,6 +390,37 @@ export const Round1: React.FC = () => {
           >
             <UserCheck className="w-4 h-4" />
             <span>{actionLoadingId === activeParticipant.id ? 'Checking In...' : 'Mark Arrived & Check In'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Informative notice when no contestants are checked in yet for this station */}
+      {checkedInStationParticipants.length === 0 && stationParticipants.length > 0 && (
+        <div className="p-4 rounded-2xl bg-slate-900/90 border border-amber-500/50 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <MapPin className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-white text-sm">
+                  Awaiting Contestant Check-In
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-950/70 text-amber-300 border border-amber-500/40 text-[10px] font-bold font-mono">
+                  0/{stationParticipants.length} Checked In
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Only checked-in contestants appear in the Round 1 drop-down. Check in arriving contestants at the Station Arrival Desk.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowCheckInModal(true)}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-purple-950/50 transition-all cursor-pointer shrink-0"
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Open Arrival Desk</span>
           </button>
         </div>
       )}
@@ -830,17 +884,23 @@ export const Round1: React.FC = () => {
 
                         {/* Stage Contestant */}
                         <button
-                          onClick={() => {
+                          onClick={async () => {
+                            if (!isChecked) {
+                              await handleCheckIn(p.id, true);
+                            }
                             setActiveParticipant(p);
                             setShowCheckInModal(false);
                           }}
+                          disabled={loading}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             isCurrent
                               ? 'bg-purple-950/80 text-purple-300 border border-purple-700'
-                              : 'bg-purple-600 hover:bg-purple-500 text-white shadow-md'
+                              : isChecked
+                              ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-md'
+                              : 'bg-emerald-700 hover:bg-emerald-600 text-white shadow-md'
                           }`}
                         >
-                          {isCurrent ? 'Current' : 'Stage on Round 1'}
+                          {isCurrent ? 'Current' : isChecked ? 'Stage on Round 1' : 'Check In & Stage'}
                         </button>
                       </div>
                     </div>
