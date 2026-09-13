@@ -1612,7 +1612,12 @@ app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Invalid round number. Must be 1, 2, or 3.' });
   }
 
-  station.currentRound = Number(round) as 1 | 2 | 3;
+  const targetRound = Number(round) as 1 | 2 | 3;
+  if (station.currentRound === targetRound && !req.body.force) {
+    return res.json({ success: true, station });
+  }
+
+  station.currentRound = targetRound;
   station.status = 'WAITING';
   station.selectedImageId = null;
   station.selectedImage = null;
@@ -1661,7 +1666,19 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
     assignedParticipant = p;
   }
 
-  station.activeParticipantId = assignedParticipant ? assignedParticipant.id : null;
+  const targetParticipantId = assignedParticipant ? assignedParticipant.id : null;
+
+  // Idempotency: If already assigned to this participant, skip resetting prompts and avoid broadcast storm
+  if (station.activeParticipantId === targetParticipantId) {
+    if (assignedParticipant) {
+      station.activeParticipant = { ...assignedParticipant };
+    } else {
+      station.activeParticipant = null;
+    }
+    return res.json({ success: true, station });
+  }
+
+  station.activeParticipantId = targetParticipantId;
   station.activeParticipant = assignedParticipant ? { ...assignedParticipant } : null;
 
   // Reset current station item if contestant changes

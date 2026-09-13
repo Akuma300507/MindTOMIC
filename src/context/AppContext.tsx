@@ -277,8 +277,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [deviceRole, setDeviceRoleState] = useState<DeviceRole>(() => {
     try {
-      const urlRole = new URLSearchParams(window.location.search).get('role') as DeviceRole | null;
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlRole = urlParams.get('role') as DeviceRole | null;
       if (urlRole && ['station', 'master', 'projector'].includes(urlRole)) return urlRole;
+      const urlPage = urlParams.get('page');
+      if (urlPage === 'projector') return 'projector';
+      if (urlPage === 'master') return 'master';
       const saved = localStorage.getItem('m2m_device_role') as DeviceRole | null;
       if (saved && ['station', 'master', 'projector'].includes(saved)) return saved;
     } catch {}
@@ -539,32 +543,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return Object.values(db.stations);
   }, [db?.stations]);
 
-  // Synchronize active participant across station
+  // Synchronize active participant across station (Operator station role only)
   useEffect(() => {
-    if (currentStationId && currentStationId !== 'all') {
-      if (activeParticipant && isParticipantCheckedIn(activeParticipant)) {
+    // Projector and Master must NEVER auto-sync active participant to station
+    if (deviceRole === 'projector' || currentPage === 'projector' || deviceRole === 'master') {
+      return;
+    }
+
+    if (!currentStationId || currentStationId === 'all') {
+      return;
+    }
+
+    const currentSt = db?.stations?.[currentStationId];
+
+    if (activeParticipant && isParticipantCheckedIn(activeParticipant)) {
+      // Only call API if station does NOT already have this participant staged
+      if (currentSt?.activeParticipantId !== activeParticipant.id) {
         api.setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
-      } else if (!activeParticipant) {
-        // If there is no checked-in active contestant, ensure station state is cleared
-        const currentSt = db?.stations?.[currentStationId];
-        if (currentSt?.activeParticipantId || currentSt?.activeParticipant) {
-          api.setStationParticipant(currentStationId, null).catch(() => {});
-        }
+      }
+    } else if (!activeParticipant) {
+      // If there is no checked-in active contestant, ensure station state is cleared ONLY if currently staged
+      if (currentSt?.activeParticipantId || currentSt?.activeParticipant) {
+        api.setStationParticipant(currentStationId, null).catch(() => {});
       }
     }
-  }, [activeParticipant?.id, activeParticipant?.checkedIn, activeParticipant?.status, currentStationId, db?.stations]);
+  }, [
+    activeParticipant?.id,
+    activeParticipant?.checkedIn,
+    activeParticipant?.status,
+    currentStationId,
+    deviceRole,
+    currentPage,
+    db?.stations?.[currentStationId || '']?.activeParticipantId,
+  ]);
 
-  // Synchronize round switch when operator navigates pages
+  // Synchronize round switch when operator navigates pages (Operator station role only)
   useEffect(() => {
+    if (deviceRole === 'projector' || currentPage === 'projector' || deviceRole === 'master') {
+      return;
+    }
+
     let roundNum: 1 | 2 | 3 | null = null;
     if (currentPage === 'round1') roundNum = 1;
     else if (currentPage === 'round2') roundNum = 2;
     else if (currentPage === 'round3') roundNum = 3;
 
-    if (roundNum && currentStationId) {
-      api.setStationRound(currentStationId, roundNum).catch(() => {});
+    if (roundNum && currentStationId && currentStationId !== 'all') {
+      const currentSt = db?.stations?.[currentStationId];
+      if (currentSt?.currentRound !== roundNum) {
+        api.setStationRound(currentStationId, roundNum).catch(() => {});
+      }
     }
-  }, [currentPage, currentStationId]);
+  }, [
+    currentPage,
+    currentStationId,
+    deviceRole,
+    db?.stations?.[currentStationId || '']?.currentRound,
+  ]);
 
   // Station claim & takeover
   const claimStation = useCallback(

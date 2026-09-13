@@ -50,7 +50,12 @@ export const ProjectorDisplay: React.FC = () => {
     projectorPingNotification,
     clearProjectorPingNotification,
     updateSettings,
+    setDeviceRole,
   } = useApp();
+
+  useEffect(() => {
+    setDeviceRole('projector');
+  }, [setDeviceRole]);
 
   // Wheel topic font size adjustment state (synced with settings and localStorage)
   const wheelFontSize = useMemo(() => {
@@ -161,7 +166,13 @@ export const ProjectorDisplay: React.FC = () => {
       return candidate;
     }
     return null;
-  }, [currentStationState, db?.participants]);
+  }, [
+    currentStationState?.activeParticipantId,
+    currentStationState?.activeParticipant?.id,
+    currentStationState?.activeParticipant?.checkedIn,
+    currentStationState?.activeParticipant?.status,
+    db?.participants,
+  ]);
 
   const eventName = db?.settings.event.name || 'MIND TO MIC';
   const tagline = db?.settings.event.tagline || 'THINK. SPEAK. EXPRESS.';
@@ -809,7 +820,7 @@ export const ProjectorDisplay: React.FC = () => {
       <main ref={stageRef} className="relative z-10 flex-1 min-h-0 w-full max-w-full mx-auto flex flex-col items-center justify-center text-center px-1 py-0.5 overflow-hidden">
         {/* Active Contestant Spotlight Banner */}
         {activeParticipant ? (
-          <div className="shrink-0 flex items-center justify-center gap-2 py-0.5 animate-in fade-in zoom-in-95 duration-300">
+          <div key={activeParticipant.id} className="shrink-0 flex items-center justify-center gap-2 py-0.5 animate-in fade-in zoom-in-95 duration-300">
             <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-purple-300 font-mono bg-purple-950/80 px-2.5 py-0.5 rounded-full border border-purple-800/60 shadow">
               CONTESTANT {activeParticipant.participantNumber} • {currentStationState?.name ? `${currentStationState.name.toUpperCase()}` : 'ON STAGE'}
             </span>
@@ -818,7 +829,7 @@ export const ProjectorDisplay: React.FC = () => {
             </h2>
           </div>
         ) : (
-          <div className="shrink-0 text-slate-400 font-semibold text-xs flex items-center gap-2 py-0.5">
+          <div key="awaiting-contestant" className="shrink-0 text-slate-400 font-semibold text-xs flex items-center gap-2 py-0.5">
             <Radio className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
             <span>Awaiting Next Contestant{currentStationState ? ` for ${currentStationState.name}` : ''}...</span>
           </div>
