@@ -1963,6 +1963,16 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
   const roundSettings = (db.settings as any)[`round${station.currentRound}`] || db.settings.round1;
 
   if (action === 'start') {
+    // Strict Round 1 check-in gating
+    if (station.currentRound === 1 && station.activeParticipantId) {
+      const activeP = db.participants.find((p) => p.id === station.activeParticipantId);
+      if (activeP && !activeP.checkedIn && activeP.status !== 'checked_in') {
+        return res.status(403).json({
+          error: `Contestant ${activeP.name} has not checked in to the location yet. Check-in is required before Round 1 can be started.`,
+        });
+      }
+    }
+
     const activePhase = phase || station.timerMode || (roundSettings.prepEnabled ? 'prep' : 'speech');
     const defaultSec = activePhase === 'prep' ? (roundSettings.prepTimeSeconds || 30) : (roundSettings.speechTimeSeconds || 120);
     const duration = totalSeconds || station.timerDuration || defaultSec;
@@ -1996,6 +2006,16 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     const totalElapsedSec = Math.floor((station.timerAccumulatedMs || 0) / 1000);
     station.timerRemainingSeconds = Math.max(0, (station.timerDuration || 120) - totalElapsedSec);
   } else if (action === 'resume') {
+    // Strict Round 1 check-in gating
+    if (station.currentRound === 1 && station.activeParticipantId) {
+      const activeP = db.participants.find((p) => p.id === station.activeParticipantId);
+      if (activeP && !activeP.checkedIn && activeP.status !== 'checked_in') {
+        return res.status(403).json({
+          error: `Contestant ${activeP.name} has not checked in to the location yet. Check-in is required before Round 1 can be started.`,
+        });
+      }
+    }
+
     station.timerStartTime = now;
     station.timerStartedAt = now;
     station.timerStatus = 'running';
@@ -2117,7 +2137,12 @@ app.post('/api/event/reset-all-statuses', (req: Request, res: Response) => {
 
   // 2. Reset participants round statuses (DO NOT DELETE PARTICIPANT RECORDS!)
   db.participants.forEach((p) => {
-    p.status = 'active';
+    p.status = 'registered';
+    p.checkedIn = false;
+    delete p.checkedInAt;
+    delete p.checkedInStationId;
+    delete p.checkedInStationName;
+    delete p.checkedInBy;
     p.round1Status = 'pending';
     p.round2Status = 'pending';
     p.round3Status = 'pending';
@@ -2200,7 +2225,12 @@ app.post('/api/event/start-new', (req: Request, res: Response) => {
 
   // Reset participants round statuses
   db.participants.forEach((p) => {
-    p.status = 'active';
+    p.status = 'registered';
+    p.checkedIn = false;
+    delete p.checkedInAt;
+    delete p.checkedInStationId;
+    delete p.checkedInStationName;
+    delete p.checkedInBy;
     p.round1Status = 'pending';
     p.round2Status = 'pending';
     p.round3Status = 'pending';
@@ -2440,6 +2470,127 @@ app.post('/api/participants/:id/move-station', (req: Request, res: Response) => 
   logAction('Participant Station Moved', `Moved ${p.name} (${p.participantNumber}) to ${targetStationName || 'Unassigned'}${forRound ? ` for Round ${forRound}` : ''}`);
   broadcastSSE('participant_updated', p);
   res.json({ success: true, participant: p });
+});
+
+// Participant Arrival Check-In to Station/Location
+app.post('/api/participants/:id/check-in', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { checkedIn = true, stationId, stationName, checkedInBy } = req.body;
+  const idx = db.participants.findIndex((p) => p.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Participant not found' });
+  }
+
+  const p = db.participants[idx];
+  const targetStationId = stationId || p.stationId || '';
+  const targetStationName = stationName || p.stationName || resolveStationName(targetStationId) || '';
+
+  if (checkedIn) {
+    p.checkedIn = true;
+    p.checkedInAt = new Date().toISOString();
+    p.checkedInStationId = targetStationId;
+    p.checkedInStationName = targetStationName;
+    p.checkedInBy = checkedInBy || 'Station Master';
+    if (!p.stationId && targetStationId) {
+      p.stationId = targetStationId;
+      p.stationName = targetStationName;
+    }
+    if (p.status === 'registered') {
+      p.status = 'checked_in';
+    }
+  } else {
+    p.checkedIn = false;
+    delete p.checkedInAt;
+    delete p.checkedInStationId;
+    delete p.checkedInStationName;
+    delete p.checkedInBy;
+    if (p.status === 'checked_in') {
+      p.status = 'registered';
+    }
+  }
+  p.updatedAt = new Date().toISOString();
+
+  // Sync if staged on any active station
+  if (db.stations) {
+    Object.values(db.stations).forEach((st) => {
+      if (st.activeParticipantId === p.id) {
+        st.activeParticipant = { ...p };
+        broadcastStationUpdate(st.id, 'station_updated', st);
+      }
+    });
+  }
+
+  persistDB();
+  logAction(
+    checkedIn ? 'Participant Checked In' : 'Participant Check-In Revoked',
+    `${checkedIn ? 'Checked in' : 'Revoked check-in for'} ${p.name} (${p.participantNumber}) at ${targetStationName || 'Location'}`
+  );
+  broadcastSSE('participant_updated', p);
+  res.json({ success: true, participant: p });
+});
+
+// Batch Participant Check-In
+app.post('/api/participants/check-in/batch', (req: Request, res: Response) => {
+  const { participantIds, checkedIn = true, stationId, stationName, checkedInBy } = req.body;
+  if (!Array.isArray(participantIds) || participantIds.length === 0) {
+    return res.status(400).json({ error: 'participantIds array is required' });
+  }
+
+  const targetStationId = stationId || '';
+  const targetStationName = targetStationId ? (stationName || resolveStationName(targetStationId) || '') : '';
+  const updated: Participant[] = [];
+
+  participantIds.forEach((id) => {
+    const idx = db.participants.findIndex((p) => p.id === id);
+    if (idx !== -1) {
+      const p = db.participants[idx];
+      const stnId = targetStationId || p.stationId || '';
+      const stnName = targetStationName || p.stationName || resolveStationName(stnId) || '';
+
+      if (checkedIn) {
+        p.checkedIn = true;
+        p.checkedInAt = new Date().toISOString();
+        p.checkedInStationId = stnId;
+        p.checkedInStationName = stnName;
+        p.checkedInBy = checkedInBy || 'Station Master';
+        if (!p.stationId && stnId) {
+          p.stationId = stnId;
+          p.stationName = stnName;
+        }
+        if (p.status === 'registered') {
+          p.status = 'checked_in';
+        }
+      } else {
+        p.checkedIn = false;
+        delete p.checkedInAt;
+        delete p.checkedInStationId;
+        delete p.checkedInStationName;
+        delete p.checkedInBy;
+        if (p.status === 'checked_in') {
+          p.status = 'registered';
+        }
+      }
+      p.updatedAt = new Date().toISOString();
+      updated.push(p);
+
+      if (db.stations) {
+        Object.values(db.stations).forEach((st) => {
+          if (st.activeParticipantId === p.id) {
+            st.activeParticipant = { ...p };
+            broadcastStationUpdate(st.id, 'station_updated', st);
+          }
+        });
+      }
+    }
+  });
+
+  persistDB();
+  logAction(
+    checkedIn ? 'Batch Participant Check-In' : 'Batch Check-In Revoked',
+    `${checkedIn ? 'Checked in' : 'Revoked check-in for'} ${updated.length} participants at ${targetStationName || 'Location'}`
+  );
+  broadcastSSE('participants_batch_updated', updated);
+  res.json({ success: true, count: updated.length, participants: updated });
 });
 
 // Custom Fields

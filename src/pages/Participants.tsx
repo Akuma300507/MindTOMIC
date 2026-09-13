@@ -19,10 +19,12 @@ import {
   CheckSquare,
   Square,
   Radio,
+  MapPin,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { excelService } from '../lib/excel';
 import type { Participant, CustomFieldDefinition, CustomFieldType, RoundStatus, QualificationStatus } from '../types';
+import { isParticipantCheckedIn } from '../types';
 
 export const Participants: React.FC = () => {
   const {
@@ -39,6 +41,8 @@ export const Participants: React.FC = () => {
     setActiveParticipant,
     setQualification,
     batchSetQualification,
+    checkInParticipant,
+    batchCheckInParticipants,
   } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -73,6 +77,7 @@ export const Participants: React.FC = () => {
     round3StationId?: string;
     round3StationName?: string;
     status: Participant['status'];
+    checkedIn: boolean;
     round1Qualified: QualificationStatus;
     round2Qualified: QualificationStatus;
     round3Qualified: QualificationStatus;
@@ -90,6 +95,7 @@ export const Participants: React.FC = () => {
     round3StationId: '',
     round3StationName: '',
     status: 'active',
+    checkedIn: false,
     round1Qualified: 'pending',
     round2Qualified: 'pending',
     round3Qualified: 'pending',
@@ -130,6 +136,17 @@ export const Participants: React.FC = () => {
     return counts;
   }, [db?.participants]);
 
+  // Arrival counts for quick arrival pills & filter counters
+  const arrivalCounts = useMemo(() => {
+    if (!db?.participants) return { arrived: 0, awaiting: 0, total: 0 };
+    const total = db.participants.length;
+    let arrived = 0;
+    db.participants.forEach((p) => {
+      if (isParticipantCheckedIn(p)) arrived++;
+    });
+    return { arrived, awaiting: total - arrived, total };
+  }, [db?.participants]);
+
   // Custom Field Creator Form
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');
@@ -159,6 +176,8 @@ export const Participants: React.FC = () => {
 
         if (!matchesSearch) return false;
 
+        if (statusFilter === 'arrived' || statusFilter === 'checked_in') return isParticipantCheckedIn(p);
+        if (statusFilter === 'awaiting_checkin') return !isParticipantCheckedIn(p);
         if (statusFilter === 'r1_qualified') return p.round1Qualified === 'qualified';
         if (statusFilter === 'r2_qualified') return p.round2Qualified === 'qualified';
         if (statusFilter === 'r3_qualified') return p.round3Qualified === 'qualified';
@@ -207,6 +226,7 @@ export const Participants: React.FC = () => {
       round3StationId: '',
       round3StationName: '',
       status: 'active',
+      checkedIn: false,
       round1Qualified: 'pending',
       round2Qualified: 'pending',
       round3Qualified: 'pending',
@@ -230,6 +250,7 @@ export const Participants: React.FC = () => {
       round3StationId: p.round3StationId || '',
       round3StationName: p.round3StationName || '',
       status: p.status,
+      checkedIn: isParticipantCheckedIn(p),
       round1Qualified: p.round1Qualified || 'pending',
       round2Qualified: p.round2Qualified || 'pending',
       round3Qualified: p.round3Qualified || 'pending',
@@ -258,6 +279,10 @@ export const Participants: React.FC = () => {
         round3StationId: formData.round3StationId ? formData.round3StationId : undefined,
         round3StationName: formData.round3StationName ? formData.round3StationName : undefined,
         status: formData.status,
+        checkedIn: formData.checkedIn,
+        checkedInAt: formData.checkedIn ? (editingParticipant.checkedInAt || new Date().toISOString()) : undefined,
+        checkedInStationId: formData.checkedIn ? (formData.stationId || editingParticipant.checkedInStationId) : undefined,
+        checkedInStationName: formData.checkedIn ? (formData.stationName || editingParticipant.checkedInStationName) : undefined,
         round1Qualified: formData.round1Qualified,
         round2Qualified: formData.round2Qualified,
         round3Qualified: formData.round3Qualified,
@@ -282,6 +307,10 @@ export const Participants: React.FC = () => {
         round3StationId: formData.round3StationId ? formData.round3StationId : undefined,
         round3StationName: formData.round3StationName ? formData.round3StationName : undefined,
         status: formData.status,
+        checkedIn: formData.checkedIn,
+        checkedInAt: formData.checkedIn ? new Date().toISOString() : undefined,
+        checkedInStationId: formData.checkedIn ? formData.stationId : undefined,
+        checkedInStationName: formData.checkedIn ? formData.stationName : undefined,
         round1Qualified: formData.round1Qualified,
         round2Qualified: formData.round2Qualified,
         round3Qualified: formData.round3Qualified,
@@ -573,9 +602,10 @@ export const Participants: React.FC = () => {
               className="bg-slate-950 border border-slate-800 text-slate-200 px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-purple-500"
             >
               <option value="all">All Statuses</option>
+              <option value="arrived">📍 Arrived / Checked In ({arrivalCounts.arrived})</option>
+              <option value="awaiting_checkin">⏳ Awaiting Arrival ({arrivalCounts.awaiting})</option>
               <option value="active">Active</option>
               <option value="registered">Registered</option>
-              <option value="checked_in">Checked In</option>
               <option value="eliminated">Eliminated</option>
               <option value="completed">Completed</option>
               <option value="r1_qualified">Round 1 Qualifiers</option>
@@ -681,6 +711,39 @@ export const Participants: React.FC = () => {
             {stationCounts.unassigned || 0}
           </span>
         </button>
+
+        {/* Quick Arrival Filters */}
+        <div className="h-4 w-[1px] bg-slate-800 mx-1 hidden sm:block" />
+        <button
+          onClick={() => setStatusFilter(statusFilter === 'arrived' ? 'all' : 'arrived')}
+          className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs flex items-center gap-1.5 ${
+            statusFilter === 'arrived'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/50 ring-2 ring-emerald-400'
+              : 'bg-slate-900 text-emerald-400 hover:text-emerald-300 border border-slate-800'
+          }`}
+          title="Filter arrived / checked-in contestants"
+        >
+          <MapPin className="w-3.5 h-3.5" />
+          <span>Arrived</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-950/60 font-mono">
+            {arrivalCounts.arrived}
+          </span>
+        </button>
+        <button
+          onClick={() => setStatusFilter(statusFilter === 'awaiting_checkin' ? 'all' : 'awaiting_checkin')}
+          className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs flex items-center gap-1.5 ${
+            statusFilter === 'awaiting_checkin'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-950/50 ring-2 ring-amber-400'
+              : 'bg-slate-900 text-amber-400 hover:text-amber-300 border border-slate-800'
+          }`}
+          title="Filter awaiting arrival contestants"
+        >
+          <Clock className="w-3.5 h-3.5" />
+          <span>Awaiting</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-950/60 font-mono">
+            {arrivalCounts.awaiting}
+          </span>
+        </button>
       </div>
 
       {/* Batch Selection Action Bar */}
@@ -721,6 +784,51 @@ export const Participants: React.FC = () => {
             >
               <Radio className="w-3.5 h-3.5" />
               <span>Assign Station</span>
+            </button>
+
+            {/* Batch Arrival Location Check-In */}
+            <div className="h-4 w-[1px] bg-slate-700 mx-1 hidden sm:block" />
+
+            <button
+              onClick={async () => {
+                if (selectedIds.length === 0) return;
+                setBatchLoading(true);
+                try {
+                  await batchCheckInParticipants(selectedIds, { checkedIn: true });
+                  setSelectedIds([]);
+                } catch (err: any) {
+                  alert(err.message || 'Failed to check in selected participants');
+                } finally {
+                  setBatchLoading(false);
+                }
+              }}
+              disabled={batchLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-950/50 transition-all disabled:opacity-50"
+              title="Mark all selected contestants as arrived at location"
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span>Mark Arrived</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                if (selectedIds.length === 0) return;
+                setBatchLoading(true);
+                try {
+                  await batchCheckInParticipants(selectedIds, { checkedIn: false });
+                  setSelectedIds([]);
+                } catch (err: any) {
+                  alert(err.message || 'Failed to revoke arrival check-in');
+                } finally {
+                  setBatchLoading(false);
+                }
+              }}
+              disabled={batchLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-200 text-xs font-semibold transition-all disabled:opacity-50"
+              title="Revoke arrival check-in for selected contestants"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Revoke Check-In</span>
             </button>
 
             <div className="h-4 w-[1px] bg-slate-700 mx-1 hidden sm:block" />
@@ -797,6 +905,7 @@ export const Participants: React.FC = () => {
                 <th className="py-3.5 px-4">Contestant</th>
                 <th className="py-3.5 px-4">Mobile Number</th>
                 <th className="py-3.5 px-4">Station</th>
+                <th className="py-3.5 px-4 text-center">Arrival</th>
                 <th className="py-3.5 px-4 text-center">Round 1</th>
                 <th className="py-3.5 px-4 text-center">Round 2</th>
                 <th className="py-3.5 px-4 text-center">Round 3</th>
@@ -811,7 +920,7 @@ export const Participants: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60">
               {filteredParticipants.length === 0 ? (
                 <tr>
-                  <td colSpan={8 + customFields.length} className="py-12 text-center text-slate-400">
+                  <td colSpan={9 + customFields.length} className="py-12 text-center text-slate-400">
                     <p className="font-semibold">No participants found matching your filter.</p>
                     <p className="text-[11px] mt-1 text-slate-500">Add a new contestant or clear the search query.</p>
                   </td>
@@ -932,6 +1041,48 @@ export const Participants: React.FC = () => {
                             </div>
                           )}
                         </div>
+                      </td>
+
+                      {/* Arrival / Location Check-in Status & Action */}
+                      <td className="py-3.5 px-4 text-center">
+                        {isParticipantCheckedIn(p) ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-950 text-emerald-300 border border-emerald-600/60 shadow-sm">
+                              <MapPin className="w-3 h-3 text-emerald-400" />
+                              <span>ARRIVED</span>
+                            </span>
+                            <span className="text-[9px] font-mono text-slate-400">
+                              {p.checkedInAt
+                                ? new Date(p.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : 'Checked In'}
+                            </span>
+                            <button
+                              onClick={() => checkInParticipant(p.id, { checkedIn: false })}
+                              className="text-[9px] text-slate-500 hover:text-rose-400 transition-colors underline"
+                              title="Revoke check-in"
+                            >
+                              Revoke
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center gap-1">
+                            <button
+                              onClick={() =>
+                                checkInParticipant(p.id, {
+                                  checkedIn: true,
+                                  stationId: p.stationId,
+                                  stationName: p.stationName,
+                                })
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-purple-950 hover:bg-emerald-950 text-purple-300 hover:text-emerald-300 border border-purple-800 hover:border-emerald-600 transition-all shadow-sm"
+                              title="Mark contestant as arrived at location"
+                            >
+                              <MapPin className="w-3 h-3 text-purple-400" />
+                              <span>Check In</span>
+                            </button>
+                            <span className="text-[9px] text-amber-400/80 font-mono">Awaiting</span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Round Statuses & Qualification Controls */}
@@ -1080,6 +1231,24 @@ export const Participants: React.FC = () => {
                   </select>
                 </div>
               </div>
+
+              {/* Arrival / Location Check-in Toggle */}
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-purple-500/50 cursor-pointer transition-colors">
+                <input
+                  type="checkbox"
+                  checked={formData.checkedIn}
+                  onChange={(e) => setFormData({ ...formData, checkedIn: e.target.checked })}
+                  className="mt-0.5 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 w-4 h-4"
+                />
+                <div>
+                  <span className="text-white font-bold flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-400" /> Mark Arrived / Checked In to Location
+                  </span>
+                  <span className="text-[11px] text-slate-400 block mt-0.5">
+                    Required for Round 1 timer start. Can also be marked directly by station masters at the Arrival Desk.
+                  </span>
+                </div>
+              </label>
 
               {/* Stage Qualifications */}
               <div className="pt-3 border-t border-slate-800 space-y-3">

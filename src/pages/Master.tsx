@@ -29,12 +29,13 @@ import {
   X,
   Plus,
   Monitor,
+  MapPin,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { computeStationTimer } from '../lib/timerUtils';
 import { getServerNow } from '../lib/timeSync';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
-import type { StationState, StationStatus, Participant, ProjectorDevice } from '../types';
+import { isParticipantCheckedIn, type StationState, type StationStatus, type Participant, type ProjectorDevice } from '../types';
 
 export const Master: React.FC = () => {
   const {
@@ -56,6 +57,7 @@ export const Master: React.FC = () => {
     pingProjectorDevice,
     refreshConnectedProjectors,
     reloadState,
+    checkInParticipant,
   } = useApp();
 
   const safeProjectors: ProjectorDevice[] = Array.isArray(connectedProjectors)
@@ -525,10 +527,13 @@ export const Master: React.FC = () => {
                     </span>
                     <button
                       onClick={() => setRosterStation(station)}
-                      className="px-2 py-0.5 rounded-lg bg-purple-950/60 border border-purple-800/50 text-purple-300 text-[10px] font-bold hover:bg-purple-900/60 transition-colors"
+                      className="px-2.5 py-0.5 rounded-lg bg-purple-950/60 border border-purple-800/50 text-purple-300 text-[10px] font-bold hover:bg-purple-900/60 transition-colors flex items-center gap-1.5"
                       title="View all contestants allocated to this station"
                     >
-                      📋 {stationParticipants.length} in Roster
+                      <span>📋 {stationParticipants.length} in Roster</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/30 text-[9px] font-mono">
+                        {stationParticipants.filter((p) => isParticipantCheckedIn(p)).length} Arrived
+                      </span>
                     </button>
                   </div>
                   {station.activeParticipant ? (
@@ -1144,7 +1149,7 @@ export const Master: React.FC = () => {
                   <span>{rosterStation.name} Contestant Roster</span>
                 </h3>
                 <p className="text-xs text-purple-300">
-                  Contestants specifically assigned and provided to this stage.
+                  Contestants specifically assigned to this stage. Check in arrivals before Round 1.
                 </p>
               </div>
               <button
@@ -1162,6 +1167,7 @@ export const Master: React.FC = () => {
                     (p.stationId && p.stationId.toLowerCase().trim() === rosterStation.id.toLowerCase().trim()) ||
                     (p.stationName && p.stationName.toLowerCase().trim() === rosterStation.name.toLowerCase().trim())
                 );
+                const arrivedInRoster = assigned.filter((p) => isParticipantCheckedIn(p)).length;
 
                 if (assigned.length === 0) {
                   return (
@@ -1181,62 +1187,129 @@ export const Master: React.FC = () => {
                   );
                 }
 
-                return assigned.map((p) => {
-                  const isCurrent = rosterStation.activeParticipantId === p.id;
-                  return (
-                    <div
-                      key={p.id}
-                      className={`p-3 rounded-2xl border flex items-center justify-between gap-3 transition-colors ${
-                        isCurrent
-                          ? 'bg-purple-950/40 border-purple-600'
-                          : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-purple-950 border border-purple-800/40 flex items-center justify-center text-purple-300 font-bold font-mono">
-                          #{p.participantNumber}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-white text-sm">{p.name}</span>
-                            {isCurrent && (
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
-                                ACTIVE ON STAGE
-                              </span>
+                return (
+                  <>
+                    <div className="flex items-center justify-between px-1 py-1 text-[11px] text-slate-400">
+                      <span>Total: <strong>{assigned.length}</strong> contestants</span>
+                      <span className="text-emerald-400 font-semibold">
+                        Arrived: <strong>{arrivedInRoster}</strong> of {assigned.length}
+                      </span>
+                    </div>
+
+                    {assigned.map((p) => {
+                      const isCurrent = rosterStation.activeParticipantId === p.id;
+                      const isChecked = isParticipantCheckedIn(p);
+
+                      return (
+                        <div
+                          key={p.id}
+                          className={`p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
+                            isCurrent
+                              ? 'bg-purple-950/40 border-purple-600'
+                              : isChecked
+                              ? 'bg-emerald-950/10 border-emerald-500/30'
+                              : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-8 h-8 rounded-xl border flex items-center justify-center font-bold font-mono text-xs ${
+                                isChecked
+                                  ? 'bg-emerald-950 text-emerald-300 border-emerald-800/40'
+                                  : 'bg-purple-950 text-purple-300 border-purple-800/40'
+                              }`}
+                            >
+                              #{p.participantNumber}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-white text-sm">{p.name}</span>
+                                {isCurrent && (
+                                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-bold">
+                                    ACTIVE ON STAGE
+                                  </span>
+                                )}
+                                {isChecked ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
+                                    Arrived
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
+                                    Awaiting Check-In
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                                <span>{p.organization || 'General'}</span>
+                                {p.mobile && <span>• {p.mobile}</span>}
+                                {p.checkedInAt && (
+                                  <span className="text-emerald-400 font-mono">
+                                    • {new Date(p.checkedInAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 justify-end">
+                            {/* Check In / Undo Toggle */}
+                            {isChecked ? (
+                              <button
+                                onClick={async () => {
+                                  await checkInParticipant(p.id, { checkedIn: false });
+                                  setToastMessage(`Revoked check-in for ${p.name}`);
+                                  setTimeout(() => setToastMessage(null), 3000);
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 hover:border-rose-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-all cursor-pointer"
+                                title="Revoke check-in"
+                              >
+                                Revoke Check-In
+                              </button>
+                            ) : (
+                              <button
+                                onClick={async () => {
+                                  await checkInParticipant(p.id, {
+                                    checkedIn: true,
+                                    stationId: rosterStation.id,
+                                    stationName: rosterStation.name,
+                                    checkedInBy: 'Master Supervisor',
+                                  });
+                                  setToastMessage(`Checked in ${p.name} at ${rosterStation.name}!`);
+                                  setTimeout(() => setToastMessage(null), 3000);
+                                }}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md cursor-pointer"
+                              >
+                                <MapPin className="w-3.5 h-3.5" />
+                                <span>Check In</span>
+                              </button>
+                            )}
+
+                            {isCurrent ? (
+                              <button
+                                onClick={() => setStationParticipant(rosterStation.id, null)}
+                                className="px-3 py-1.5 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 font-bold text-xs cursor-pointer"
+                              >
+                                Unstage
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setStationParticipant(rosterStation.id, p.id);
+                                  setRosterStation(null);
+                                  setToastMessage(`Staged ${p.name} on ${rosterStation.name}!`);
+                                  setTimeout(() => setToastMessage(null), 3000);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
+                              >
+                                Stage Now
+                              </button>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                            <span>{p.organization || 'General'}</span>
-                            {p.mobile && <span>• {p.mobile}</span>}
-                          </div>
                         </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {isCurrent ? (
-                          <button
-                            onClick={() => setStationParticipant(rosterStation.id, null)}
-                            className="px-3 py-1.5 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 font-bold text-xs"
-                          >
-                            Unstage
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              setStationParticipant(rosterStation.id, p.id);
-                              setRosterStation(null);
-                              setToastMessage(`Staged ${p.name} on ${rosterStation.name}!`);
-                              setTimeout(() => setToastMessage(null), 3000);
-                            }}
-                            className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition-colors"
-                          >
-                            Stage Now
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                });
+                      );
+                    })}
+                  </>
+                );
               })()}
             </div>
 

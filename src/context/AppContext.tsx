@@ -110,6 +110,14 @@ interface AppContextType {
   importParticipants: (list: Partial<Participant>[]) => Promise<number>;
   batchSetStation: (participantIds: string[], stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => Promise<any>;
   moveParticipantStation: (participantId: string, stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => Promise<Participant>;
+  checkInParticipant: (
+    id: string,
+    options?: { checkedIn?: boolean; stationId?: string; stationName?: string; checkedInBy?: string }
+  ) => Promise<Participant>;
+  batchCheckInParticipants: (
+    participantIds: string[],
+    options?: { checkedIn?: boolean; stationId?: string; stationName?: string; checkedInBy?: string }
+  ) => Promise<{ count: number; participants: Participant[] }>;
   // Custom Fields
   addCustomField: (field: Partial<CustomFieldDefinition>) => Promise<CustomFieldDefinition>;
   updateCustomField: (id: string, field: Partial<CustomFieldDefinition>) => Promise<CustomFieldDefinition>;
@@ -1524,6 +1532,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     []
   );
 
+  const checkInParticipant = useCallback(
+    async (
+      id: string,
+      options?: { checkedIn?: boolean; stationId?: string; stationName?: string; checkedInBy?: string }
+    ) => {
+      const res = await api.checkInParticipant(id, options);
+      setDb((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          participants: prev.participants.map((p) => (p.id === id ? res.participant : p)),
+        };
+      });
+      setActiveParticipant((curr) => (curr?.id === id ? res.participant : curr));
+      return res.participant;
+    },
+    []
+  );
+
+  const batchCheckInParticipants = useCallback(
+    async (
+      participantIds: string[],
+      options?: { checkedIn?: boolean; stationId?: string; stationName?: string; checkedInBy?: string }
+    ) => {
+      const res = await api.batchCheckInParticipants(participantIds, options);
+      setDb((prev) => {
+        if (!prev) return prev;
+        const map = new Map(res.participants.map((p) => [p.id, p]));
+        return {
+          ...prev,
+          participants: prev.participants.map((p) => (map.has(p.id) ? (map.get(p.id) as Participant) : p)),
+        };
+      });
+      setActiveParticipant((curr) => {
+        if (!curr) return curr;
+        const updated = res.participants.find((p) => p.id === curr.id);
+        return updated || curr;
+      });
+      return { count: res.count, participants: res.participants };
+    },
+    []
+  );
+
   // Custom fields
   const addCustomField = useCallback(async (field: Partial<CustomFieldDefinition>) => {
     const created = await api.addCustomField(field);
@@ -1839,6 +1890,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         importTopics,
         batchUpdateTopicStations,
         moveParticipantStation,
+        checkInParticipant,
+        batchCheckInParticipants,
         resetTopicsStatus,
         addImage,
         updateImage,

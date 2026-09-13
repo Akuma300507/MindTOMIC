@@ -30,6 +30,11 @@ export interface Participant {
   round3StationId?: string;
   round3StationName?: string;
   status: 'registered' | 'checked_in' | 'active' | 'eliminated' | 'completed' | 'qualified' | 'disqualified';
+  checkedIn?: boolean;
+  checkedInAt?: string;
+  checkedInStationId?: string;
+  checkedInStationName?: string;
+  checkedInBy?: string;
   round1Status: RoundStatus;
   round2Status: RoundStatus;
   round3Status: RoundStatus;
@@ -42,6 +47,11 @@ export interface Participant {
   customData: Record<string, any>;
   createdAt: string;
   updatedAt: string;
+}
+
+export function isParticipantCheckedIn(p?: Participant | null): boolean {
+  if (!p) return false;
+  return Boolean(p.checkedIn || p.status === 'checked_in' || p.checkedInAt);
 }
 
 export interface Topic {

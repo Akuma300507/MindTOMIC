@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { Participant, Topic, AppDatabase, CustomFieldDefinition } from '../types';
+import { isParticipantCheckedIn } from '../types';
 
 export const excelService = {
   // Generate & download participant template
@@ -11,6 +12,7 @@ export const excelService = {
       'Mobile Number': '+91 98765 43210',
       'Station': 'Station A',
       'Status': 'active',
+      'Arrived': 'NO',
     };
 
     customFields.forEach((cf) => {
@@ -82,6 +84,11 @@ export const excelService = {
               }
             });
 
+            const rawCheckedIn = row['Arrived'] || row['Checked In'] || row['Arrived / Checked In'] || row['checkedIn'];
+            const isCheckedIn = rawCheckedIn !== undefined
+              ? (String(rawCheckedIn).toLowerCase() === 'true' || String(rawCheckedIn).toLowerCase() === 'yes' || rawCheckedIn === 1)
+              : (status === 'checked_in');
+
             return {
               name: String(name),
               participantNumber: String(participantNumber),
@@ -90,6 +97,10 @@ export const excelService = {
               stationId: stationId || undefined,
               stationName: stationName || undefined,
               status: ['active', 'registered', 'checked_in', 'eliminated', 'completed'].includes(status) ? status : 'active',
+              checkedIn: isCheckedIn,
+              checkedInAt: isCheckedIn ? new Date().toISOString() : undefined,
+              checkedInStationId: isCheckedIn && stationId ? stationId : undefined,
+              checkedInStationName: isCheckedIn && stationName ? stationName : undefined,
               round1Status: 'pending',
               round2Status: 'pending',
               round3Status: 'pending',
@@ -193,6 +204,9 @@ export const excelService = {
         'Station': p.stationName || (p.stationId ? p.stationId.toUpperCase() : 'Unassigned'),
         'Station ID': p.stationId || '',
         'Status': p.status,
+        'Arrived / Checked In': isParticipantCheckedIn(p) ? 'YES' : 'NO',
+        'Check-In Station': p.checkedInStationName || (p.checkedInStationId ? p.checkedInStationId.toUpperCase() : ''),
+        'Check-In Time': p.checkedInAt || '',
         'Round 1 Image ID': p.round1ImageId || '',
         'Round 1 Status': p.round1Status,
         'Round 1 Qualification': p.round1Qualified || 'pending',

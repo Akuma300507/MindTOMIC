@@ -295,6 +295,32 @@ export const api = {
     return res.json();
   },
 
+  async checkInParticipant(
+    id: string,
+    options?: { checkedIn?: boolean; stationId?: string; stationName?: string; checkedInBy?: string }
+  ): Promise<{ success: boolean; participant: Participant }> {
+    const res = await fetch(`/api/participants/${id}/check-in`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options || {}),
+    });
+    if (!res.ok) throw new Error('Failed to update participant check-in status');
+    return res.json();
+  },
+
+  async batchCheckInParticipants(
+    participantIds: string[],
+    options?: { checkedIn?: boolean; stationId?: string; stationName?: string; checkedInBy?: string }
+  ): Promise<{ success: boolean; count: number; participants: Participant[] }> {
+    const res = await fetch('/api/participants/check-in/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participantIds, ...(options || {}) }),
+    });
+    if (!res.ok) throw new Error('Failed to batch check in participants');
+    return res.json();
+  },
+
   // Custom Fields
   async getCustomFields(): Promise<CustomFieldDefinition[]> {
     const res = await fetch('/api/custom-fields');

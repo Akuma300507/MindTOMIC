@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Zap,
   Bell,
+  Lock,
 } from 'lucide-react';
 import { soundEngine } from '../../lib/audio';
 import { useApp } from '../../context/AppContext';
@@ -26,6 +27,8 @@ interface TimerProps {
   warningBuzzerEnabled?: boolean;
   warningTimeSeconds?: number;
   stationId?: string;
+  canStart?: boolean;
+  cannotStartReason?: string;
   onFinish?: (data: {
     status: 'completed' | 'completed_early' | 'time_up';
     prepDurationSeconds: number;
@@ -46,6 +49,8 @@ export const Timer: React.FC<TimerProps> = ({
   warningBuzzerEnabled = true,
   warningTimeSeconds = 30,
   stationId,
+  canStart = true,
+  cannotStartReason,
   onFinish,
   onPhaseChange,
 }) => {
@@ -262,6 +267,10 @@ export const Timer: React.FC<TimerProps> = ({
 
   // START action
   const handleStart = useCallback(() => {
+    if (!canStart && phase === 'idle') {
+      alert(cannotStartReason || 'Contestant must check in to location before starting Round 1.');
+      return;
+    }
     unlockSound();
     if (isRunning) return;
 
@@ -343,7 +352,7 @@ export const Timer: React.FC<TimerProps> = ({
       }
       startTicker(pausedTimeRemainingRef.current, phase as 'prep' | 'speech');
     }
-  }, [hasPrepPhase, isRunning, phase, prepDurationSeconds, speechDurationSeconds, startTicker, unlockSound, sendTimerAction, sendStationTimerAction, activeStationId, roundName, totalSecondsForPhase]);
+  }, [canStart, cannotStartReason, hasPrepPhase, isRunning, phase, prepDurationSeconds, speechDurationSeconds, startTicker, unlockSound, sendTimerAction, sendStationTimerAction, activeStationId, roundName, totalSecondsForPhase]);
 
   // PAUSE action
   const handlePause = useCallback(() => {
@@ -372,9 +381,13 @@ export const Timer: React.FC<TimerProps> = ({
     if (isRunning) {
       handlePause();
     } else {
+      if (!canStart && phase === 'idle') {
+        alert(cannotStartReason || 'Contestant must check in to location before starting Round 1.');
+        return;
+      }
       handleStart();
     }
-  }, [isRunning, handlePause, handleStart]);
+  }, [isRunning, handlePause, handleStart, canStart, cannotStartReason, phase]);
 
   // STOP action (organizer manual stop before time runs out)
   // Note: Per requirements, NO buzzer sound plays when clicking STOP
@@ -623,11 +636,25 @@ export const Timer: React.FC<TimerProps> = ({
         {!isRunning ? (
           <button
             onClick={handleStart}
-            disabled={phase === 'time_up' || phase === 'stopped'}
-            className="flex-1 min-w-[130px] flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-emerald-950/60 hover:shadow-emerald-900/60 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            disabled={phase === 'time_up' || phase === 'stopped' || (phase === 'idle' && !canStart)}
+            className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl font-extrabold text-sm uppercase tracking-wider shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all ${
+              phase === 'idle' && !canStart
+                ? 'bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-amber-950/60'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-950/60 hover:shadow-emerald-900/60'
+            }`}
+            title={phase === 'idle' && !canStart ? cannotStartReason || 'Check-in required before starting' : undefined}
           >
-            <Play className="w-5 h-5 fill-current" />
-            <span>{phase === 'idle' ? 'START' : 'RESUME'}</span>
+            {phase === 'idle' && !canStart ? (
+              <>
+                <Lock className="w-5 h-5 text-amber-400" />
+                <span>CHECK-IN REQUIRED</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-5 h-5 fill-current" />
+                <span>{phase === 'idle' ? 'START' : 'RESUME'}</span>
+              </>
+            )}
           </button>
         ) : (
           <button
@@ -662,15 +689,30 @@ export const Timer: React.FC<TimerProps> = ({
         {/* SKIP PREP / START SPEECH DIRECTLY */}
         {hasPrepPhase && (phase === 'prep' || (phase === 'idle' && !isRunning)) && (
           <button
-            onClick={handleTransitionToSpeech}
-            className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-2xl bg-purple-600/90 hover:bg-purple-600 text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-purple-950/60 active:scale-95 border border-purple-400/30 transition-all mt-2"
-            title="Start speech timer immediately (skipping prep)"
+            onClick={() => {
+              if (phase === 'idle' && !canStart) {
+                alert(cannotStartReason || 'Contestant must check in to location before starting Round 1.');
+                return;
+              }
+              handleTransitionToSpeech();
+            }}
+            disabled={phase === 'idle' && !canStart}
+            className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-2xl bg-purple-600/90 hover:bg-purple-600 text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-purple-950/60 active:scale-95 border border-purple-400/30 transition-all mt-2 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={phase === 'idle' && !canStart ? cannotStartReason : 'Start speech timer immediately (skipping prep)'}
           >
             <Zap className="w-5 h-5" />
             <span>{phase === 'prep' ? 'Skip Prep ➔ Start Speech Now' : 'Start Speech Directly (Skip Prep)'}</span>
           </button>
         )}
       </div>
+
+      {/* Notice if check-in is required */}
+      {phase === 'idle' && !canStart && (
+        <div className="mt-3 px-4 py-2.5 rounded-xl bg-amber-950/80 border border-amber-500/50 text-amber-200 text-xs flex items-center justify-center gap-2 text-center max-w-lg z-10 animate-in fade-in shadow-lg">
+          <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="font-semibold">{cannotStartReason || 'Contestant must check in to location before starting Round 1.'}</span>
+        </div>
+      )}
 
       {/* Reset Confirmation Dialog */}
       {showResetConfirm && (
