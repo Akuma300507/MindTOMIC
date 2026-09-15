@@ -29,6 +29,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const DB_BACKUP_FILE = path.join(DATA_DIR, 'db.backup.json');
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
 
 // Cloudinary Configuration
@@ -412,23 +413,105 @@ function getInitialDatabase(): AppDatabase {
 
 let db: AppDatabase;
 
+// Synchronous persistence for all mutations (Atomic write to tmp -> db.json and db.backup.json)
+let saveTimeout: NodeJS.Timeout | null = null;
+function persistDBSync() {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+  }
+  try {
+    if (db && db.stations) {
+      db.liveSync.stationStates = db.stations;
+    }
+    const jsonStr = JSON.stringify(db, null, 2);
+    const tmpFile = `${DB_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, jsonStr, 'utf-8');
+    fs.copyFileSync(tmpFile, DB_FILE);
+    try {
+      fs.copyFileSync(tmpFile, DB_BACKUP_FILE);
+    } catch {}
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {}
+
+    if (mongoDb) {
+      mongoDb
+        .collection('app_state')
+        .updateOne(
+          { _id: 'current_state' },
+          { $set: { data: db, updatedAt: new Date() } },
+          { upsert: true }
+        )
+        .catch((e: any) => console.error('[mongodb] sync persist error:', e));
+    }
+  } catch (err) {
+    console.error('Failed to persist database synchronously:', err);
+  }
+}
+
+// Immediate persistence: ensures any user mutation is immediately written to disk
+function persistDB() {
+  persistDBSync();
+}
+
+// Process exit handlers to ensure state is flushed on shutdown
+process.on('SIGINT', () => {
+  console.log('[server] Interrupted (SIGINT), flushing database...');
+  persistDBSync();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  console.log('[server] Terminated (SIGTERM), flushing database...');
+  persistDBSync();
+  process.exit(0);
+});
+process.on('beforeExit', () => {
+  persistDBSync();
+});
+
 try {
+  let loaded = false;
   if (fs.existsSync(DB_FILE)) {
-    const raw = fs.readFileSync(DB_FILE, 'utf-8');
-    db = JSON.parse(raw);
-    // Ensure all keys exist
+    try {
+      const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      if (raw && raw.trim().length > 0) {
+        db = JSON.parse(raw);
+        loaded = true;
+      }
+    } catch (parseErr) {
+      console.warn('Warning: db.json was unreadable or corrupted, attempting backup recovery:', parseErr);
+    }
+  }
+
+  // Fallback to backup if primary db.json was missing or corrupted
+  if (!loaded && fs.existsSync(DB_BACKUP_FILE)) {
+    try {
+      const raw = fs.readFileSync(DB_BACKUP_FILE, 'utf-8');
+      if (raw && raw.trim().length > 0) {
+        db = JSON.parse(raw);
+        loaded = true;
+        console.log('[storage] Successfully recovered database from db.backup.json!');
+      }
+    } catch (backupErr) {
+      console.error('[storage] Backup file also failed to parse:', backupErr);
+    }
+  }
+
+  if (loaded) {
+    // Ensure all keys exist while strictly preserving existing user data
     if (!db.settings) db.settings = defaultSettings;
     if (!db.settings.stations || db.settings.stations.length === 0) {
       db.settings.stations = defaultSettings.stations;
     }
-    if (!db.participants) db.participants = defaultParticipants;
-    if (!db.topics) db.topics = defaultTopics;
-    if (!db.images) db.images = defaultImages;
-    if (!db.customFields) db.customFields = defaultCustomFields;
-    if (!db.round1Results) db.round1Results = [];
-    if (!db.round2Results) db.round2Results = [];
-    if (!db.round3Results) db.round3Results = [];
-    if (!db.history) db.history = defaultHistory;
+    if (!Array.isArray(db.participants)) db.participants = defaultParticipants;
+    if (!Array.isArray(db.topics)) db.topics = defaultTopics;
+    if (!Array.isArray(db.images)) db.images = defaultImages;
+    if (!Array.isArray(db.customFields)) db.customFields = defaultCustomFields;
+    if (!Array.isArray(db.round1Results)) db.round1Results = [];
+    if (!Array.isArray(db.round2Results)) db.round2Results = [];
+    if (!Array.isArray(db.round3Results)) db.round3Results = [];
+    if (!Array.isArray(db.history)) db.history = defaultHistory;
     if (!db.stations) db.stations = {};
 
     // Ensure all configured stations have station states
@@ -535,14 +618,15 @@ try {
 
     if (!db.liveSync) db.liveSync = getInitialDatabase().liveSync;
     db.liveSync.stationStates = db.stations;
+    persistDBSync();
   } else {
     db = getInitialDatabase();
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    persistDBSync();
   }
 } catch (err) {
-  console.error('Error loading db.json, resetting to initial defaults', err);
+  console.error('Error loading db.json, recovering initial defaults', err);
   db = getInitialDatabase();
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+  persistDBSync();
 }
 
 // Helper to initialize and sync with MongoDB Atlas if configured
@@ -561,9 +645,7 @@ async function initMongo() {
     const stateDoc = await mongoDb.collection('app_state').findOne({ _id: 'current_state' });
     if (stateDoc && stateDoc.data) {
       db = stateDoc.data;
-      try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
-      } catch {}
+      persistDBSync();
       console.log('[mongodb] Loaded cloud state from MongoDB Atlas');
     } else {
       await mongoDb.collection('app_state').updateOne(
@@ -575,53 +657,6 @@ async function initMongo() {
     }
   } catch (err) {
     console.error('[mongodb] Connection failed, continuing with local storage:', err);
-  }
-}
-
-// Helper to persist data to disk and MongoDB Atlas
-let saveTimeout: NodeJS.Timeout | null = null;
-function persistDB() {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(async () => {
-    try {
-      if (db.stations) {
-        db.liveSync.stationStates = db.stations;
-      }
-      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
-
-      if (mongoDb) {
-        await mongoDb.collection('app_state').updateOne(
-          { _id: 'current_state' },
-          { $set: { data: db, updatedAt: new Date() } },
-          { upsert: true }
-        );
-      }
-    } catch (err) {
-      console.error('Failed to persist database:', err);
-    }
-  }, 100);
-}
-
-// Synchronous persistence for critical actions like Reset
-function persistDBSync() {
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
-    saveTimeout = null;
-  }
-  try {
-    if (db.stations) {
-      db.liveSync.stationStates = db.stations;
-    }
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
-    if (mongoDb) {
-      mongoDb.collection('app_state').updateOne(
-        { _id: 'current_state' },
-        { $set: { data: db, updatedAt: new Date() } },
-        { upsert: true }
-      ).catch((e: any) => console.error('[mongodb] sync persist error:', e));
-    }
-  } catch (err) {
-    console.error('Failed to persist database synchronously:', err);
   }
 }
 
@@ -773,6 +808,67 @@ app.get('/api/health', (req: Request, res: Response) => {
 app.get('/api/state', (req: Request, res: Response) => {
   res.json(db);
 });
+
+// Restore / merge local client additions if missing on server
+app.post('/api/sync-restore', (req: Request, res: Response) => {
+  try {
+    const { participants, topics, images } = req.body;
+    let addedCount = 0;
+
+    if (Array.isArray(participants)) {
+      const existingIds = new Set(db.participants.map((p) => p.id));
+      participants.forEach((p) => {
+        if (p && p.id && !existingIds.has(p.id)) {
+          db.participants.push(p);
+          existingIds.add(p.id);
+          addedCount++;
+        }
+      });
+    }
+
+    if (Array.isArray(topics)) {
+      const existingIds = new Set(db.topics.map((t) => t.id));
+      topics.forEach((t) => {
+        if (t && t.id && !existingIds.has(t.id)) {
+          db.topics.push(t);
+          existingIds.add(t.id);
+          addedCount++;
+        }
+      });
+    }
+
+    if (Array.isArray(images)) {
+      const existingIds = new Set(db.images.map((img) => img.id));
+      images.forEach((img) => {
+        if (img && img.id && !existingIds.has(img.id)) {
+          db.images.push(img);
+          existingIds.add(img.id);
+          addedCount++;
+        }
+      });
+    }
+
+    if (addedCount > 0) {
+      persistDB();
+      if (Array.isArray(participants) && participants.length > 0) {
+        broadcastSSE('participants_updated', db.participants);
+      }
+      if (Array.isArray(topics) && topics.length > 0) {
+        broadcastSSE('topics_updated', db.topics);
+      }
+      if (Array.isArray(images) && images.length > 0) {
+        broadcastSSE('images_updated', db.images);
+      }
+      logAction('State Restored', `Synchronized ${addedCount} locally preserved entity item(s) to server.`);
+    }
+
+    res.json({ success: true, addedCount });
+  } catch (err: any) {
+    console.error('Error in /api/sync-restore:', err);
+    res.status(500).json({ error: err.message || 'Failed to sync restore' });
+  }
+});
+
 
 // Reset database to initial factory defaults
 app.post('/api/reset-data', (req: Request, res: Response) => {
@@ -2417,6 +2513,7 @@ app.post('/api/participants', (req: Request, res: Response) => {
   db.participants.push(newParticipant);
   persistDB();
   logAction('Participant Added', `Added ${newParticipant.name} (${newParticipant.participantNumber})`);
+  broadcastSSE('participants_updated', db.participants);
   broadcastSSE('participant_created', newParticipant);
   res.json(newParticipant);
 });
@@ -2438,6 +2535,7 @@ app.put('/api/participants/:id', (req: Request, res: Response) => {
   db.participants[idx] = updated;
   persistDB();
   logAction('Participant Updated', `Updated details for ${updated.name} (${updated.participantNumber})`);
+  broadcastSSE('participants_updated', db.participants);
   broadcastSSE('participant_updated', updated);
   res.json(updated);
 });
@@ -2452,6 +2550,7 @@ app.delete('/api/participants/:id', (req: Request, res: Response) => {
   db.participants = db.participants.filter((p) => p.id !== id);
   persistDB();
   logAction('Participant Deleted', `Deleted participant ${target.name} (${target.participantNumber})`);
+  broadcastSSE('participants_updated', db.participants);
   broadcastSSE('participant_deleted', { id });
   res.json({ success: true, id });
 });
@@ -2489,6 +2588,7 @@ app.post('/api/participants/batch', (req: Request, res: Response) => {
 
   persistDB();
   logAction('Batch Participant Import', `Imported ${created.length} participants into the event`);
+  broadcastSSE('participants_updated', db.participants);
   broadcastSSE('participants_batch_imported', created);
   res.json({ success: true, count: created.length, participants: created });
 });
@@ -3098,6 +3198,7 @@ app.delete('/api/images/:id', (req: Request, res: Response) => {
   const { id } = req.params;
   db.images = db.images.filter((img) => img.id !== id);
   persistDB();
+  broadcastSSE('images_updated', db.images);
   res.json({ success: true, id });
 });
 
@@ -3109,6 +3210,7 @@ app.post('/api/images/reset-status', (req: Request, res: Response) => {
     delete img.usedAt;
   });
   persistDB();
+  broadcastSSE('images_updated', db.images);
   logAction('Images Reset', 'Reset all images to available status');
   res.json({ success: true, message: 'All images reset to available' });
 });

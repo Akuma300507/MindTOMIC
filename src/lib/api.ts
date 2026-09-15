@@ -792,4 +792,20 @@ export const api = {
     if (!res.ok) throw new Error('Failed to ping projector');
     return res.json();
   },
+
+  // Sync / Restore local additions to server if missing on server
+  async syncRestore(payload: {
+    participants?: Participant[];
+    topics?: Topic[];
+    images?: EventImage[];
+  }): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/sync-restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('Failed to sync local additions to server');
+    return res.json();
+  },
 };
+

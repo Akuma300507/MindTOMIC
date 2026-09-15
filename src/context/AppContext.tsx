@@ -20,6 +20,7 @@ import {
 import { api } from '../lib/api';
 import { soundEngine } from '../lib/audio';
 import { getServerNow, recordServerTimestamp } from '../lib/timeSync';
+import { storageService } from '../lib/storage';
 
 export interface TakeoverModalInfo {
   stationId: string;
@@ -217,8 +218,8 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [db, setDb] = useState<AppDatabase | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [db, setDb] = useState<AppDatabase | null>(() => storageService.loadPersistedDatabase());
+  const [loading, setLoading] = useState(() => !storageService.loadPersistedDatabase());
 
   // Stable Device Identification
   const [deviceId] = useState<string>(() => {
@@ -499,24 +500,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const reloadState = useCallback(async () => {
     try {
-      const state = await api.getState();
-      setDb(state);
+      const serverState = await api.getState();
+      const localState = storageService.loadPersistedDatabase();
+      const { mergedDb, hasLocalAdditions, localAdditions } = storageService.reconcileWithServerState(
+        serverState,
+        localState
+      );
+      setDb(mergedDb);
+
+      if (hasLocalAdditions) {
+        api.syncRestore(localAdditions).catch((syncErr) => {
+          console.warn('[sync] Background sync of local additions to server failed:', syncErr);
+        });
+      }
+
       // Initialize active participant from staged station participant or station participant
       setActiveParticipant((current) => {
         if (current) return current;
-        if (!state.participants || state.participants.length === 0) return null;
+        if (!mergedDb.participants || mergedDb.participants.length === 0) return null;
         if (currentStationId && currentStationId !== 'all') {
-          const staged = state.stations?.[currentStationId]?.activeParticipant;
+          const staged = mergedDb.stations?.[currentStationId]?.activeParticipant;
           if (staged) return staged;
-          const stationMatch = state.participants.find(
+          const stationMatch = mergedDb.participants.find(
             (p) => p.stationId === currentStationId
           );
           if (stationMatch) return stationMatch;
         }
-        return state.participants[0] ?? null;
+        return mergedDb.participants[0] ?? null;
       });
     } catch (err) {
-      console.error('Failed to load initial state:', err);
+      console.error('Failed to load initial state from server, falling back to persistent storage:', err);
+      const localState = storageService.loadPersistedDatabase();
+      if (localState) {
+        setDb(localState);
+      }
     } finally {
       setLoading(false);
     }
@@ -1127,7 +1144,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       eventSource.addEventListener('settings_updated', (e) => {
         try {
           const settings = JSON.parse(e.data);
-          setDb((prev) => (prev ? { ...prev, settings } : prev));
+          setDb((prev) => {
+            if (!prev) return prev;
+            const nextDb = { ...prev, settings };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
         } catch (err) {
           console.error(err);
         }
@@ -1136,7 +1158,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       eventSource.addEventListener('images_updated', (e) => {
         try {
           const images = JSON.parse(e.data);
-          setDb((prev) => (prev ? { ...prev, images } : prev));
+          setDb((prev) => {
+            if (!prev) return prev;
+            const nextDb = { ...prev, images };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
         } catch (err) {
           console.error(err);
         }
@@ -1145,7 +1172,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       eventSource.addEventListener('topics_updated', (e) => {
         try {
           const topics = JSON.parse(e.data);
-          setDb((prev) => (prev ? { ...prev, topics } : prev));
+          setDb((prev) => {
+            if (!prev) return prev;
+            const nextDb = { ...prev, topics };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
         } catch (err) {
           console.error(err);
         }
@@ -1156,7 +1188,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const data = JSON.parse(e.data);
           setDb((prev) => {
             if (!prev) return prev;
-            return {
+            const nextDb = {
               ...prev,
               stations: data.stations,
               participants: data.participants,
@@ -1167,6 +1199,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               round2Results: [],
               round3Results: [],
             };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
           });
           setActiveParticipant(null);
         } catch (err) {
@@ -1177,8 +1211,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       eventSource.addEventListener('state_reset', (e) => {
         try {
           const resetDb = JSON.parse(e.data);
+          storageService.clearAll();
+          storageService.savePersistedDatabase(resetDb);
           setDb(resetDb);
           setActiveParticipant(null);
+        } catch (err) {
+          console.error(err);
+        }
+      });
+
+      eventSource.addEventListener('participants_updated', (e) => {
+        try {
+          const participants: Participant[] = JSON.parse(e.data);
+          setDb((prev) => {
+            if (!prev) return prev;
+            const nextDb = { ...prev, participants };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
+        } catch (err) {
+          console.error(err);
+        }
+      });
+
+      eventSource.addEventListener('participant_created', (e) => {
+        try {
+          const participant: Participant = JSON.parse(e.data);
+          setDb((prev) => {
+            if (!prev) return prev;
+            if (prev.participants.some((p) => p.id === participant.id)) return prev;
+            const nextDb = { ...prev, participants: [...prev.participants, participant] };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
+        } catch (err) {
+          console.error(err);
+        }
+      });
+
+      eventSource.addEventListener('participant_deleted', (e) => {
+        try {
+          const { id } = JSON.parse(e.data);
+          storageService.recordDeletedParticipant(id);
+          setDb((prev) => {
+            if (!prev) return prev;
+            const nextDb = { ...prev, participants: prev.participants.filter((p) => p.id !== id) };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
+        } catch (err) {
+          console.error(err);
+        }
+      });
+
+      eventSource.addEventListener('participants_batch_imported', (e) => {
+        try {
+          const created: Participant[] = JSON.parse(e.data);
+          setDb((prev) => {
+            if (!prev) return prev;
+            const existingIds = new Set(prev.participants.map((p) => p.id));
+            const newItems = created.filter((p) => !existingIds.has(p.id));
+            const nextDb = { ...prev, participants: [...prev.participants, ...newItems] };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
         } catch (err) {
           console.error(err);
         }
@@ -1189,10 +1285,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const participant: Participant = JSON.parse(e.data);
           setDb((prev) => {
             if (!prev) return prev;
-            return {
+            const nextDb = {
               ...prev,
               participants: prev.participants.map((p) => (p.id === participant.id ? participant : p)),
             };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
           });
           setActiveParticipant((curr) => {
             if (curr?.id === participant.id) {
@@ -1213,10 +1311,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const { participant } = JSON.parse(e.data);
           setDb((prev) => {
             if (!prev) return prev;
-            return {
+            const nextDb = {
               ...prev,
               participants: prev.participants.map((p) => (p.id === participant.id ? participant : p)),
             };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
           });
           setActiveParticipant((curr) => (curr?.id === participant.id ? participant : curr));
         } catch (err) {
@@ -1233,10 +1333,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const map = new Map(list.map((p: Participant) => [p.id, p]));
           setDb((prev) => {
             if (!prev) return prev;
-            return {
+            const nextDb = {
               ...prev,
               participants: prev.participants.map((p) => (map.has(p.id) ? (map.get(p.id) as Participant) : p)),
             };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
           });
           setActiveParticipant((curr) => {
             if (!curr) {
@@ -1529,6 +1631,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Start fresh event
   const startNewEvent = useCallback(async () => {
+    storageService.clearDeletedRecords();
     await api.startNewEvent();
     await reloadState();
   }, [reloadState]);
@@ -1599,35 +1702,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Participants actions
   const addParticipant = useCallback(async (p: Partial<Participant>) => {
     const created = await api.addParticipant(p);
-    setDb((prev) => (prev ? { ...prev, participants: [...prev.participants, created] } : prev));
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, participants: [...prev.participants, created] } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     setActiveParticipant((curr) => curr || created);
     return created;
   }, []);
 
   const updateParticipant = useCallback(async (id: string, p: Partial<Participant>) => {
     const updated = await api.updateParticipant(id, p);
-    setDb((prev) =>
-      prev
+    setDb((prev) => {
+      const nextDb = prev
         ? {
             ...prev,
             participants: prev.participants.map((item) => (item.id === id ? updated : item)),
           }
-        : prev
-    );
+        : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     setActiveParticipant((curr) => (curr?.id === id ? updated : curr));
     return updated;
   }, []);
 
   const deleteParticipant = useCallback(async (id: string) => {
+    storageService.recordDeletedParticipant(id);
     await api.deleteParticipant(id);
-    setDb((prev) =>
-      prev
+    setDb((prev) => {
+      const nextDb = prev
         ? {
             ...prev,
             participants: prev.participants.filter((item) => item.id !== id),
           }
-        : prev
-    );
+        : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     setActiveParticipant((curr) => (curr?.id === id ? null : curr));
   }, []);
 
@@ -1643,10 +1755,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDb((prev) => {
         if (!prev) return prev;
         const map = new Map(res.participants.map((p) => [p.id, p]));
-        return {
+        const nextDb = {
           ...prev,
           participants: prev.participants.map((p) => (map.has(p.id) ? (map.get(p.id) as Participant) : p)),
         };
+        storageService.savePersistedDatabase(nextDb);
+        return nextDb;
       });
       return res;
     },
@@ -1656,14 +1770,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const moveParticipantStation = useCallback(
     async (participantId: string, stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => {
       const res = await api.moveParticipantStation(participantId, stationId, stationName, forRound);
-      setDb((prev) =>
-        prev
-          ? {
-              ...prev,
-              participants: prev.participants.map((p) => (p.id === participantId ? res.participant : p)),
-            }
-          : prev
-      );
+      setDb((prev) => {
+        if (!prev) return prev;
+        const nextDb = {
+          ...prev,
+          participants: prev.participants.map((p) => (p.id === participantId ? res.participant : p)),
+        };
+        storageService.savePersistedDatabase(nextDb);
+        return nextDb;
+      });
       return res.participant;
     },
     []
@@ -1677,10 +1792,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const res = await api.checkInParticipant(id, options);
       setDb((prev) => {
         if (!prev) return prev;
-        return {
+        const nextDb = {
           ...prev,
           participants: prev.participants.map((p) => (p.id === id ? res.participant : p)),
         };
+        storageService.savePersistedDatabase(nextDb);
+        return nextDb;
       });
       setActiveParticipant((curr) => {
         if (curr?.id === id) {
@@ -1705,10 +1822,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDb((prev) => {
         if (!prev) return prev;
         const map = new Map(res.participants.map((p) => [p.id, p]));
-        return {
+        const nextDb = {
           ...prev,
           participants: prev.participants.map((p) => (map.has(p.id) ? (map.get(p.id) as Participant) : p)),
         };
+        storageService.savePersistedDatabase(nextDb);
+        return nextDb;
       });
       setActiveParticipant((curr) => {
         if (!curr) {
@@ -1728,58 +1847,77 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Custom fields
   const addCustomField = useCallback(async (field: Partial<CustomFieldDefinition>) => {
     const created = await api.addCustomField(field);
-    setDb((prev) => (prev ? { ...prev, customFields: [...prev.customFields, created] } : prev));
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, customFields: [...prev.customFields, created] } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     return created;
   }, []);
 
   const updateCustomField = useCallback(async (id: string, field: Partial<CustomFieldDefinition>) => {
     const updated = await api.updateCustomField(id, field);
-    setDb((prev) =>
-      prev
+    setDb((prev) => {
+      const nextDb = prev
         ? {
             ...prev,
             customFields: prev.customFields.map((f) => (f.id === id ? updated : f)),
           }
-        : prev
-    );
+        : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     return updated;
   }, []);
 
   const deleteCustomField = useCallback(async (id: string) => {
     await api.deleteCustomField(id);
-    setDb((prev) =>
-      prev
+    setDb((prev) => {
+      const nextDb = prev
         ? {
             ...prev,
             customFields: prev.customFields.filter((f) => f.id !== id),
           }
-        : prev
-    );
+        : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
   }, []);
 
   // Topics
   const addTopic = useCallback(async (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => {
     const created = await api.addTopic({ topic, category, topicId, stationId, stationName });
-    setDb((prev) => (prev ? { ...prev, topics: [...prev.topics, created] } : prev));
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, topics: [...prev.topics, created] } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     return created;
   }, []);
 
   const updateTopic = useCallback(async (id: string, updates: Partial<Topic>) => {
     const updated = await api.updateTopic(id, updates);
-    setDb((prev) =>
-      prev
+    setDb((prev) => {
+      const nextDb = prev
         ? {
             ...prev,
             topics: prev.topics.map((t) => (t.id === id ? updated : t)),
           }
-        : prev
-    );
+        : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     return updated;
   }, []);
 
   const deleteTopic = useCallback(async (id: string) => {
+    storageService.recordDeletedTopic(id);
     await api.deleteTopic(id);
-    setDb((prev) => (prev ? { ...prev, topics: prev.topics.filter((t) => t.id !== id) } : prev));
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, topics: prev.topics.filter((t) => t.id !== id) } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
   }, []);
 
   const importTopics = useCallback(async (list: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[], defaultStationId?: string) => {
@@ -1791,7 +1929,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const batchUpdateTopicStations = useCallback(
     async (topicIds: string[], stationId?: string, stationName?: string) => {
       const res = await api.batchUpdateTopicStations(topicIds, stationId, stationName);
-      setDb((prev) => (prev ? { ...prev, topics: res.allTopics } : prev));
+      setDb((prev) => {
+        const nextDb = prev ? { ...prev, topics: res.allTopics } : prev;
+        if (nextDb) storageService.savePersistedDatabase(nextDb);
+        return nextDb;
+      });
       return res;
     },
     []
@@ -1805,20 +1947,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Images
   const addImage = useCallback(async (imageIdOrName: string, url: string, stationId?: string, stationName?: string) => {
     const created = await api.addImage({ imageId: imageIdOrName, name: imageIdOrName, url, stationId, stationName });
-    setDb((prev) => (prev ? { ...prev, images: [...prev.images, created] } : prev));
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, images: [...prev.images, created] } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     return created;
   }, []);
 
   const updateImage = useCallback(async (id: string, updates: Partial<EventImage>) => {
     const updated = await api.updateImage(id, updates);
-    setDb((prev) =>
-      prev
+    setDb((prev) => {
+      const nextDb = prev
         ? {
             ...prev,
             images: prev.images.map((img) => (img.id === id ? updated : img)),
           }
-        : prev
-    );
+        : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     return updated;
   }, []);
 
@@ -1832,7 +1980,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stationName?: string;
     }) => {
       const res = await api.uploadImages(payload);
-      setDb((prev) => (prev ? { ...prev, images: res.allImages } : prev));
+      setDb((prev) => {
+        const nextDb = prev ? { ...prev, images: res.allImages } : prev;
+        if (nextDb) storageService.savePersistedDatabase(nextDb);
+        return nextDb;
+      });
       return res;
     },
     []
@@ -1841,15 +1993,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const batchUpdateImageStations = useCallback(
     async (imageIds: string[], stationId?: string, stationName?: string) => {
       const res = await api.batchUpdateImageStations(imageIds, stationId, stationName);
-      setDb((prev) => (prev ? { ...prev, images: res.allImages } : prev));
+      setDb((prev) => {
+        const nextDb = prev ? { ...prev, images: res.allImages } : prev;
+        if (nextDb) storageService.savePersistedDatabase(nextDb);
+        return nextDb;
+      });
       return res;
     },
     []
   );
 
   const deleteImage = useCallback(async (id: string) => {
+    storageService.recordDeletedImage(id);
     await api.deleteImage(id);
-    setDb((prev) => (prev ? { ...prev, images: prev.images.filter((img) => img.id !== id) } : prev));
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, images: prev.images.filter((img) => img.id !== id) } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
   }, []);
 
   const resetImagesStatus = useCallback(async () => {
@@ -1860,7 +2021,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Settings
   const updateSettings = useCallback(async (updates: Partial<EventSettings>) => {
     const updated = await api.updateSettings(updates);
-    setDb((prev) => (prev ? { ...prev, settings: updated } : prev));
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, settings: updated } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
     return updated;
   }, []);
 
@@ -1921,13 +2086,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   : r
               )
             : prev.round3Results;
-        return {
+        const nextDb = {
           ...prev,
           participants: updatedParticipants,
           round1Results: updatedR1,
           round2Results: updatedR2,
           round3Results: updatedR3,
         };
+        storageService.savePersistedDatabase(nextDb);
+        return nextDb;
       });
       setActiveParticipant((curr) => (curr?.id === participantId ? res.participant : curr));
       return res.participant;
@@ -1964,6 +2131,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const resetAllData = useCallback(async () => {
+    storageService.clearAll();
     await api.resetData();
     await reloadState();
   }, [reloadState]);
