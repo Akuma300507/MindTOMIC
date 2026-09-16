@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -119,201 +120,19 @@ const defaultSettings: EventSettings = {
 
 const defaultCustomFields: CustomFieldDefinition[] = [];
 
-const defaultParticipants: Participant[] = [
-  {
-    id: 'p-101',
-    participantNumber: 'M2M-001',
-    name: 'Aarav Sharma',
-    mobile: '+91 98765 43210',
-    phone: '+91 98765 43210',
-    stationId: 'station-a',
-    stationName: 'Station A',
-    status: 'active',
-    round1Status: 'pending',
-    round2Status: 'pending',
-    round3Status: 'pending',
-    customData: { phone: '+91 98765 43210', mobile: '+91 98765 43210' },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'p-102',
-    participantNumber: 'M2M-002',
-    name: 'Maya Chen',
-    mobile: '+1 415 555 0192',
-    phone: '+1 415 555 0192',
-    stationId: 'station-b',
-    stationName: 'Station B',
-    status: 'active',
-    round1Status: 'pending',
-    round2Status: 'pending',
-    round3Status: 'pending',
-    customData: { phone: '+1 415 555 0192', mobile: '+1 415 555 0192' },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'p-103',
-    participantNumber: 'M2M-003',
-    name: 'Lucas Dupont',
-    mobile: '+33 6 12 34 56 78',
-    phone: '+33 6 12 34 56 78',
-    stationId: 'station-a',
-    stationName: 'Station A',
-    status: 'active',
-    round1Status: 'pending',
-    round2Status: 'pending',
-    round3Status: 'pending',
-    customData: { phone: '+33 6 12 34 56 78', mobile: '+33 6 12 34 56 78' },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'p-104',
-    participantNumber: 'M2M-004',
-    name: 'Priya Patel',
-    mobile: '+91 91234 56789',
-    phone: '+91 91234 56789',
-    stationId: 'station-c',
-    stationName: 'Station C',
-    status: 'active',
-    round1Status: 'pending',
-    round2Status: 'pending',
-    round3Status: 'pending',
-    customData: { phone: '+91 91234 56789', mobile: '+91 91234 56789' },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'p-105',
-    participantNumber: 'M2M-005',
-    name: 'David Kim',
-    mobile: '+82 10 9876 5432',
-    phone: '+82 10 9876 5432',
-    stationId: 'station-d',
-    stationName: 'Station D',
-    status: 'active',
-    round1Status: 'pending',
-    round2Status: 'pending',
-    round3Status: 'pending',
-    customData: { phone: '+82 10 9876 5432', mobile: '+82 10 9876 5432' },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'p-106',
-    participantNumber: 'M2M-006',
-    name: 'Zara Al-Mansoor',
-    mobile: '+971 50 123 4567',
-    phone: '+971 50 123 4567',
-    stationId: 'station-b',
-    stationName: 'Station B',
-    status: 'active',
-    round1Status: 'pending',
-    round2Status: 'pending',
-    round3Status: 'pending',
-    customData: { phone: '+971 50 123 4567', mobile: '+971 50 123 4567' },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
+// Blacklist of legacy sample data IDs to prevent accidental resurrection from browser local caches
+const LEGACY_DEFAULT_IDS = new Set<string>([
+  'p-101', 'p-102', 'p-103', 'p-104', 'p-105', 'p-106', 'test-live-offline-projector-uuid',
+  'top-1', 'top-2', 'top-3', 'top-4', 'top-5', 'top-6', 'top-7', 'top-8', 'top-9', 'top-10',
+  'top-11', 'top-12', 'top-13', 'top-14', 'top-15', 'top-16', 'top-17', 'top-18', 'top-19', 'top-20',
+  'top-21', 'top-22', 'top-23', 'top-24', 'top-25',
+  'img-1', 'img-2', 'img-3', 'img-4', 'img-5', 'img-6', 'img-7', 'img-8',
+]);
 
-const defaultTopics: Topic[] = [
-  { id: 'top-1', topicId: 'TOP-001', topic: 'Is AI creative or merely a parrot of human culture?', category: 'Technology', status: 'available' },
-  { id: 'top-2', topicId: 'TOP-002', topic: 'The Power of Silence in an Age of Constant Noise', category: 'Philosophy', status: 'available' },
-  { id: 'top-3', topicId: 'TOP-003', topic: 'Should college degrees remain the benchmark for intellect?', category: 'Education', status: 'available' },
-  { id: 'top-4', topicId: 'TOP-004', topic: 'Digital Privacy: A Universal Right or a Modern Myth?', category: 'Society', status: 'available' },
-  { id: 'top-5', topicId: 'TOP-005', topic: 'Can empathy be taught or is it hardwired?', category: 'Psychology', status: 'available' },
-  { id: 'top-6', topicId: 'TOP-006', topic: 'The Myth of the Overnight Success Story', category: 'Mindset', status: 'available' },
-  { id: 'top-7', topicId: 'TOP-007', topic: 'Why Failure is the Highest Form of Curriculum', category: 'Mindset', status: 'available' },
-  { id: 'top-8', topicId: 'TOP-008', topic: 'Are algorithms polarizing human empathy?', category: 'Technology', status: 'available' },
-  { id: 'top-9', topicId: 'TOP-009', topic: 'The Future of Clean Energy: Science vs Politics', category: 'Environment', status: 'available' },
-  { id: 'top-10', topicId: 'TOP-010', topic: 'Is Cancel Culture Accountability or Retribution?', category: 'Culture', status: 'available' },
-  { id: 'top-11', topicId: 'TOP-011', topic: 'The Vanishing Art of Deep Focused Work', category: 'Productivity', status: 'available' },
-  { id: 'top-12', topicId: 'TOP-012', topic: 'Does Wealth Obligate Philanthropy?', category: 'Ethics', status: 'available' },
-  { id: 'top-13', topicId: 'TOP-013', topic: 'Space Colonization vs Fixing Earth: Where should billions go?', category: 'Future', status: 'available' },
-  { id: 'top-14', topicId: 'TOP-014', topic: 'The Illusion of Infinite Free Time', category: 'Time', status: 'available' },
-  { id: 'top-15', topicId: 'TOP-015', topic: 'Is Social Media Making Us lonelier together?', category: 'Society', status: 'available' },
-  { id: 'top-16', topicId: 'TOP-016', topic: 'Leadership in Crisis: Decisiveness vs Compassion', category: 'Leadership', status: 'available' },
-  { id: 'top-17', topicId: 'TOP-017', topic: 'The Paradox of Choice: Does more freedom bring happiness?', category: 'Philosophy', status: 'available' },
-  { id: 'top-18', topicId: 'TOP-018', topic: 'Virtual Reality vs Physical Reality: The new divide', category: 'Technology', status: 'available' },
-  { id: 'top-19', topicId: 'TOP-019', topic: 'Who is responsible for climate action: Individuals or Corporations?', category: 'Environment', status: 'available' },
-  { id: 'top-20', topicId: 'TOP-020', topic: 'The Price of Perfectionism in Youth', category: 'Psychology', status: 'available' },
-  { id: 'top-21', topicId: 'TOP-021', topic: 'Can Humor be used as an Instrument of Truth?', category: 'Culture', status: 'available' },
-  { id: 'top-22', topicId: 'TOP-022', topic: 'Why We Need More Generalists, Not Just Specialists', category: 'Career', status: 'available' },
-  { id: 'top-23', topicId: 'TOP-023', topic: 'The Ethics of Human Genetic Engineering', category: 'Bioethics', status: 'available' },
-  { id: 'top-24', topicId: 'TOP-024', topic: 'The Art of Disagreeing Without Becoming Enemies', category: 'Communication', status: 'available' },
-  { id: 'top-25', topicId: 'TOP-025', topic: 'Will Automation Create a Leisure Society or Economic Despair?', category: 'Economics', status: 'available' },
-];
-
-const defaultImages: EventImage[] = [
-  {
-    id: 'img-1',
-    imageId: 'IMG-001',
-    name: 'IMG-001',
-    url: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-  {
-    id: 'img-2',
-    imageId: 'IMG-002',
-    name: 'IMG-002',
-    url: 'https://images.unsplash.com/photo-1508962914676-134849a727f0?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-  {
-    id: 'img-3',
-    imageId: 'IMG-003',
-    name: 'IMG-003',
-    url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-  {
-    id: 'img-4',
-    imageId: 'IMG-004',
-    name: 'IMG-004',
-    url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-  {
-    id: 'img-5',
-    imageId: 'IMG-005',
-    name: 'IMG-005',
-    url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-  {
-    id: 'img-6',
-    imageId: 'IMG-006',
-    name: 'IMG-006',
-    url: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-  {
-    id: 'img-7',
-    imageId: 'IMG-007',
-    name: 'IMG-007',
-    url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-  {
-    id: 'img-8',
-    imageId: 'IMG-008',
-    name: 'IMG-008',
-    url: 'https://images.unsplash.com/photo-1529699211952-734e80c4d42b?auto=format&fit=crop&w=1200&q=80',
-    status: 'available',
-  },
-];
-
-const defaultHistory: EventLog[] = [
-  {
-    id: 'log-1',
-    timestamp: new Date().toISOString(),
-    action: 'Event Initialized',
-    round: 'General',
-    details: 'Mind to Mic competition platform booted with initial participant and topic roster.',
-  },
-];
+const defaultParticipants: Participant[] = [];
+const defaultTopics: Topic[] = [];
+const defaultImages: EventImage[] = [];
+const defaultHistory: EventLog[] = [];
 
 function isParticipantCheckedIn(p?: Participant | null): boolean {
   if (!p) return false;
@@ -504,14 +323,21 @@ try {
     if (!db.settings.stations || db.settings.stations.length === 0) {
       db.settings.stations = defaultSettings.stations;
     }
-    if (!Array.isArray(db.participants)) db.participants = defaultParticipants;
-    if (!Array.isArray(db.topics)) db.topics = defaultTopics;
-    if (!Array.isArray(db.images)) db.images = defaultImages;
+    if (!Array.isArray(db.participants)) db.participants = [];
+    else db.participants = db.participants.filter((p) => !LEGACY_DEFAULT_IDS.has(p.id));
+
+    if (!Array.isArray(db.topics)) db.topics = [];
+    else db.topics = db.topics.filter((t) => !LEGACY_DEFAULT_IDS.has(t.id));
+
+    if (!Array.isArray(db.images)) db.images = [];
+    else db.images = db.images.filter((img) => !LEGACY_DEFAULT_IDS.has(img.id));
+
     if (!Array.isArray(db.customFields)) db.customFields = defaultCustomFields;
     if (!Array.isArray(db.round1Results)) db.round1Results = [];
     if (!Array.isArray(db.round2Results)) db.round2Results = [];
     if (!Array.isArray(db.round3Results)) db.round3Results = [];
-    if (!Array.isArray(db.history)) db.history = defaultHistory;
+    if (!Array.isArray(db.history)) db.history = [];
+    else db.history = db.history.filter((h) => !h.participantId || !LEGACY_DEFAULT_IDS.has(h.participantId));
     if (!db.stations) db.stations = {};
 
     // Ensure all configured stations have station states
@@ -645,8 +471,17 @@ async function initMongo() {
     const stateDoc = await mongoDb.collection('app_state').findOne({ _id: 'current_state' });
     if (stateDoc && stateDoc.data) {
       db = stateDoc.data;
+      if (Array.isArray(db.participants)) {
+        db.participants = db.participants.filter((p) => !LEGACY_DEFAULT_IDS.has(p.id));
+      }
+      if (Array.isArray(db.topics)) {
+        db.topics = db.topics.filter((t) => !LEGACY_DEFAULT_IDS.has(t.id));
+      }
+      if (Array.isArray(db.images)) {
+        db.images = db.images.filter((img) => !LEGACY_DEFAULT_IDS.has(img.id));
+      }
       persistDBSync();
-      console.log('[mongodb] Loaded cloud state from MongoDB Atlas');
+      console.log('[mongodb] Loaded and synchronized cloud state from MongoDB Atlas');
     } else {
       await mongoDb.collection('app_state').updateOne(
         { _id: 'current_state' },
@@ -818,7 +653,7 @@ app.post('/api/sync-restore', (req: Request, res: Response) => {
     if (Array.isArray(participants)) {
       const existingIds = new Set(db.participants.map((p) => p.id));
       participants.forEach((p) => {
-        if (p && p.id && !existingIds.has(p.id)) {
+        if (p && p.id && !existingIds.has(p.id) && !LEGACY_DEFAULT_IDS.has(p.id)) {
           db.participants.push(p);
           existingIds.add(p.id);
           addedCount++;
@@ -829,7 +664,7 @@ app.post('/api/sync-restore', (req: Request, res: Response) => {
     if (Array.isArray(topics)) {
       const existingIds = new Set(db.topics.map((t) => t.id));
       topics.forEach((t) => {
-        if (t && t.id && !existingIds.has(t.id)) {
+        if (t && t.id && !existingIds.has(t.id) && !LEGACY_DEFAULT_IDS.has(t.id)) {
           db.topics.push(t);
           existingIds.add(t.id);
           addedCount++;
@@ -840,7 +675,7 @@ app.post('/api/sync-restore', (req: Request, res: Response) => {
     if (Array.isArray(images)) {
       const existingIds = new Set(db.images.map((img) => img.id));
       images.forEach((img) => {
-        if (img && img.id && !existingIds.has(img.id)) {
+        if (img && img.id && !existingIds.has(img.id) && !LEGACY_DEFAULT_IDS.has(img.id)) {
           db.images.push(img);
           existingIds.add(img.id);
           addedCount++;

@@ -28,6 +28,14 @@ function saveStoredSet(key: string, set: Set<string>): void {
   }
 }
 
+export const LEGACY_DEFAULT_IDS = new Set<string>([
+  'p-101', 'p-102', 'p-103', 'p-104', 'p-105', 'p-106', 'test-live-offline-projector-uuid',
+  'top-1', 'top-2', 'top-3', 'top-4', 'top-5', 'top-6', 'top-7', 'top-8', 'top-9', 'top-10',
+  'top-11', 'top-12', 'top-13', 'top-14', 'top-15', 'top-16', 'top-17', 'top-18', 'top-19', 'top-20',
+  'top-21', 'top-22', 'top-23', 'top-24', 'top-25',
+  'img-1', 'img-2', 'img-3', 'img-4', 'img-5', 'img-6', 'img-7', 'img-8',
+]);
+
 export const storageService = {
   /**
    * Load entire database from local browser persistence.
@@ -41,19 +49,19 @@ export const storageService = {
       const db = JSON.parse(raw) as AppDatabase;
       if (!db || typeof db !== 'object') return null;
 
-      // Filter out any items recorded as deleted by the user
+      // Filter out any items recorded as deleted by the user or legacy defaults
       const deletedParticipants = getStoredSet(STORAGE_KEYS.DELETED_PARTICIPANTS);
       const deletedTopics = getStoredSet(STORAGE_KEYS.DELETED_TOPICS);
       const deletedImages = getStoredSet(STORAGE_KEYS.DELETED_IMAGES);
 
       if (Array.isArray(db.participants)) {
-        db.participants = db.participants.filter((p) => !deletedParticipants.has(p.id));
+        db.participants = db.participants.filter((p) => !deletedParticipants.has(p.id) && !LEGACY_DEFAULT_IDS.has(p.id));
       }
       if (Array.isArray(db.topics)) {
-        db.topics = db.topics.filter((t) => !deletedTopics.has(t.id));
+        db.topics = db.topics.filter((t) => !deletedTopics.has(t.id) && !LEGACY_DEFAULT_IDS.has(t.id));
       }
       if (Array.isArray(db.images)) {
-        db.images = db.images.filter((img) => !deletedImages.has(img.id));
+        db.images = db.images.filter((img) => !deletedImages.has(img.id) && !LEGACY_DEFAULT_IDS.has(img.id));
       }
 
       return db;
@@ -168,33 +176,33 @@ export const storageService = {
     const deletedTopics = getStoredSet(STORAGE_KEYS.DELETED_TOPICS);
     const deletedImages = getStoredSet(STORAGE_KEYS.DELETED_IMAGES);
 
-    // Filter server items against deletion records
-    const serverParticipants = (serverDb.participants || []).filter((p) => !deletedParticipants.has(p.id));
-    const serverTopics = (serverDb.topics || []).filter((t) => !deletedTopics.has(t.id));
-    const serverImages = (serverDb.images || []).filter((img) => !deletedImages.has(img.id));
+    // Filter server items against deletion records and legacy defaults
+    const serverParticipants = (serverDb.participants || []).filter((p) => !deletedParticipants.has(p.id) && !LEGACY_DEFAULT_IDS.has(p.id));
+    const serverTopics = (serverDb.topics || []).filter((t) => !deletedTopics.has(t.id) && !LEGACY_DEFAULT_IDS.has(t.id));
+    const serverImages = (serverDb.images || []).filter((img) => !deletedImages.has(img.id) && !LEGACY_DEFAULT_IDS.has(img.id));
 
     const serverParticipantIdMap = new Map(serverParticipants.map((p) => [p.id, p]));
     const serverTopicIdMap = new Map(serverTopics.map((t) => [t.id, t]));
     const serverImageIdMap = new Map(serverImages.map((i) => [i.id, i]));
 
-    // Find any local additions not on server
+    // Find any local additions not on server (excluding legacy defaults)
     const localOnlyParticipants: Participant[] = [];
     (localDb.participants || []).forEach((p) => {
-      if (!deletedParticipants.has(p.id) && !serverParticipantIdMap.has(p.id)) {
+      if (!deletedParticipants.has(p.id) && !LEGACY_DEFAULT_IDS.has(p.id) && !serverParticipantIdMap.has(p.id)) {
         localOnlyParticipants.push(p);
       }
     });
 
     const localOnlyTopics: Topic[] = [];
     (localDb.topics || []).forEach((t) => {
-      if (!deletedTopics.has(t.id) && !serverTopicIdMap.has(t.id)) {
+      if (!deletedTopics.has(t.id) && !LEGACY_DEFAULT_IDS.has(t.id) && !serverTopicIdMap.has(t.id)) {
         localOnlyTopics.push(t);
       }
     });
 
     const localOnlyImages: EventImage[] = [];
     (localDb.images || []).forEach((img) => {
-      if (!deletedImages.has(img.id) && !serverImageIdMap.has(img.id)) {
+      if (!deletedImages.has(img.id) && !LEGACY_DEFAULT_IDS.has(img.id) && !serverImageIdMap.has(img.id)) {
         localOnlyImages.push(img);
       }
     });
