@@ -4,10 +4,8 @@ import {
   Plus,
   Search,
   Trash2,
-  CheckCircle2,
   RotateCcw,
   Upload,
-  FileImage,
   X,
   Loader2,
   Check,
@@ -15,11 +13,6 @@ import {
   Globe,
   Edit2,
   Hash,
-  MapPin,
-  Layers,
-  CheckSquare,
-  Square,
-  Filter,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { EventImage } from '../types';
@@ -31,7 +24,6 @@ interface FileUploadItem {
   preview: string;
   base64: string;
   size: string;
-  stationId?: string;
 }
 
 export const ImagesManager: React.FC = () => {
@@ -42,13 +34,10 @@ export const ImagesManager: React.FC = () => {
     updateImage,
     deleteImage,
     resetImagesStatus,
-    allStations,
-    batchUpdateImageStations,
   } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'used'>('all');
-  const [stationFilter, setStationFilter] = useState<string>('all'); // 'all', 'universal', or stationId
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<'laptop' | 'url'>('laptop');
@@ -56,106 +45,28 @@ export const ImagesManager: React.FC = () => {
   // URL mode state
   const [urlImageId, setUrlImageId] = useState('');
   const [imageUrl, setImageUrl] = useState('');
-  const [urlStationId, setUrlStationId] = useState<string>('all');
 
   // Editing ID inline
   const [editingImageId, setEditingImageId] = useState<string | null>(null);
   const [newImageIdVal, setNewImageIdVal] = useState('');
 
   // Laptop upload state
-  const [uploadDefaultStationId, setUploadDefaultStationId] = useState<string>('all');
   const [selectedFiles, setSelectedFiles] = useState<FileUploadItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Multi-select for batch actions
-  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
-  const [batchTargetStationId, setBatchTargetStationId] = useState<string>('all');
-  const [isBatchUpdating, setIsBatchUpdating] = useState(false);
-  const [batchMessage, setBatchMessage] = useState<string | null>(null);
-
   const images = db?.images || [];
-
-  const resolveStationName = (stId?: string): string | undefined => {
-    if (!stId || stId === 'all' || stId === 'universal') return undefined;
-    const found = allStations.find((s) => s.id === stId);
-    return found ? found.name : stId;
-  };
-
-  const getStationColor = (stationId?: string) => {
-    if (!stationId || stationId === 'all') {
-      return {
-        badge: 'bg-slate-800/90 text-slate-300 border-slate-700',
-        dot: 'bg-slate-400',
-        name: 'Universal / All Stations',
-      };
-    }
-    const lower = stationId.toLowerCase();
-    if (lower.includes('a')) {
-      return {
-        badge: 'bg-blue-950/90 text-blue-300 border-blue-700',
-        dot: 'bg-blue-400',
-        name: resolveStationName(stationId) || stationId,
-      };
-    }
-    if (lower.includes('b')) {
-      return {
-        badge: 'bg-purple-950/90 text-purple-300 border-purple-700',
-        dot: 'bg-purple-400',
-        name: resolveStationName(stationId) || stationId,
-      };
-    }
-    if (lower.includes('c')) {
-      return {
-        badge: 'bg-emerald-950/90 text-emerald-300 border-emerald-700',
-        dot: 'bg-emerald-400',
-        name: resolveStationName(stationId) || stationId,
-      };
-    }
-    if (lower.includes('d')) {
-      return {
-        badge: 'bg-amber-950/90 text-amber-300 border-amber-700',
-        dot: 'bg-amber-400',
-        name: resolveStationName(stationId) || stationId,
-      };
-    }
-    return {
-      badge: 'bg-indigo-950/90 text-indigo-300 border-indigo-700',
-      dot: 'bg-indigo-400',
-      name: resolveStationName(stationId) || stationId,
-    };
-  };
 
   const filteredImages = useMemo(() => {
     return images.filter((img) => {
       const idToTest = (img.imageId || img.name || '').toLowerCase();
       const matchesSearch = idToTest.includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'all' || img.status === statusFilter;
-
-      let matchesStation = true;
-      if (stationFilter === 'universal') {
-        matchesStation = !img.stationId || img.stationId === 'all';
-      } else if (stationFilter !== 'all') {
-        matchesStation = img.stationId === stationFilter;
-      }
-
-      return matchesSearch && matchesStatus && matchesStation;
+      return matchesSearch && matchesStatus;
     });
-  }, [images, searchTerm, statusFilter, stationFilter]);
-
-  // Station counts for pills
-  const stationCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      all: images.length,
-      universal: images.filter((i) => !i.stationId || i.stationId === 'all').length,
-    };
-    allStations.forEach((s) => {
-      counts[s.id] = images.filter((i) => i.stationId === s.id).length;
-    });
-    return counts;
-  }, [images, allStations]);
+  }, [images, searchTerm, statusFilter]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -194,7 +105,6 @@ export const ImagesManager: React.FC = () => {
           preview: base64,
           base64,
           size: formatFileSize(file.size),
-          stationId: uploadDefaultStationId,
         });
       } catch (e) {
         console.error('Error reading file:', e);
@@ -222,12 +132,6 @@ export const ImagesManager: React.FC = () => {
     );
   };
 
-  const handleUpdateSelectedStationId = (id: string, stId: string) => {
-    setSelectedFiles((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, stationId: stId } : f))
-    );
-  };
-
   // Submit Laptop Uploaded Images
   const handleUploadFromLaptop = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -240,23 +144,12 @@ export const ImagesManager: React.FC = () => {
     setUploadError(null);
 
     try {
-      const defaultStId = uploadDefaultStationId === 'all' ? undefined : uploadDefaultStationId;
-      const defaultStName = resolveStationName(defaultStId);
-
       const payload = {
-        images: selectedFiles.map((item, idx) => {
-          const itemStId = item.stationId === 'all' ? undefined : (item.stationId || defaultStId);
-          const itemStName = resolveStationName(itemStId);
-          return {
-            imageId: item.imageId.trim().toUpperCase() || `IMG-${String(images.length + idx + 1).padStart(3, '0')}`,
-            name: item.imageId.trim().toUpperCase() || `IMG-${String(images.length + idx + 1).padStart(3, '0')}`,
-            base64: item.base64,
-            stationId: itemStId,
-            stationName: itemStName,
-          };
-        }),
-        stationId: defaultStId,
-        stationName: defaultStName,
+        images: selectedFiles.map((item, idx) => ({
+          imageId: item.imageId.trim().toUpperCase() || `IMG-${String(images.length + idx + 1).padStart(3, '0')}`,
+          name: item.imageId.trim().toUpperCase() || `IMG-${String(images.length + idx + 1).padStart(3, '0')}`,
+          base64: item.base64,
+        })),
       };
 
       await uploadImages(payload);
@@ -275,15 +168,12 @@ export const ImagesManager: React.FC = () => {
     if (!imageUrl.trim()) return;
 
     const finalId = (urlImageId.trim() || `IMG-${String(images.length + 1).padStart(3, '0')}`).toUpperCase();
-    const finalStId = urlStationId === 'all' ? undefined : urlStationId;
-    const finalStName = resolveStationName(finalStId);
 
     setIsUploading(true);
     try {
-      await addImage(finalId, imageUrl.trim(), finalStId, finalStName);
+      await addImage(finalId, imageUrl.trim());
       setUrlImageId('');
       setImageUrl('');
-      setUrlStationId('all');
       setShowAddModal(false);
     } catch (err: any) {
       setUploadError(err.message || 'Failed to add image URL.');
@@ -298,57 +188,9 @@ export const ImagesManager: React.FC = () => {
     setEditingImageId(null);
   };
 
-  const handleQuickStationChange = async (imgId: string, newStationId: string) => {
-    const finalStId = newStationId === 'all' ? undefined : newStationId;
-    const finalStName = resolveStationName(finalStId);
-    await updateImage(imgId, {
-      stationId: finalStId,
-      stationName: finalStName,
-    });
-  };
-
   const handleToggleStatus = async (img: EventImage) => {
     const nextStatus = img.status === 'available' ? 'used' : 'available';
     await updateImage(img.id, { status: nextStatus });
-  };
-
-  // Selection handlers for batch reassignment
-  const toggleSelectImage = (id: string) => {
-    setSelectedImageIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const selectAllFiltered = () => {
-    setSelectedImageIds(new Set(filteredImages.map((i) => i.id)));
-  };
-
-  const clearSelection = () => {
-    setSelectedImageIds(new Set());
-  };
-
-  const handleBatchAssignStation = async () => {
-    if (selectedImageIds.size === 0) return;
-    setIsBatchUpdating(true);
-    setBatchMessage(null);
-    try {
-      const targetStId = batchTargetStationId === 'all' ? undefined : batchTargetStationId;
-      const targetStName = resolveStationName(targetStId);
-      const res = await batchUpdateImageStations(Array.from(selectedImageIds), targetStId, targetStName);
-      setBatchMessage(`Successfully assigned ${res.count} images to ${targetStName || 'Universal / All Stations'}`);
-      setSelectedImageIds(new Set());
-      setTimeout(() => setBatchMessage(null), 4000);
-    } catch (err: any) {
-      setBatchMessage(`Error: ${err.message || 'Failed to update images'}`);
-    } finally {
-      setIsBatchUpdating(false);
-    }
   };
 
   const total = images.length;
@@ -362,10 +204,10 @@ export const ImagesManager: React.FC = () => {
         <div>
           <h1 className="text-2xl sm:text-3xl font-black text-white font-['Outfit'] flex items-center gap-3">
             <ImageIcon className="w-7 h-7 text-blue-400" />
-            Image Repository & Station Partitioning
+            Image Repository
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Assign images to specific stations (Station A, B, C, D) so they never repeat across stations, or keep them Universal.
+            Universal image pool for Round 1. All stations share this pool synchronously per heat.
           </p>
         </div>
 
@@ -400,7 +242,6 @@ export const ImagesManager: React.FC = () => {
             onClick={() => {
               setAddMode('url');
               setUrlImageId(`IMG-${String(images.length + 1).padStart(3, '0')}`);
-              setUrlStationId('all');
               setUploadError(null);
               setShowAddModal(true);
             }}
@@ -437,79 +278,6 @@ export const ImagesManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Station Filter Pills Bar */}
-      <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-2xl space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
-            <Layers className="w-4 h-4 text-purple-400" />
-            <span>Filter by Station Pool:</span>
-          </div>
-          <span className="text-[11px] text-slate-400">
-            Images in each station will only appear for that station
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setStationFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              stationFilter === 'all'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-            }`}
-          >
-            <span>All Images</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-white/20 text-[10px] font-mono">
-              {stationCounts.all}
-            </span>
-          </button>
-
-          {allStations.map((st) => {
-            const isSelected = stationFilter === st.id;
-            const count = stationCounts[st.id] || 0;
-            return (
-              <button
-                key={st.id}
-                onClick={() => setStationFilter(st.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                  isSelected
-                    ? 'bg-purple-600 text-white shadow-md'
-                    : 'bg-slate-950 text-purple-300/80 hover:text-purple-200 border border-slate-800'
-                }`}
-              >
-                <MapPin className="w-3 h-3 text-purple-400" />
-                <span>{st.name}</span>
-                <span className="px-1.5 py-0.2 rounded-md bg-purple-900/50 border border-purple-700/50 text-[10px] font-mono text-purple-200">
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-
-          <button
-            onClick={() => setStationFilter('universal')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              stationFilter === 'universal'
-                ? 'bg-slate-700 text-white shadow-md'
-                : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-            }`}
-          >
-            <span>Universal / Shared</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-slate-800 text-[10px] font-mono text-slate-300">
-              {stationCounts.universal}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Batch Message Notification */}
-      {batchMessage && (
-        <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 text-xs font-semibold flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span>{batchMessage}</span>
-        </div>
-      )}
-
       {/* Filter and Search Bar */}
       <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="relative w-full sm:w-80">
@@ -523,90 +291,19 @@ export const ImagesManager: React.FC = () => {
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-xs w-full sm:w-auto justify-between sm:justify-end">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400">Status:</span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg focus:outline-none"
-            >
-              <option value="all">All ({total})</option>
-              <option value="available">Available ({available})</option>
-              <option value="used">Used ({used})</option>
-            </select>
-          </div>
-
-          {filteredImages.length > 0 && (
-            <button
-              onClick={selectedImageIds.size === filteredImages.length ? clearSelection : selectAllFiltered}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold"
-            >
-              {selectedImageIds.size === filteredImages.length ? (
-                <>
-                  <CheckSquare className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Deselect All</span>
-                </>
-              ) : (
-                <>
-                  <Square className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Select All Filtered ({filteredImages.length})</span>
-                </>
-              )}
-            </button>
-          )}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-400">Status:</span>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg focus:outline-none"
+          >
+            <option value="all">All ({total})</option>
+            <option value="available">Available ({available})</option>
+            <option value="used">Used ({used})</option>
+          </select>
         </div>
       </div>
-
-      {/* Bulk Action Sticky Bar when items selected */}
-      {selectedImageIds.size > 0 && (
-        <div className="sticky top-4 z-40 bg-slate-950 border-2 border-purple-500 p-3.5 rounded-2xl shadow-2xl shadow-purple-950/80 flex flex-wrap items-center justify-between gap-4 animate-in slide-in-from-top-2">
-          <div className="flex items-center gap-3">
-            <span className="px-2.5 py-1 rounded-lg bg-purple-500/20 border border-purple-500/40 text-purple-300 font-mono font-bold text-xs">
-              {selectedImageIds.size} Selected
-            </span>
-            <span className="text-xs text-slate-300">
-              Bulk assign station to selected images:
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <select
-              value={batchTargetStationId}
-              onChange={(e) => setBatchTargetStationId(e.target.value)}
-              className="px-3 py-1.5 rounded-xl bg-slate-900 border border-purple-500/60 text-purple-200 text-xs font-bold focus:outline-none"
-            >
-              <option value="all">Universal / All Stations (Shared)</option>
-              {allStations.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.location || 'Station'})
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={handleBatchAssignStation}
-              disabled={isBatchUpdating}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/60 disabled:opacity-50"
-            >
-              {isBatchUpdating ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Check className="w-3.5 h-3.5" />
-              )}
-              <span>Apply to {selectedImageIds.size} Images</span>
-            </button>
-
-            <button
-              onClick={clearSelection}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-              title="Cancel selection"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Images Grid */}
       {filteredImages.length === 0 ? (
@@ -615,9 +312,9 @@ export const ImagesManager: React.FC = () => {
           <div className="space-y-1">
             <h3 className="text-lg font-bold text-white">No Images Found</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              {searchTerm || statusFilter !== 'all' || stationFilter !== 'all'
-                ? 'Try adjusting your search query, status filter, or station filter.'
-                : 'Upload images from your laptop or provide image links and assign each an Image ID and Station.'}
+              {searchTerm || statusFilter !== 'all'
+                ? 'Try adjusting your search query or status filter.'
+                : 'Upload images from your laptop or provide image links and assign each an Image ID.'}
             </p>
           </div>
           <button
@@ -637,17 +334,11 @@ export const ImagesManager: React.FC = () => {
             const isLocalUpload = img.url.startsWith('/uploads/');
             const currentId = img.imageId || img.name || img.id;
             const isEditing = editingImageId === img.id;
-            const isSelected = selectedImageIds.has(img.id);
-            const stationColor = getStationColor(img.stationId);
 
             return (
               <div
                 key={img.id}
-                className={`bg-slate-900/90 border rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between transition-all group ${
-                  isSelected
-                    ? 'border-purple-500 ring-2 ring-purple-500/30'
-                    : 'border-slate-800 hover:border-blue-500/50'
-                }`}
+                className="bg-slate-900/90 border border-slate-800 hover:border-blue-500/50 rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between transition-all group"
               >
                 <div className="relative aspect-video bg-slate-950 overflow-hidden">
                   <img
@@ -660,22 +351,8 @@ export const ImagesManager: React.FC = () => {
                     }}
                   />
 
-                  {/* Multi-select checkbox */}
-                  <button
-                    type="button"
-                    onClick={() => toggleSelectImage(img.id)}
-                    className="absolute top-2 left-2 z-10 p-1.5 rounded-lg bg-slate-950/80 hover:bg-slate-900 text-white backdrop-blur-sm border border-slate-700"
-                    title={isSelected ? 'Deselect image' : 'Select image for batch action'}
-                  >
-                    {isSelected ? (
-                      <CheckSquare className="w-4 h-4 text-purple-400" />
-                    ) : (
-                      <Square className="w-4 h-4 text-slate-400" />
-                    )}
-                  </button>
-
                   {/* Upload Source Badge */}
-                  <div className="absolute top-2 left-10 flex items-center gap-1.5">
+                  <div className="absolute top-2 left-2 flex items-center gap-1.5">
                     {isLocalUpload ? (
                       <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-950/90 text-blue-300 border border-blue-700 flex items-center gap-1 backdrop-blur-sm">
                         <Laptop className="w-2.5 h-2.5" />
@@ -756,31 +433,6 @@ export const ImagesManager: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Assigned Station Badge & Quick Reassign Selector */}
-                  <div className="pt-2 border-t border-slate-800/80">
-                    <div className="flex items-center justify-between gap-1 mb-1">
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold">
-                        <MapPin className="w-3 h-3 text-purple-400" />
-                        Assigned Station:
-                      </span>
-                    </div>
-
-                    <select
-                      value={img.stationId || 'all'}
-                      onChange={(e) => handleQuickStationChange(img.id, e.target.value)}
-                      className={`w-full px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors focus:outline-none ${stationColor.badge}`}
-                    >
-                      <option value="all" className="bg-slate-900 text-slate-200">
-                        Universal / All Stations
-                      </option>
-                      {allStations.map((s) => (
-                        <option key={s.id} value={s.id} className="bg-slate-900 text-white font-semibold">
-                          {s.name} ({s.location || 'Station'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
                   <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
                     <button
                       onClick={() => handleToggleStatus(img)}
@@ -814,7 +466,7 @@ export const ImagesManager: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <h3 className="text-lg font-bold text-white font-['Outfit'] flex items-center gap-2">
                 <ImageIcon className="w-5 h-5 text-blue-400" />
-                Add Images with Custom IDs & Stations
+                Add Images with Custom IDs
               </h3>
               <button
                 onClick={() => {
@@ -850,7 +502,6 @@ export const ImagesManager: React.FC = () => {
                 onClick={() => {
                   setAddMode('url');
                   setUrlImageId(`IMG-${String(images.length + 1).padStart(3, '0')}`);
-                  setUrlStationId('all');
                   setUploadError(null);
                 }}
                 className={`flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
@@ -874,35 +525,6 @@ export const ImagesManager: React.FC = () => {
             {/* LAPTOP UPLOAD MODE */}
             {addMode === 'laptop' && (
               <form onSubmit={handleUploadFromLaptop} className="space-y-4">
-                {/* Station Selection for Batch Upload */}
-                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
-                  <label className="block text-slate-300 font-semibold text-xs mb-1.5 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-purple-400" />
-                    <span>Assign Uploaded Images to Station:</span>
-                  </label>
-                  <select
-                    value={uploadDefaultStationId}
-                    onChange={(e) => {
-                      const newStId = e.target.value;
-                      setUploadDefaultStationId(newStId);
-                      setSelectedFiles((prev) =>
-                        prev.map((f) => ({ ...f, stationId: newStId }))
-                      );
-                    }}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-purple-300 text-xs font-semibold focus:outline-none focus:border-purple-500"
-                  >
-                    <option value="all">Universal / All Stations (Shared across all)</option>
-                    {allStations.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.location || 'Station'}) — Images will NOT repeat on other stations
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Images assigned to a specific station are strictly reserved for that station in Round 1.
-                  </p>
-                </div>
-
                 {/* Hidden File Input */}
                 <input
                   ref={fileInputRef}
@@ -940,12 +562,12 @@ export const ImagesManager: React.FC = () => {
                       Click to browse your laptop or drag & drop images
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Supports JPG, PNG, WEBP, GIF (each image receives an editable Image ID & Station)
+                      Supports JPG, PNG, WEBP, GIF (each image receives an editable Image ID)
                     </p>
                   </div>
                 </div>
 
-                {/* Selected Files List & Previews with Image ID and Station */}
+                {/* Selected Files List & Previews with Image ID */}
                 {selectedFiles.length > 0 && (
                   <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                     <div className="flex items-center justify-between text-xs text-slate-400 font-semibold px-1">
@@ -979,22 +601,6 @@ export const ImagesManager: React.FC = () => {
                               placeholder="e.g. IMG-001"
                               className="w-full text-xs font-mono font-bold text-blue-300 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 focus:outline-none focus:border-blue-500"
                             />
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-400 font-semibold">Station:</span>
-                            <select
-                              value={item.stationId || uploadDefaultStationId}
-                              onChange={(e) => handleUpdateSelectedStationId(item.id, e.target.value)}
-                              className="w-full text-[11px] bg-slate-900 border border-slate-800 text-purple-300 rounded-lg px-2 py-0.5 focus:outline-none"
-                            >
-                              <option value="all">Universal / All</option>
-                              {allStations.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name}
-                                </option>
-                              ))}
-                            </select>
                           </div>
 
                           <span className="text-[10px] text-slate-500 font-mono block truncate">
@@ -1067,27 +673,6 @@ export const ImagesManager: React.FC = () => {
                   </div>
                   <p className="text-[11px] text-slate-500 mt-1">
                     This ID will be randomly assigned to participants and tracked in the Results table.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Assign to Station
-                  </label>
-                  <select
-                    value={urlStationId}
-                    onChange={(e) => setUrlStationId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-purple-300 font-semibold focus:outline-none focus:border-purple-500"
-                  >
-                    <option value="all">Universal / All Stations (No Restriction)</option>
-                    {allStations.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.location || 'Station'})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    If assigned to a specific station, this image will NEVER appear in other stations.
                   </p>
                 </div>
 

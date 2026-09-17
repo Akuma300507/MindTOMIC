@@ -121,9 +121,9 @@ export const excelService = {
   // Download topic template
   downloadTopicTemplate() {
     const sample = [
-      { 'Topic ID': 'TOP-001', 'Topic': 'Is Artificial Intelligence empowering or replacing human creativity?', 'Category': 'Technology', 'Station': 'Station A' },
-      { 'Topic ID': 'TOP-002', 'Topic': 'The Vanishing Art of Deep Conversation', 'Category': 'Culture', 'Station': 'Station B' },
-      { 'Topic ID': 'TOP-003', 'Topic': 'Why True Courage Requires Vulnerability', 'Category': 'Philosophy', 'Station': 'Universal' },
+      { 'Topic ID': 'TOP-001', 'Topic': 'Is Artificial Intelligence empowering or replacing human creativity?', 'Category': 'Technology' },
+      { 'Topic ID': 'TOP-002', 'Topic': 'The Vanishing Art of Deep Conversation', 'Category': 'Culture' },
+      { 'Topic ID': 'TOP-003', 'Topic': 'Why True Courage Requires Vulnerability', 'Category': 'Philosophy' },
     ];
     const ws = XLSX.utils.json_to_sheet(sample);
     const wb = XLSX.utils.book_new();
@@ -132,7 +132,7 @@ export const excelService = {
   },
 
   // Parse topics file
-  async parseTopicsFile(file: File): Promise<{ topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[]> {
+  async parseTopicsFile(file: File): Promise<{ topic: string; category?: string; topicId?: string }[]> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -144,40 +144,11 @@ export const excelService = {
           const rawRows: any[] = XLSX.utils.sheet_to_json(worksheet);
 
           const topics = rawRows
-            .map((row) => {
-              const rawStation = row['Station'] || row['Station Name'] || row['Station ID'] || row['station'] || row['stationId'] || '';
-              let stationId: string | undefined;
-              let stationName: string | undefined;
-
-              if (rawStation) {
-                const sStr = String(rawStation).trim();
-                const lower = sStr.toLowerCase();
-                if (lower.includes('station a') || lower === 'a' || lower === 'station-a') {
-                  stationId = 'station-a';
-                  stationName = 'Station A';
-                } else if (lower.includes('station b') || lower === 'b' || lower === 'station-b') {
-                  stationId = 'station-b';
-                  stationName = 'Station B';
-                } else if (lower.includes('station c') || lower === 'c' || lower === 'station-c') {
-                  stationId = 'station-c';
-                  stationName = 'Station C';
-                } else if (lower.includes('station d') || lower === 'd' || lower === 'station-d') {
-                  stationId = 'station-d';
-                  stationName = 'Station D';
-                } else if (lower !== 'all' && !lower.includes('universal')) {
-                  stationId = lower.replace(/[^a-z0-9]/g, '-');
-                  stationName = sStr;
-                }
-              }
-
-              return {
-                topicId: row['Topic ID'] || row['Topic Id'] || row['ID'] || row['topicId'] ? String(row['Topic ID'] || row['Topic Id'] || row['ID'] || row['topicId']).trim() : undefined,
-                topic: String(row['Topic'] || row['topic'] || row['Title'] || '').trim(),
-                category: String(row['Category'] || row['category'] || 'General').trim(),
-                stationId,
-                stationName,
-              };
-            })
+            .map((row) => ({
+              topicId: row['Topic ID'] || row['Topic Id'] || row['ID'] || row['topicId'] ? String(row['Topic ID'] || row['Topic Id'] || row['ID'] || row['topicId']).trim() : undefined,
+              topic: String(row['Topic'] || row['topic'] || row['Title'] || '').trim(),
+              category: String(row['Category'] || row['category'] || 'General').trim(),
+            }))
             .filter((t) => t.topic.length > 0);
 
           resolve(topics);

@@ -446,6 +446,20 @@ try {
       );
     }
 
+    // Strip stationId and stationName from images and topics so all media is universal
+    if (Array.isArray(db.images)) {
+      db.images.forEach((img: any) => {
+        delete img.stationId;
+        delete img.stationName;
+      });
+    }
+    if (Array.isArray(db.topics)) {
+      db.topics.forEach((t: any) => {
+        delete t.stationId;
+        delete t.stationName;
+      });
+    }
+
     // Ensure warning buzzer defaults exist on loaded db settings
     if (db.settings) {
       ['round1', 'round2', 'round3'].forEach((rnd) => {
@@ -495,9 +509,17 @@ async function initMongo() {
       }
       if (Array.isArray(db.topics)) {
         db.topics = db.topics.filter((t) => !LEGACY_DEFAULT_IDS.has(t.id));
+        db.topics.forEach((t: any) => {
+          delete t.stationId;
+          delete t.stationName;
+        });
       }
       if (Array.isArray(db.images)) {
         db.images = db.images.filter((img) => !LEGACY_DEFAULT_IDS.has(img.id));
+        db.images.forEach((img: any) => {
+          delete img.stationId;
+          delete img.stationName;
+        });
       }
       persistDBSync();
       console.log('[mongodb] Loaded and synchronized cloud state from MongoDB Atlas');
@@ -1210,34 +1232,13 @@ app.post('/api/timer/action', (req: Request, res: Response) => {
   res.json({ success: true, liveSync: db.liveSync, serverTime: now });
 });
 
-// Atomic Round 1 Image Assignment (No-repeat across devices/stations)
+// Atomic Round 1 Image Assignment (Universal pool across all stations)
 app.post('/api/round1/assign-image', (req: Request, res: Response) => {
-  const { participantId, participantName, stationId } = req.body;
+  const { participantId, participantName } = req.body;
 
-  // Filter available images (respecting station-specific images if stationId is provided)
-  let candidates: EventImage[] = [];
-  if (stationId && stationId !== 'all') {
-    const stationCandidates = db.images.filter(
-      (img) => img.stationId === stationId || img.stationId === resolveStationName(stationId)
-    );
-    if (stationCandidates.length > 0) {
-      candidates = stationCandidates.filter((img) => img.status === 'available');
-      if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
-        candidates = stationCandidates;
-      }
-    }
-  }
-
-  if (candidates.length === 0) {
-    // Exclude images explicitly assigned to other stations!
-    const otherStationImages = db.images.filter(
-      (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stationId
-    );
-    const availablePool = db.images.filter((img) => !otherStationImages.includes(img));
-    candidates = availablePool.filter((img) => img.status === 'available');
-    if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
-      candidates = availablePool.length > 0 ? availablePool : db.images;
-    }
+  let candidates = db.images.filter((img) => img.status === 'available');
+  if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+    candidates = db.images;
   }
 
   if (candidates.length === 0) {
@@ -1245,7 +1246,7 @@ app.post('/api/round1/assign-image', (req: Request, res: Response) => {
       candidates = db.images;
     } else {
       return res.status(409).json({
-        error: 'No unused images left in the pool for this station. Reset image pool or allow image reuse in settings.',
+        error: 'No unused images left in the pool. Reset image pool or allow image reuse in settings.',
       });
     }
   }
@@ -1285,31 +1286,14 @@ app.post('/api/round1/assign-image', (req: Request, res: Response) => {
   res.json({ success: true, image: chosen, liveSync: db.liveSync });
 });
 
-// Atomic Round 2 Topic Spin (synchronized spin across devices & projector)
+// Atomic Round 2 Topic Spin (Universal topic pool across devices & projector)
 app.post('/api/round2/spin-topic', (req: Request, res: Response) => {
-  const { participantId, participantName, stationId, wheelTopicIds } = req.body;
+  const { participantId, participantName, wheelTopicIds } = req.body;
 
-  // Pool of available topics strictly isolated for station if specified
-  let pool: Topic[] = [];
-  if (stationId && stationId !== 'all') {
-    const stationCandidates = db.topics.filter((t) => t.stationId === stationId);
-    if (stationCandidates.length > 0) {
-      pool = stationCandidates.filter((t) => t.status === 'available');
-      if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
-        pool = stationCandidates;
-      }
-    }
-  }
-
-  if (pool.length === 0) {
-    const otherStationTopics = stationId && stationId !== 'all'
-      ? db.topics.filter((t) => t.stationId && t.stationId !== 'all' && t.stationId !== stationId)
-      : [];
-    const availablePool = db.topics.filter((t) => !otherStationTopics.includes(t));
-    pool = availablePool.filter((t) => t.status === 'available');
-    if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
-      pool = availablePool.length > 0 ? availablePool : db.topics;
-    }
+  // Pool of available topics from universal pool
+  let pool = db.topics.filter((t) => t.status === 'available');
+  if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
+    pool = db.topics;
   }
 
   if (pool.length === 0) {
@@ -1798,35 +1782,18 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
   }
 
   if (!chosen) {
-    // Filter available images strictly for THIS station to prevent repeating across stations
-    const stationId = station.id;
-    const stationCandidates = db.images.filter(
-      (img) => img.stationId === stationId || img.stationId === station.name
-    );
-
-    let candidates: EventImage[] = [];
-    if (stationCandidates.length > 0) {
-      candidates = stationCandidates.filter((img) => img.status === 'available');
-      if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
-        candidates = stationCandidates;
-      }
-    } else {
-      const otherStationImages = db.images.filter(
-        (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stationId && img.stationId !== station.name
-      );
-      const availablePool = db.images.filter((img) => !otherStationImages.includes(img));
-      candidates = availablePool.filter((img) => img.status === 'available');
-      if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
-        candidates = availablePool.length > 0 ? availablePool : db.images;
-      }
+    const availablePool = db.images.filter((img) => img.status === 'available');
+    let candidates: EventImage[] = availablePool;
+    if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+      candidates = db.images;
     }
 
     if (candidates.length === 0) {
       if (db.settings.round1.allowImageReuse && db.images.length > 0) {
-        candidates = stationCandidates.length > 0 ? stationCandidates : db.images;
+        candidates = db.images;
       } else {
         return res.status(409).json({
-          error: `No unused images available for ${station.name}. Please upload images or allow image reuse in settings.`,
+          error: `No unused images available in universal pool. Please upload images or allow image reuse in settings.`,
         });
       }
     }
@@ -1927,42 +1894,18 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
 
   const isSynchronized = db.settings.round2.synchronizedSlots !== false;
 
-  // Filter available topics strictly for THIS station to prevent repeating across stations
-  const stationId = station.id;
-  const otherStationTopics = db.topics.filter(
-    (t) => t.stationId && t.stationId !== 'all' && t.stationId !== stationId && t.stationId !== station.name
-  );
-  const stationCandidates = db.topics.filter(
-    (t) => t.stationId === stationId || t.stationId === station.name
-  );
-
   const assignedTopicIds = new Set<string>(Object.values(db.synchronizedSlots?.round2 || {}));
 
-  let pool: Topic[] = [];
-  if (stationCandidates.length > 0) {
-    pool = stationCandidates.filter((t) => t.status === 'available');
-    if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
-      pool = stationCandidates;
-    }
-  } else {
-    // Unassigned or universal topics, strictly excluding other stations' topics and (in synchronized mode) topics assigned to other slots
-    const availablePool = db.topics.filter(
-      (t) => !otherStationTopics.includes(t) &&
-             (!isSynchronized || !assignedTopicIds.has(t.id) || db.synchronizedSlots?.round2[slotIndex] === t.id)
-    );
-    pool = availablePool.filter((t) => t.status === 'available');
-    if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
-      pool = availablePool.length > 0 ? availablePool : db.topics;
-    }
+  // Universal topics pool, excluding topics assigned to other synchronized slots
+  const availablePool = db.topics.filter(
+    (t) => !isSynchronized || !assignedTopicIds.has(t.id) || db.synchronizedSlots?.round2[slotIndex] === t.id
+  );
+  let pool: Topic[] = availablePool.filter((t) => t.status === 'available');
+  if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
+    pool = availablePool.length > 0 ? availablePool : db.topics;
   }
-
   if (pool.length === 0) {
-    if (db.settings.round2.topicReuseAllowed && db.topics.length > 0) {
-      pool = stationCandidates.length > 0 ? stationCandidates : db.topics;
-    } else {
-      pool = db.topics.filter((t) => !otherStationTopics.includes(t));
-      if (pool.length === 0) pool = db.topics;
-    }
+    pool = db.topics;
   }
 
   // Ensure candidates are selected from the active wheel slices (preserving wheel order)
@@ -2967,25 +2910,20 @@ app.get('/api/topics', (req: Request, res: Response) => {
 });
 
 app.post('/api/topics', (req: Request, res: Response) => {
-  const { topic, category, topicId, stationId, stationName } = req.body;
+  const { topic, category, topicId } = req.body;
   if (!topic) return res.status(400).json({ error: 'Topic text is required' });
-
-  const finalStId = !stationId || stationId === 'all' || stationId === 'universal' ? undefined : stationId;
-  const finalStName = finalStId ? (stationName || resolveStationName(finalStId)) : undefined;
 
   const newTopic: Topic = {
     id: `top-${Date.now()}`,
     topicId: topicId?.trim() || `TOP-${String(db.topics.length + 1).padStart(3, '0')}`,
     topic: topic.trim(),
     category: category?.trim() || 'General',
-    stationId: finalStId,
-    stationName: finalStName,
     status: 'available',
   };
 
   db.topics.push(newTopic);
   persistDB();
-  logAction('Topic Created', `Added topic [${newTopic.topicId}]: "${newTopic.topic.substring(0, 40)}..." (${newTopic.stationName || 'Universal'})`);
+  logAction('Topic Created', `Added topic [${newTopic.topicId}]: "${newTopic.topic.substring(0, 40)}..."`);
   broadcastSSE('topics_updated', db.topics);
   res.json(newTopic);
 });
@@ -2995,57 +2933,23 @@ app.put('/api/topics/:id', (req: Request, res: Response) => {
   const idx = db.topics.findIndex((t) => t.id === id);
   if (idx === -1) return res.status(404).json({ error: 'Topic not found' });
 
-  const bodyStationId = req.body.stationId;
-  let finalStId = db.topics[idx].stationId;
-  let finalStName = db.topics[idx].stationName;
+  const { topic, category, topicId, status } = req.body;
+  if (topic !== undefined) db.topics[idx].topic = topic.trim();
+  if (category !== undefined) db.topics[idx].category = category.trim();
+  if (topicId !== undefined) db.topics[idx].topicId = topicId.trim();
+  if (status !== undefined) db.topics[idx].status = status;
 
-  if (bodyStationId !== undefined) {
-    if (!bodyStationId || bodyStationId === 'all' || bodyStationId === 'universal') {
-      finalStId = undefined;
-      finalStName = undefined;
-    } else {
-      finalStId = bodyStationId;
-      finalStName = req.body.stationName || resolveStationName(bodyStationId);
-    }
-  }
-
-  db.topics[idx] = {
-    ...db.topics[idx],
-    ...req.body,
-    stationId: finalStId,
-    stationName: finalStName,
-    id: db.topics[idx].id,
-  };
+  delete (db.topics[idx] as any).stationId;
+  delete (db.topics[idx] as any).stationName;
 
   persistDB();
   broadcastSSE('topics_updated', db.topics);
   res.json(db.topics[idx]);
 });
 
-// Bulk update topic stations
+// Bulk update topic stations (kept as no-op for backward compatibility)
 app.post('/api/topics/batch-station', (req: Request, res: Response) => {
-  const { topicIds, stationId, stationName } = req.body;
-  if (!Array.isArray(topicIds)) {
-    return res.status(400).json({ error: 'topicIds array is required' });
-  }
-
-  const targetStationId = !stationId || stationId === 'all' || stationId === 'universal' ? undefined : stationId;
-  const targetStationName = targetStationId ? (stationName || resolveStationName(targetStationId)) : undefined;
-
-  const updated: Topic[] = [];
-  topicIds.forEach((id) => {
-    const t = db.topics.find((item) => item.id === id);
-    if (t) {
-      t.stationId = targetStationId;
-      t.stationName = targetStationName;
-      updated.push(t);
-    }
-  });
-
-  persistDB();
-  logAction('Batch Topic Station Assignment', `Assigned ${updated.length} topics to ${targetStationName || 'Universal / All Stations'}`);
-  broadcastSSE('topics_updated', db.topics);
-  res.json({ success: true, count: updated.length, topics: updated, allTopics: db.topics });
+  res.json({ success: true, count: 0, topics: [], allTopics: db.topics });
 });
 
 app.delete('/api/topics/:id', (req: Request, res: Response) => {
@@ -3057,25 +2961,18 @@ app.delete('/api/topics/:id', (req: Request, res: Response) => {
 });
 
 app.post('/api/topics/batch', (req: Request, res: Response) => {
-  const items: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[] = req.body.topics || [];
-  const defaultStationId = req.body.stationId === 'all' || !req.body.stationId ? undefined : req.body.stationId;
-  const defaultStationName = defaultStationId ? (req.body.stationName || resolveStationName(defaultStationId)) : undefined;
-
+  const items: { topic: string; category?: string; topicId?: string }[] = req.body.topics || [];
   const added: Topic[] = [];
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (!item.topic) continue;
-    const stId = item.stationId === 'all' ? undefined : (item.stationId || defaultStationId);
-    const stName = stId ? (item.stationName || resolveStationName(stId)) : undefined;
 
     const t: Topic = {
       id: `top-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       topicId: item.topicId?.trim() || `TOP-${String(db.topics.length + i + 1).padStart(3, '0')}`,
       topic: item.topic.trim(),
       category: item.category?.trim() || 'General',
-      stationId: stId,
-      stationName: stName,
       status: 'available',
     };
     db.topics.push(t);
@@ -3083,7 +2980,7 @@ app.post('/api/topics/batch', (req: Request, res: Response) => {
   }
 
   persistDB();
-  logAction('Batch Topics Import', `Imported ${added.length} topics into topic repository`);
+  logAction('Batch Topics Import', `Imported ${added.length} topics into universal repository`);
   broadcastSSE('topics_updated', db.topics);
   res.json({ success: true, count: added.length, topics: added });
 });
@@ -3113,26 +3010,22 @@ app.get('/api/images', (req: Request, res: Response) => {
 });
 
 app.post('/api/images', (req: Request, res: Response) => {
-  const { name, url, imageId, stationId, stationName } = req.body;
+  const { name, url, imageId } = req.body;
   if (!url) return res.status(400).json({ error: 'Image URL is required' });
 
   const finalImageId = (imageId?.trim() || name?.trim() || `IMG-${String(db.images.length + 1).padStart(3, '0')}`).toUpperCase();
-  const assignedStationId = stationId && stationId !== 'all' ? stationId : undefined;
-  const assignedStationName = stationName || resolveStationName(assignedStationId);
 
   const newImg: EventImage = {
     id: `img-${Date.now()}`,
     imageId: finalImageId,
     name: finalImageId,
     url: url.trim(),
-    stationId: assignedStationId,
-    stationName: assignedStationName,
     status: 'available',
   };
 
   db.images.push(newImg);
   persistDB();
-  logAction('Image Added', `Added image with ID: "${newImg.imageId}"${assignedStationName ? ' for ' + assignedStationName : ''}`);
+  logAction('Image Added', `Added image with ID: "${newImg.imageId}"`);
   broadcastSSE('images_updated', db.images);
   res.json(newImg);
 });
@@ -3142,7 +3035,7 @@ app.put('/api/images/:id', (req: Request, res: Response) => {
   const img = db.images.find((i) => i.id === id);
   if (!img) return res.status(404).json({ error: 'Image not found' });
 
-  const { imageId, name, status, url, stationId, stationName } = req.body;
+  const { imageId, name, status, url } = req.body;
   if (imageId !== undefined) {
     img.imageId = imageId.trim().toUpperCase();
     img.name = img.imageId;
@@ -3153,52 +3046,31 @@ app.put('/api/images/:id', (req: Request, res: Response) => {
   }
   if (status !== undefined) img.status = status;
   if (url !== undefined) img.url = url.trim();
-  if (stationId !== undefined) {
-    img.stationId = stationId && stationId !== 'all' ? stationId : undefined;
-    img.stationName = stationName || resolveStationName(img.stationId);
-  }
+
+  delete (img as any).stationId;
+  delete (img as any).stationName;
 
   persistDB();
-  logAction('Image Updated', `Updated image ID "${img.imageId}" (${img.stationName || 'All Stations'})`);
+  logAction('Image Updated', `Updated image ID "${img.imageId}"`);
   broadcastSSE('images_updated', db.images);
   res.json(img);
 });
 
-// Batch update image stations
+// Batch update image stations (kept as no-op for backward compatibility)
 app.post('/api/images/batch-station', (req: Request, res: Response) => {
-  const { imageIds, stationId, stationName } = req.body;
-  if (!Array.isArray(imageIds) || imageIds.length === 0) {
-    return res.status(400).json({ error: 'imageIds array is required' });
-  }
-
-  const assignedStationId = stationId && stationId !== 'all' ? stationId : undefined;
-  const assignedStationName = stationName || resolveStationName(assignedStationId);
-
-  const updated: EventImage[] = [];
-  db.images.forEach((img) => {
-    if (imageIds.includes(img.id)) {
-      img.stationId = assignedStationId;
-      img.stationName = assignedStationName;
-      updated.push(img);
-    }
-  });
-
-  persistDB();
-  logAction('Images Reassigned', `Assigned ${updated.length} image(s) to ${assignedStationName || 'All Stations'}`);
-  broadcastSSE('images_updated', db.images);
-  res.json({ success: true, count: updated.length, images: updated, allImages: db.images });
+  res.json({ success: true, count: 0, images: [], allImages: db.images });
 });
 
 // Laptop Image Upload Endpoint (Saves to persistent online uploads directory or Cloudinary)
 app.post('/api/images/upload', async (req: Request, res: Response) => {
   try {
-    const { images, name, base64, imageId, stationId, stationName } = req.body;
-    const itemsToProcess: Array<{ name?: string; imageId?: string; base64: string; stationId?: string; stationName?: string }> = [];
+    const { images, name, base64, imageId } = req.body;
+    const itemsToProcess: Array<{ name?: string; imageId?: string; base64: string }> = [];
 
     if (Array.isArray(images)) {
       itemsToProcess.push(...images);
     } else if (base64) {
-      itemsToProcess.push({ name: name || 'Uploaded Image', imageId, base64, stationId, stationName });
+      itemsToProcess.push({ name: name || 'Uploaded Image', imageId, base64 });
     }
 
     if (itemsToProcess.length === 0) {
@@ -3251,17 +3123,12 @@ app.post('/api/images/upload', async (req: Request, res: Response) => {
         fs.writeFileSync(filePath, buffer);
       }
 
-      const itemStationId = (item.stationId && item.stationId !== 'all') ? item.stationId : (stationId && stationId !== 'all' ? stationId : undefined);
-      const itemStationName = item.stationName || stationName || resolveStationName(itemStationId);
-
       const assignedId = (item.imageId?.trim() || `IMG-${String(db.images.length + 1).padStart(3, '0')}`).toUpperCase();
       const newImg: EventImage = {
         id: `img-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         imageId: assignedId,
         name: assignedId,
         url: imageUrl,
-        stationId: itemStationId,
-        stationName: itemStationName,
         status: 'available',
       };
 
@@ -3270,7 +3137,7 @@ app.post('/api/images/upload', async (req: Request, res: Response) => {
     }
 
     persistDB();
-    logAction('Images Uploaded', `Uploaded ${createdImages.length} image(s) with assigned IDs to repository.`);
+    logAction('Images Uploaded', `Uploaded ${createdImages.length} image(s) with assigned IDs to universal repository.`);
     broadcastSSE('images_updated', db.images);
 
     res.json({
