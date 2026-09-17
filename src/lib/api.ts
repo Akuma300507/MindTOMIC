@@ -149,11 +149,11 @@ export const api = {
     return res.json();
   },
 
-  async assignStationImage(id: string, participantId?: string, participantName?: string): Promise<{ success: boolean; image: EventImage; station: StationState }> {
+  async assignStationImage(id: string, participantId?: string, participantName?: string, slotIndex?: number): Promise<{ success: boolean; image: EventImage; station: StationState; slotIndex?: number }> {
     const res = await fetch(`/api/stations/${id}/assign-image`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participantId, participantName }),
+      body: JSON.stringify({ participantId, participantName, slotIndex }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -175,16 +175,42 @@ export const api = {
     return res.json();
   },
 
-  async spinStationTopic(id: string, participantId?: string, participantName?: string, wheelTopicIds?: string[]): Promise<{ success: boolean; topic: Topic; startedAt: number; durationMs: number; station: StationState }> {
+  async spinStationTopic(id: string, participantId?: string, participantName?: string, wheelTopicIds?: string[], slotIndex?: number): Promise<{ success: boolean; topic: Topic; targetIndex?: number; wheelTopics?: Topic[]; startedAt: number; durationMs: number; station: StationState; slotIndex?: number }> {
     const res = await fetch(`/api/stations/${id}/spin-topic`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participantId, participantName, wheelTopicIds }),
+      body: JSON.stringify({ participantId, participantName, wheelTopicIds, slotIndex }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to spin topic');
     }
+    return res.json();
+  },
+
+  async getSynchronizedSlots(): Promise<{ success: boolean; synchronizedSlots: { round1: Record<number, string>; round2: Record<number, string> } }> {
+    const res = await fetch('/api/slots');
+    if (!res.ok) throw new Error('Failed to fetch synchronized slots');
+    return res.json();
+  },
+
+  async resetSynchronizedSlots(round?: 'round1' | 'round2' | 'all'): Promise<{ success: boolean; synchronizedSlots: { round1: Record<number, string>; round2: Record<number, string> } }> {
+    const res = await fetch('/api/slots/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ round }),
+    });
+    if (!res.ok) throw new Error('Failed to reset synchronized slots');
+    return res.json();
+  },
+
+  async pregenerateSynchronizedSlots(count?: number, round?: 'round1' | 'round2' | 'all'): Promise<{ success: boolean; synchronizedSlots: { round1: Record<number, string>; round2: Record<number, string> } }> {
+    const res = await fetch('/api/slots/pregenerate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count, round }),
+    });
+    if (!res.ok) throw new Error('Failed to pre-generate synchronized slots');
     return res.json();
   },
 

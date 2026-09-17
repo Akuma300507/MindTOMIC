@@ -78,6 +78,7 @@ const defaultSettings: EventSettings = {
     allowImageReuse: false,
     warningBuzzerEnabled: true,
     warningTimeSeconds: 30,
+    synchronizedSlots: true,
   },
   round2: {
     prepEnabled: false, // Round 2 starts speaking immediately
@@ -89,6 +90,7 @@ const defaultSettings: EventSettings = {
     topicReuseAllowed: false,
     warningBuzzerEnabled: true,
     warningTimeSeconds: 30,
+    synchronizedSlots: true,
   },
   round3: {
     prepEnabled: false,
@@ -218,6 +220,10 @@ function getInitialDatabase(): AppDatabase {
     settings: defaultSettings,
     history: defaultHistory,
     stations,
+    synchronizedSlots: {
+      round1: {},
+      round2: {},
+    },
     liveSync: {
       currentRound: 1,
       activeParticipantId: null,
@@ -339,6 +345,19 @@ try {
     if (!Array.isArray(db.history)) db.history = [];
     else db.history = db.history.filter((h) => !h.participantId || !LEGACY_DEFAULT_IDS.has(h.participantId));
     if (!db.stations) db.stations = {};
+
+    if (!db.synchronizedSlots) {
+      db.synchronizedSlots = { round1: {}, round2: {} };
+    } else {
+      if (!db.synchronizedSlots.round1) db.synchronizedSlots.round1 = {};
+      if (!db.synchronizedSlots.round2) db.synchronizedSlots.round2 = {};
+    }
+    if (db.settings.round1.synchronizedSlots === undefined) {
+      db.settings.round1.synchronizedSlots = true;
+    }
+    if (db.settings.round2.synchronizedSlots === undefined) {
+      db.settings.round2.synchronizedSlots = true;
+    }
 
     // Ensure all configured stations have station states
     (db.settings.stations || []).forEach((s) => {
@@ -1652,56 +1671,171 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
   res.json({ success: true, station });
 });
 
-// Atomic Round 1 Image Assignment for Station (Global Uniqueness)
+/**
+ * Synchronized Slot Resolution Helper
+ * Resolves or creates a deterministic slot item for Round 1 (Image) or Round 2 (Topic)
+ * ensuring all stations get the identical item for slotIndex, while preventing
+ * duplicates across different slots even when stations progress at different speeds.
+ */
+function getOrAssignSlotItem(
+  round: 'round1' | 'round2',
+  slotIndex: number,
+  stationId?: string,
+  preferredCandidateIds?: string[]
+): { item: EventImage | Topic | null; isNew: boolean } {
+  if (!db.synchronizedSlots) {
+    db.synchronizedSlots = { round1: {}, round2: {} };
+  }
+  if (!db.synchronizedSlots[round]) {
+    db.synchronizedSlots[round] = {};
+  }
+
+  // 1. Check if slot already has an item assigned
+  const existingId = db.synchronizedSlots[round][slotIndex];
+  if (existingId) {
+    if (round === 'round1') {
+      const img = db.images.find((i) => i.id === existingId || i.imageId === existingId);
+      if (img) return { item: img, isNew: false };
+    } else {
+      const top = db.topics.find((t) => t.id === existingId || t.topicId === existingId);
+      if (top) return { item: top, isNew: false };
+    }
+  }
+
+  // 2. Not assigned yet -> First station reaching this slot!
+  // Collect all item IDs already assigned across ANY slot in this round to prevent cross-slot repetition
+  const assignedSlotIds = new Set<string>();
+  Object.entries(db.synchronizedSlots[round]).forEach(([k, id]) => {
+    if (Number(k) !== slotIndex && id) {
+      assignedSlotIds.add(id);
+    }
+  });
+
+  if (round === 'round1') {
+    // Candidates not assigned to any other slot
+    const candidates = db.images.filter(
+      (img) => !assignedSlotIds.has(img.id) && !assignedSlotIds.has(img.imageId || '')
+    );
+    let pool = candidates.filter((i) => i.status === 'available');
+    if (pool.length === 0) {
+      pool = candidates.length > 0 ? candidates : db.images.filter((img) => !assignedSlotIds.has(img.id));
+    }
+    if (pool.length === 0) {
+      pool = db.images;
+    }
+    if (pool.length === 0) return { item: null, isNew: false };
+
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    db.synchronizedSlots.round1[slotIndex] = chosen.id;
+    persistDB();
+    return { item: chosen, isNew: true };
+  } else {
+    // Round 2 Topics
+    const candidates = db.topics.filter(
+      (t) => !assignedSlotIds.has(t.id) && !assignedSlotIds.has(t.topicId || '')
+    );
+    let pool = candidates.filter((t) => t.status === 'available');
+    if (pool.length === 0) {
+      pool = candidates.length > 0 ? candidates : db.topics.filter((t) => !assignedSlotIds.has(t.id));
+    }
+    if (pool.length === 0) {
+      pool = db.topics;
+    }
+    if (pool.length === 0) return { item: null, isNew: false };
+
+    let chosen: Topic;
+    if (Array.isArray(preferredCandidateIds) && preferredCandidateIds.length > 0) {
+      const wheelCandidates = pool.filter((t) => preferredCandidateIds.includes(t.id));
+      if (wheelCandidates.length > 0) {
+        chosen = wheelCandidates[Math.floor(Math.random() * wheelCandidates.length)];
+      } else {
+        chosen = pool[Math.floor(Math.random() * pool.length)];
+      }
+    } else {
+      chosen = pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    db.synchronizedSlots.round2[slotIndex] = chosen.id;
+    persistDB();
+    return { item: chosen, isNew: true };
+  }
+}
+
+// Atomic Round 1 Image Assignment for Station (Supports Synchronized Heat Slots)
 app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
-  const { participantId, participantName } = req.body;
+  const { participantId, participantName, slotIndex: reqSlotIndex } = req.body;
 
   if (participantId) {
     station.activeParticipantId = participantId;
     station.activeParticipant = db.participants.find((p) => p.id === participantId) || station.activeParticipant;
   }
 
-  // Filter available images strictly for THIS station to prevent repeating across stations
-  const stationId = station.id;
-  const stationCandidates = db.images.filter(
-    (img) => img.stationId === stationId || img.stationId === station.name
-  );
+  const targetParticipant = station.activeParticipant || (participantId ? db.participants.find((p) => p.id === participantId) : null);
 
-  let candidates: EventImage[] = [];
-  if (stationCandidates.length > 0) {
-    candidates = stationCandidates.filter((img) => img.status === 'available');
-    if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
-      candidates = stationCandidates;
-    }
-  } else {
-    // If no images are assigned specifically to this station, use unassigned or all-station images
-    // Strictly exclude images that belong to other stations!
-    const otherStationImages = db.images.filter(
-      (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stationId && img.stationId !== station.name
+  // Determine slot index
+  let slotIndex = typeof reqSlotIndex === 'number' && reqSlotIndex >= 0 ? reqSlotIndex : -1;
+  if (slotIndex === -1 && targetParticipant) {
+    const stParticipants = db.participants.filter(
+      (p) => p.stationId === station.id || p.round1StationId === station.id
     );
-    const availablePool = db.images.filter((img) => !otherStationImages.includes(img));
-    candidates = availablePool.filter((img) => img.status === 'available');
-    if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
-      candidates = availablePool.length > 0 ? availablePool : db.images;
-    }
+    slotIndex = stParticipants.findIndex((p) => p.id === targetParticipant.id);
+  }
+  if (slotIndex === -1) {
+    slotIndex = db.round1Results.filter((r) => {
+      const p = db.participants.find((item) => item.id === r.participantId);
+      return p?.stationId === station.id || p?.round1StationId === station.id;
+    }).length;
+  }
+  if (slotIndex === -1) slotIndex = 0;
+
+  const isSynchronized = db.settings.round1.synchronizedSlots !== false;
+  let chosen: EventImage | null = null;
+
+  if (isSynchronized) {
+    const slotRes = getOrAssignSlotItem('round1', slotIndex, station.id);
+    chosen = slotRes.item as EventImage | null;
   }
 
-  if (candidates.length === 0) {
-    if (db.settings.round1.allowImageReuse && db.images.length > 0) {
-      candidates = stationCandidates.length > 0 ? stationCandidates : db.images;
+  if (!chosen) {
+    // Filter available images strictly for THIS station to prevent repeating across stations
+    const stationId = station.id;
+    const stationCandidates = db.images.filter(
+      (img) => img.stationId === stationId || img.stationId === station.name
+    );
+
+    let candidates: EventImage[] = [];
+    if (stationCandidates.length > 0) {
+      candidates = stationCandidates.filter((img) => img.status === 'available');
+      if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+        candidates = stationCandidates;
+      }
     } else {
-      return res.status(409).json({
-        error: `No unused images available for ${station.name}. Please upload images assigned to ${station.name} or allow image reuse in settings.`,
-      });
+      const otherStationImages = db.images.filter(
+        (img) => img.stationId && img.stationId !== 'all' && img.stationId !== stationId && img.stationId !== station.name
+      );
+      const availablePool = db.images.filter((img) => !otherStationImages.includes(img));
+      candidates = availablePool.filter((img) => img.status === 'available');
+      if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
+        candidates = availablePool.length > 0 ? availablePool : db.images;
+      }
     }
+
+    if (candidates.length === 0) {
+      if (db.settings.round1.allowImageReuse && db.images.length > 0) {
+        candidates = stationCandidates.length > 0 ? stationCandidates : db.images;
+      } else {
+        return res.status(409).json({
+          error: `No unused images available for ${station.name}. Please upload images or allow image reuse in settings.`,
+        });
+      }
+    }
+
+    chosen = candidates[Math.floor(Math.random() * candidates.length)];
   }
 
-  // Random selection
-  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-
-  // Mark as used globally
-  if (!db.settings.round1.allowImageReuse) {
+  // Mark as used globally if NOT in synchronized slots mode (synchronized slots are shared across stations for that slot)
+  if (!db.settings.round1.allowImageReuse && !isSynchronized) {
     chosen.status = 'used';
     chosen.usedByParticipantId = station.activeParticipantId || undefined;
     chosen.usedByParticipantName = participantName || station.activeParticipant?.name || undefined;
@@ -1717,6 +1851,7 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
     const p = db.participants.find((item) => item.id === station.activeParticipantId);
     if (p) {
       p.round1ImageId = chosen.imageId || chosen.name || chosen.id;
+      p.slotIndex = slotIndex;
     }
   }
 
@@ -1738,12 +1873,12 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
   station.timerEndsAt = null;
 
   persistDB();
-  logAction('Image Assigned', `Assigned image "${chosen.name}" at ${station.name} to contestant ${participantName || station.activeParticipant?.name || 'Contestant'}`);
+  logAction('Image Assigned', `Assigned image "${chosen.name}" at ${station.name} (Heat Slot ${slotIndex + 1}) to contestant ${participantName || station.activeParticipant?.name || 'Contestant'}`);
 
   broadcastSSE('images_updated', db.images);
   broadcastStationUpdate(station.id, 'station_updated', station);
 
-  res.json({ success: true, image: chosen, station });
+  res.json({ success: true, image: chosen, station, slotIndex });
 });
 
 // Rotate Image for Station
@@ -1762,15 +1897,35 @@ app.post('/api/stations/:id/rotate-image', (req: Request, res: Response) => {
   res.json({ success: true, station, imageRotation: nextRot });
 });
 
-// Atomic Round 2 Topic Spin for Station (Single Source of Truth, Global Uniqueness)
+// Atomic Round 2 Topic Spin for Station (Supports Synchronized Heat Slots & Slot Preservation)
 app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
-  const { participantId, participantName, wheelTopicIds } = req.body;
+  const { participantId, participantName, wheelTopicIds, slotIndex: reqSlotIndex } = req.body;
 
   if (participantId) {
     station.activeParticipantId = participantId;
     station.activeParticipant = db.participants.find((p) => p.id === participantId) || station.activeParticipant;
   }
+
+  const targetParticipant = station.activeParticipant || (participantId ? db.participants.find((p) => p.id === participantId) : null);
+
+  // Determine slot index
+  let slotIndex = typeof reqSlotIndex === 'number' && reqSlotIndex >= 0 ? reqSlotIndex : -1;
+  if (slotIndex === -1 && targetParticipant) {
+    const stParticipants = db.participants.filter(
+      (p) => p.stationId === station.id || p.round2StationId === station.id
+    );
+    slotIndex = stParticipants.findIndex((p) => p.id === targetParticipant.id);
+  }
+  if (slotIndex === -1) {
+    slotIndex = db.round2Results.filter((r) => {
+      const p = db.participants.find((item) => item.id === r.participantId);
+      return p?.stationId === station.id || p?.round2StationId === station.id;
+    }).length;
+  }
+  if (slotIndex === -1) slotIndex = 0;
+
+  const isSynchronized = db.settings.round2.synchronizedSlots !== false;
 
   // Filter available topics strictly for THIS station to prevent repeating across stations
   const stationId = station.id;
@@ -1781,6 +1936,8 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     (t) => t.stationId === stationId || t.stationId === station.name
   );
 
+  const assignedTopicIds = new Set<string>(Object.values(db.synchronizedSlots?.round2 || {}));
+
   let pool: Topic[] = [];
   if (stationCandidates.length > 0) {
     pool = stationCandidates.filter((t) => t.status === 'available');
@@ -1788,8 +1945,11 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
       pool = stationCandidates;
     }
   } else {
-    // Unassigned or universal topics, strictly excluding other stations' topics
-    const availablePool = db.topics.filter((t) => !otherStationTopics.includes(t));
+    // Unassigned or universal topics, strictly excluding other stations' topics and (in synchronized mode) topics assigned to other slots
+    const availablePool = db.topics.filter(
+      (t) => !otherStationTopics.includes(t) &&
+             (!isSynchronized || !assignedTopicIds.has(t.id) || db.synchronizedSlots?.round2[slotIndex] === t.id)
+    );
     pool = availablePool.filter((t) => t.status === 'available');
     if (pool.length === 0 && db.settings.round2.topicReuseAllowed) {
       pool = availablePool.length > 0 ? availablePool : db.topics;
@@ -1800,9 +1960,8 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     if (db.settings.round2.topicReuseAllowed && db.topics.length > 0) {
       pool = stationCandidates.length > 0 ? stationCandidates : db.topics;
     } else {
-      return res.status(409).json({
-        error: `No unused topics available for ${station.name}. Please upload topics assigned to ${station.name} or allow topic reuse in settings.`,
-      });
+      pool = db.topics.filter((t) => !otherStationTopics.includes(t));
+      if (pool.length === 0) pool = db.topics;
     }
   }
 
@@ -1836,8 +1995,18 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     candidates = pool.slice(0, wheelCount);
   }
 
-  // Select EXACTLY ONE topic in backend from the wheel candidates
-  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  let chosen: Topic;
+  if (isSynchronized) {
+    const slotRes = getOrAssignSlotItem('round2', slotIndex, station.id, candidates.map((c) => c.id));
+    chosen = (slotRes.item as Topic) || candidates[0];
+    // Guarantee that chosen topic is mounted onto the wheel slices!
+    if (!candidates.some((c) => c.id === chosen.id)) {
+      candidates[0] = chosen;
+    }
+  } else {
+    chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
   const targetIndex = candidates.findIndex((t) => t.id === chosen.id);
 
   // Update station active wheel topics to match this exact candidates list
@@ -1847,11 +2016,12 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     const p = db.participants.find((item) => item.id === station.activeParticipantId);
     if (p) {
       p.round2TopicId = chosen.topicId || chosen.id;
+      p.slotIndex = slotIndex;
     }
   }
 
-  // Immediately claim as USED in backend
-  if (!db.settings.round2.topicReuseAllowed) {
+  // Immediately claim as USED in backend (if not synchronized across stations for that slot)
+  if (!db.settings.round2.topicReuseAllowed && !isSynchronized) {
     chosen.status = 'used';
     chosen.usedByParticipantId = station.activeParticipantId || undefined;
     chosen.usedByParticipantName = participantName || station.activeParticipant?.name || undefined;
@@ -1879,7 +2049,7 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
   };
 
   persistDB();
-  logAction('Topic Spun', `Wheel spin initiated at ${station.name} for contestant ${participantName || station.activeParticipant?.name || 'Contestant'}`);
+  logAction('Topic Spun', `Wheel spin initiated at ${station.name} (Heat Slot ${slotIndex + 1}) for contestant ${participantName || station.activeParticipant?.name || 'Contestant'}`);
 
   broadcastStationUpdate(station.id, 'wheel_spin_started', {
     stationId: station.id,
@@ -1889,6 +2059,7 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     wheelTopics: candidates,
     startedAt,
     durationMs: spinDurationMs,
+    slotIndex,
   });
   broadcastSSE('topics_updated', db.topics);
   broadcastStationUpdate(station.id, 'station_updated', station);
@@ -1901,10 +2072,11 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     startedAt,
     durationMs: spinDurationMs,
     station,
+    slotIndex,
   });
 });
 
-// Complete Round 2 Spin -> Reveal topic and transition to Speaking mode
+// Complete Round 2 Spin -> Reveal topic, transition to Speaking mode & replace used slice on wheel
 app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
   const speechSec = db.settings.round2.speechTimeSeconds || 120;
@@ -1924,8 +2096,17 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
     }
     const targetIdx = currentWheel.findIndex((t) => t && t.id === winningTopic.id);
     if (targetIdx !== -1) {
+      const assignedTopicIds = new Set(Object.values(db.synchronizedSlots?.round2 || {}));
       const replacement = db.topics.find(
+        (t) => t && t.status === 'available' &&
+               t.id !== winningTopic.id &&
+               !currentWheel.some((w) => w && w.id === t.id) &&
+               !assignedTopicIds.has(t.id) &&
+               !assignedTopicIds.has(t.topicId || '')
+      ) || db.topics.find(
         (t) => t && t.status === 'available' && t.id !== winningTopic.id && !currentWheel.some((w) => w && w.id === t.id)
+      ) || db.topics.find(
+        (t) => t && t.id !== winningTopic.id && !currentWheel.some((w) => w && w.id === t.id)
       );
       if (replacement) {
         currentWheel[targetIdx] = replacement;
@@ -1963,10 +2144,19 @@ app.post('/api/stations/:id/wheel-replace', (req: Request, res: Response) => {
   if (usedTopicId) {
     const idx = currentWheel.findIndex((t) => t && t.id === usedTopicId);
     if (idx !== -1) {
+      const assignedTopicIds = new Set(Object.values(db.synchronizedSlots?.round2 || {}));
       const replacement = replacementTopicId
         ? db.topics.find((t) => t && t.id === replacementTopicId)
         : db.topics.find(
+            (t) => t && t.status === 'available' &&
+                   t.id !== usedTopicId &&
+                   !currentWheel.some((w) => w && w.id === t.id) &&
+                   !assignedTopicIds.has(t.id) &&
+                   !assignedTopicIds.has(t.topicId || '')
+          ) || db.topics.find(
             (t) => t && t.status === 'available' && t.id !== usedTopicId && !currentWheel.some((w) => w && w.id === t.id)
+          ) || db.topics.find(
+            (t) => t && t.id !== usedTopicId && !currentWheel.some((w) => w && w.id === t.id)
           );
       if (replacement) {
         currentWheel[idx] = replacement;
@@ -1977,6 +2167,70 @@ app.post('/api/stations/:id/wheel-replace', (req: Request, res: Response) => {
   persistDB();
   broadcastStationUpdate(station.id, 'station_updated', station);
   res.json({ success: true, activeWheelTopics: station.activeWheelTopics });
+});
+
+// Synchronized Slots Management Endpoints
+app.get('/api/slots', (req: Request, res: Response) => {
+  if (!db.synchronizedSlots) db.synchronizedSlots = { round1: {}, round2: {} };
+  res.json({
+    success: true,
+    synchronizedSlots: db.synchronizedSlots,
+  });
+});
+
+app.post('/api/slots/reset', (req: Request, res: Response) => {
+  const { round } = req.body;
+  if (!db.synchronizedSlots) db.synchronizedSlots = { round1: {}, round2: {} };
+  if (!round || round === 'all' || round === 'round1') {
+    db.synchronizedSlots.round1 = {};
+  }
+  if (!round || round === 'all' || round === 'round2') {
+    db.synchronizedSlots.round2 = {};
+  }
+  persistDB();
+  broadcastSSE('slots_updated', db.synchronizedSlots);
+  logAction('Slots Reset', `Synchronized heat slots were reset (Round: ${round || 'all'})`);
+  res.json({ success: true, synchronizedSlots: db.synchronizedSlots });
+});
+
+app.post('/api/slots/pregenerate', (req: Request, res: Response) => {
+  const { count = 30, round = 'all' } = req.body;
+  if (!db.synchronizedSlots) db.synchronizedSlots = { round1: {}, round2: {} };
+
+  if (round === 'all' || round === 'round1') {
+    const assignedIds = new Set<string>(Object.values(db.synchronizedSlots.round1));
+    let available = db.images.filter((i) => !assignedIds.has(i.id) && !assignedIds.has(i.imageId || ''));
+    for (let i = 0; i < count; i++) {
+      if (!db.synchronizedSlots.round1[i]) {
+        if (available.length === 0) available = [...db.images];
+        if (available.length > 0) {
+          const idx = Math.floor(Math.random() * available.length);
+          const chosen = available.splice(idx, 1)[0];
+          db.synchronizedSlots.round1[i] = chosen.id;
+        }
+      }
+    }
+  }
+
+  if (round === 'all' || round === 'round2') {
+    const assignedIds = new Set<string>(Object.values(db.synchronizedSlots.round2));
+    let available = db.topics.filter((t) => !assignedIds.has(t.id) && !assignedIds.has(t.topicId || ''));
+    for (let i = 0; i < count; i++) {
+      if (!db.synchronizedSlots.round2[i]) {
+        if (available.length === 0) available = [...db.topics];
+        if (available.length > 0) {
+          const idx = Math.floor(Math.random() * available.length);
+          const chosen = available.splice(idx, 1)[0];
+          db.synchronizedSlots.round2[i] = chosen.id;
+        }
+      }
+    }
+  }
+
+  persistDB();
+  broadcastSSE('slots_updated', db.synchronizedSlots);
+  logAction('Slots Pre-Generated', `Pre-generated ${count} synchronized heat slots for ${round || 'all rounds'}`);
+  res.json({ success: true, synchronizedSlots: db.synchronizedSlots });
 });
 
 // Independent Station Timer Action with Shared Timestamp Synchronization & Continuous Overtime
@@ -2193,10 +2447,11 @@ app.post('/api/event/reset-all-statuses', (req: Request, res: Response) => {
     delete t.usedAt;
   });
 
-  // 5. Clear round results
+  // 5. Clear round results & synchronized slots
   db.round1Results = [];
   db.round2Results = [];
   db.round3Results = [];
+  db.synchronizedSlots = { round1: {}, round2: {} };
 
   // 6. Reset global live sync
   const defaultSpeechSec = db.settings.round1.speechTimeSeconds || 120;
@@ -2277,10 +2532,11 @@ app.post('/api/event/start-new', (req: Request, res: Response) => {
     delete t.usedAt;
   });
 
-  // Clear results
+  // Clear results & synchronized slots
   db.round1Results = [];
   db.round2Results = [];
   db.round3Results = [];
+  db.synchronizedSlots = { round1: {}, round2: {} };
 
   // Reset Live Sync
   db.liveSync = {

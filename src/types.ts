@@ -44,6 +44,7 @@ export interface Participant {
   qualificationReason?: string;
   round1ImageId?: string; // Noted Image ID for Participant in Round 1
   round2TopicId?: string; // Noted Topic ID for Participant in Round 2
+  slotIndex?: number; // Zero-based heat/slot index across stations
   customData: Record<string, any>;
   createdAt: string;
   updatedAt: string;
@@ -171,6 +172,7 @@ export interface EventSettings {
     allowImageReuse: boolean;
     warningBuzzerEnabled?: boolean; // default true
     warningTimeSeconds?: number; // default 30 (seconds remaining)
+    synchronizedSlots?: boolean; // default true: heat/slot synchronized across all stations
   };
   round2: {
     prepEnabled: boolean; // default false (Round 2 starts speaking immediately)
@@ -183,6 +185,7 @@ export interface EventSettings {
     warningBuzzerEnabled?: boolean; // default true
     warningTimeSeconds?: number; // default 30 (seconds remaining)
     wheelFontSize?: number; // user configurable font size for wheel slices
+    synchronizedSlots?: boolean; // default true: heat/slot synchronized across all stations
   };
   round3: {
     prepEnabled: boolean; // default false
@@ -364,6 +367,10 @@ export interface AppDatabase {
   history: EventLog[];
   liveSync: LiveSyncState;
   stations?: Record<string, StationState>;
+  synchronizedSlots?: {
+    round1: Record<number, string>; // slotIndex -> imageId
+    round2: Record<number, string>; // slotIndex -> topicId
+  };
 }
 
 export type DeviceRole = 'station' | 'master' | 'projector';

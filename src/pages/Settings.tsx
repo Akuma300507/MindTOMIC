@@ -22,6 +22,7 @@ import {
   Edit3,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { api } from '../lib/api';
 import { soundEngine } from '../lib/audio';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
 import { InspireLogo } from '../components/common/InspireLogo';
@@ -71,6 +72,11 @@ export const Settings: React.FC = () => {
   const [inspireLogoUploading, setInspireLogoUploading] = useState(false);
   const [inspireLogoError, setInspireLogoError] = useState<string | null>(null);
   const inspireLogoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Synchronized Slot Management States
+  const [slotActionLoading, setSlotActionLoading] = useState(false);
+  const [slotActionNotice, setSlotActionNotice] = useState<string | null>(null);
+  const [pregenerateCount, setPregenerateCount] = useState<number>(30);
 
   // New Station Inputs
   const [newStationName, setNewStationName] = useState('');
@@ -437,6 +443,33 @@ export const Settings: React.FC = () => {
     });
   };
 
+  const handlePregenerateSlots = async () => {
+    try {
+      setSlotActionLoading(true);
+      setSlotActionNotice(null);
+      await api.pregenerateSynchronizedSlots(pregenerateCount, 'all');
+      setSlotActionNotice(`Successfully pre-generated ${pregenerateCount} synchronized heat slots for all rounds!`);
+    } catch (err: any) {
+      setSlotActionNotice(err.message || 'Failed to pre-generate slots');
+    } finally {
+      setSlotActionLoading(false);
+    }
+  };
+
+  const handleResetSlots = async () => {
+    if (!confirm('Reset all synchronized heat slot assignments for Round 1 and Round 2?')) return;
+    try {
+      setSlotActionLoading(true);
+      setSlotActionNotice(null);
+      await api.resetSynchronizedSlots('all');
+      setSlotActionNotice('Synchronized heat slots have been cleared and reset.');
+    } catch (err: any) {
+      setSlotActionNotice(err.message || 'Failed to reset slots');
+    } finally {
+      setSlotActionLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-300">
       {/* Header */}
@@ -731,6 +764,24 @@ export const Settings: React.FC = () => {
               />
               <span className="text-slate-300 font-medium">Play Buzzer at Zero</span>
             </label>
+
+            <label className="flex items-center gap-2 cursor-pointer sm:col-span-3 pt-1 border-t border-slate-800/60">
+              <input
+                type="checkbox"
+                checked={form.round1.synchronizedSlots !== false}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    round1: { ...form.round1, synchronizedSlots: e.target.checked },
+                  })
+                }
+                className="w-4 h-4 rounded text-purple-600 bg-slate-950 border-slate-800"
+              />
+              <div>
+                <span className="text-purple-300 font-bold">Synchronized Heat Slots across Stations (Recommended)</span>
+                <p className="text-[11px] text-slate-400">Contestant #1 across Station A, B, C gets the identical image, Contestant #2 gets the next identical image, even with delayed start.</p>
+              </div>
+            </label>
           </div>
         </div>
 
@@ -880,6 +931,24 @@ export const Settings: React.FC = () => {
                 className="w-4 h-4 rounded text-purple-600 bg-slate-950 border-slate-800"
               />
               <span className="text-slate-300 font-medium">Play Buzzer at Zero</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer sm:col-span-2 lg:col-span-4 pt-1 border-t border-slate-800/60">
+              <input
+                type="checkbox"
+                checked={form.round2.synchronizedSlots !== false}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    round2: { ...form.round2, synchronizedSlots: e.target.checked },
+                  })
+                }
+                className="w-4 h-4 rounded text-purple-600 bg-slate-950 border-slate-800"
+              />
+              <div>
+                <span className="text-purple-300 font-bold">Synchronized Heat Slots across Stations (Recommended)</span>
+                <p className="text-[11px] text-slate-400">Contestant #1 across Station A, B, C spins and lands on the identical topic, Contestant #2 gets the next identical topic, even with delayed start.</p>
+              </div>
             </label>
           </div>
         </div>
@@ -1691,6 +1760,69 @@ export const Settings: React.FC = () => {
                 <span>Add Station</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* Section: Synchronized Heat Slots Schedule & Tools */}
+        <div className="bg-slate-900/90 border border-purple-900/40 p-6 rounded-2xl shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2 text-purple-300 font-bold font-['Outfit'] text-base">
+              <Sparkles className="w-5 h-5 text-purple-400" />
+              <span>Synchronized Heat Schedule (All Stations Aligned)</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <span className="px-2.5 py-1 rounded-lg bg-blue-950/60 border border-blue-800 text-blue-300">
+                R1 Slots: {Object.keys(db?.synchronizedSlots?.round1 || {}).length}
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-purple-950/60 border border-purple-800 text-purple-300">
+                R2 Slots: {Object.keys(db?.synchronizedSlots?.round2 || {}).length}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            When enabled, Contestant #1 at Station A, B, and C will receive the exact same image and topic, Contestant #2 receives the next, etc. Stations can start simultaneously or with time differences. Whichever station reaches a turn first automatically sets the item for that heat slot.
+          </p>
+
+          {slotActionNotice && (
+            <div className="p-3 rounded-xl bg-purple-950/50 border border-purple-800 text-purple-200 text-xs flex items-center justify-between">
+              <span>{slotActionNotice}</span>
+              <button type="button" onClick={() => setSlotActionNotice(null)} className="text-purple-400 hover:text-white font-bold ml-2">✕</button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+              <span className="text-slate-400">Heats Count:</span>
+              <input
+                type="number"
+                min={5}
+                max={150}
+                value={pregenerateCount}
+                onChange={(e) => setPregenerateCount(parseInt(e.target.value) || 30)}
+                className="w-16 bg-transparent text-white font-mono font-bold focus:outline-none"
+              />
+            </div>
+
+            <button
+              type="button"
+              disabled={slotActionLoading}
+              onClick={handlePregenerateSlots}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>{slotActionLoading ? 'Processing...' : 'Pre-Generate Synchronized Schedule'}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={slotActionLoading}
+              onClick={handleResetSlots}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset Synchronized Slots</span>
+            </button>
           </div>
         </div>
 

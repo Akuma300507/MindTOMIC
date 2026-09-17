@@ -143,25 +143,35 @@ export const Round1: React.FC = () => {
     }
   }, [currentStation?.selectedImage]);
 
-  // Available images based on reuse policy
+  // Heat slot index within this station's roster
+  const slotIndex = useMemo(() => {
+    if (!activeParticipant) return 0;
+    if (typeof activeParticipant.slotIndex === 'number' && activeParticipant.slotIndex >= 0) {
+      return activeParticipant.slotIndex;
+    }
+    const idx = stationParticipants.findIndex((p) => p.id === activeParticipant.id);
+    return idx >= 0 ? idx : 0;
+  }, [stationParticipants, activeParticipant]);
+
+  // Available images based on reuse policy or synchronized slots
   const availableImages = useMemo(() => {
-    if (db?.settings.round1.allowImageReuse) {
+    if (db?.settings.round1.allowImageReuse || db?.settings.round1.synchronizedSlots !== false) {
       return stationImages;
     }
     const filtered = stationImages.filter((img) => img.status === 'available');
     return filtered.length > 0 ? filtered : stationImages;
-  }, [stationImages, db?.settings.round1.allowImageReuse]);
+  }, [stationImages, db?.settings.round1.allowImageReuse, db?.settings.round1.synchronizedSlots]);
 
   // Atomic Random image selector
   const handleRandomImage = useCallback(async () => {
     try {
       setPoolNotice(null);
-      const chosen = await assignStationImage(currentStationId);
+      const chosen = await assignStationImage(currentStationId, slotIndex);
       setSelectedImage(chosen);
     } catch (err: any) {
       setPoolNotice(err.message || 'No unused images remaining. Reset pool or enable reuse in settings.');
     }
-  }, [assignStationImage, currentStationId]);
+  }, [assignStationImage, currentStationId, slotIndex]);
 
   // Select initial image if none selected
   useEffect(() => {
@@ -289,11 +299,11 @@ export const Round1: React.FC = () => {
                   No contestants in {currentStation?.name || 'this station'}
                 </option>
               ) : (
-                stationParticipants.map((p) => {
+                stationParticipants.map((p, pIdx) => {
                   const isChecked = isParticipantCheckedIn(p);
                   return (
                     <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                      #{p.participantNumber} — {p.name} {isChecked ? '✓' : ''}
+                      #{p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isChecked ? '✓' : ''}
                     </option>
                   );
                 })
@@ -309,6 +319,14 @@ export const Round1: React.FC = () => {
             >
               {arrivedCount}/{stationParticipants.length}
             </span>
+            {activeParticipant && (
+              <span
+                className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-500/40 bg-purple-950/60 text-purple-300 text-[10px] font-mono font-bold"
+                title="Synchronized Heat Slot across all stations"
+              >
+                Heat #{slotIndex + 1}
+              </span>
+            )}
           </div>
 
           {/* Quick Participant Check-In Pill */}

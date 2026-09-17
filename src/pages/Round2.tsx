@@ -164,6 +164,16 @@ export const Round2: React.FC = () => {
   const warningTimeSeconds = db?.settings.round2.warningTimeSeconds ?? 30;
   const reuseAllowed = db?.settings.round2.topicReuseAllowed ?? false;
 
+  // Heat slot index within this station's eligible Round 2 roster
+  const slotIndex = useMemo(() => {
+    if (!activeParticipant) return 0;
+    if (typeof activeParticipant.slotIndex === 'number' && activeParticipant.slotIndex >= 0) {
+      return activeParticipant.slotIndex;
+    }
+    const idx = stationEligibleRound2Participants.findIndex((p) => p.id === activeParticipant.id);
+    return idx >= 0 ? idx : 0;
+  }, [stationEligibleRound2Participants, activeParticipant]);
+
   // Sync winningTopic if currentStation already has a selectedTopic
   useEffect(() => {
     if (currentStation?.selectedTopic) {
@@ -262,7 +272,7 @@ export const Round2: React.FC = () => {
     let targetIndex = 0;
     try {
       const wheelTopicIds = currentWheel.map((t) => t?.id).filter(Boolean) as string[];
-      const res = await spinStationTopic(currentStationId, wheelTopicIds);
+      const res = await spinStationTopic(currentStationId, wheelTopicIds, slotIndex);
       chosenTopic = res.topic;
       if (res.wheelTopics && res.wheelTopics.length > 0) {
         currentWheel = res.wheelTopics.filter(Boolean);
@@ -498,11 +508,11 @@ export const Round2: React.FC = () => {
                   No eligible contestants in {currentStation?.name || 'this station'}
                 </option>
               ) : (
-                stationEligibleRound2Participants.map((p) => {
+                stationEligibleRound2Participants.map((p, pIdx) => {
                   const isR1Qual = p.round1Qualified === 'qualified';
                   return (
                     <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                      {p.participantNumber} — {p.name} {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
+                      {p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
                     </option>
                   );
                 })
@@ -512,6 +522,15 @@ export const Round2: React.FC = () => {
             {stationEligibleRound2Participants.length > 0 && (
               <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
                 {stationEligibleRound2Participants.length} Available
+              </span>
+            )}
+
+            {activeParticipant && (
+              <span
+                className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-500/40 bg-purple-950/60 text-purple-300 text-[10px] font-mono font-bold"
+                title="Synchronized Heat Slot across all stations"
+              >
+                Heat #{slotIndex + 1}
               </span>
             )}
           </div>
