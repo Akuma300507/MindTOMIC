@@ -121,9 +121,9 @@ export const excelService = {
   // Download topic template
   downloadTopicTemplate() {
     const sample = [
-      { 'Topic ID': 'TOP-001', 'Topic': 'Is Artificial Intelligence empowering or replacing human creativity?', 'Category': 'Technology' },
-      { 'Topic ID': 'TOP-002', 'Topic': 'The Vanishing Art of Deep Conversation', 'Category': 'Culture' },
-      { 'Topic ID': 'TOP-003', 'Topic': 'Why True Courage Requires Vulnerability', 'Category': 'Philosophy' },
+      { 'Topic ID': 'TOP-001', 'Topic': 'Is Artificial Intelligence empowering or replacing human creativity?' },
+      { 'Topic ID': 'TOP-002', 'Topic': 'The Vanishing Art of Deep Conversation' },
+      { 'Topic ID': 'TOP-003', 'Topic': 'Why True Courage Requires Vulnerability' },
     ];
     const ws = XLSX.utils.json_to_sheet(sample);
     const wb = XLSX.utils.book_new();
@@ -210,7 +210,6 @@ export const excelService = {
     const tRows = db.topics.map((t) => ({
       'Topic ID': t.topicId || t.id,
       'Topic': t.topic,
-      'Category': t.category || 'General',
       'Status': t.status,
       'Used By Participant ID': t.usedByParticipantId || '',
       'Used By Participant Name': t.usedByParticipantName || '',

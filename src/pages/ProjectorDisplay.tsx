@@ -1259,16 +1259,11 @@ export const ProjectorDisplay: React.FC = () => {
                     {/* Pulsing neon radial aura */}
                     <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-pink-500 to-indigo-600 rounded-3xl blur-2xl opacity-40 -z-10 animate-pulse" />
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-center">
                       <span className="text-[10px] sm:text-xs font-mono font-black uppercase tracking-widest text-amber-400 bg-amber-950/70 border border-amber-500/50 px-2.5 py-1 rounded-xl shadow-lg flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                         SELECTED SPEECH THEME
                       </span>
-                      {currentRoundTopic.category && (
-                        <span className="text-[10px] sm:text-xs font-mono font-bold px-2 py-0.5 rounded-xl bg-purple-900/80 text-purple-200 border border-purple-500/50 shadow">
-                          {currentRoundTopic.category}
-                        </span>
-                      )}
                     </div>
 
                     <h3 className="text-xl sm:text-3xl md:text-4xl font-black text-white font-['Outfit'] leading-tight drop-shadow-2xl">

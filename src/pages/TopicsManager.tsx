@@ -27,7 +27,6 @@ export const TopicsManager: React.FC = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'used'>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
@@ -35,17 +34,6 @@ export const TopicsManager: React.FC = () => {
   const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
   const [topicIdInput, setTopicIdInput] = useState('');
   const [topicText, setTopicText] = useState('');
-  const [topicCategory, setTopicCategory] = useState('General');
-
-  // Categories list
-  const categories = useMemo(() => {
-    if (!db?.topics) return [];
-    const set = new Set<string>();
-    db.topics.forEach((t) => {
-      if (t.category) set.add(t.category);
-    });
-    return Array.from(set);
-  }, [db?.topics]);
 
   // Filtered topics
   const filteredTopics = useMemo(() => {
@@ -54,21 +42,18 @@ export const TopicsManager: React.FC = () => {
       const matchesSearch =
         (t.topicId && t.topicId.toLowerCase().includes(searchTerm.toLowerCase())) ||
         t.topic.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.category && t.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (t.usedByParticipantName && t.usedByParticipantName.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
-      const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
 
-      return matchesSearch && matchesStatus && matchesCategory;
+      return matchesSearch && matchesStatus;
     });
-  }, [db?.topics, searchTerm, statusFilter, categoryFilter]);
+  }, [db?.topics, searchTerm, statusFilter]);
 
   const openAddModal = () => {
     setEditingTopic(null);
     setTopicIdInput(`TOP-${String((db?.topics.length || 0) + 1).padStart(3, '0')}`);
     setTopicText('');
-    setTopicCategory('General');
     setShowAddModal(true);
   };
 
@@ -76,7 +61,6 @@ export const TopicsManager: React.FC = () => {
     setEditingTopic(t);
     setTopicIdInput(t.topicId || t.id);
     setTopicText(t.topic);
-    setTopicCategory(t.category || 'General');
     setShowAddModal(true);
   };
 
@@ -90,10 +74,9 @@ export const TopicsManager: React.FC = () => {
       await updateTopic(editingTopic.id, {
         topicId: finalTopicId,
         topic: topicText.trim(),
-        category: topicCategory.trim(),
       });
     } else {
-      await addTopic(topicText.trim(), topicCategory.trim(), finalTopicId);
+      await addTopic(topicText.trim(), undefined, finalTopicId);
     }
     setShowAddModal(false);
   };
@@ -220,7 +203,7 @@ export const TopicsManager: React.FC = () => {
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search topic text, ID, category..."
+            placeholder="Search topic text, ID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
@@ -241,22 +224,6 @@ export const TopicsManager: React.FC = () => {
               <option value="used">Used Only</option>
             </select>
           </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400">Category:</span>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-200 px-2.5 py-1.5 rounded-lg focus:outline-none"
-            >
-              <option value="all">All Categories</option>
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
 
@@ -269,7 +236,6 @@ export const TopicsManager: React.FC = () => {
                 <th className="py-3.5 px-3 w-10">#</th>
                 <th className="py-3.5 px-3 w-28">Topic ID</th>
                 <th className="py-3.5 px-4">Topic Statement</th>
-                <th className="py-3.5 px-3 w-32">Category</th>
                 <th className="py-3.5 px-3 text-center w-24">Status</th>
                 <th className="py-3.5 px-3 w-32">Used By</th>
                 <th className="py-3.5 px-3 text-right w-20">Actions</th>
@@ -278,7 +244,7 @@ export const TopicsManager: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60">
               {filteredTopics.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
                     No topics found matching current filters.
                   </td>
                 </tr>
@@ -296,11 +262,6 @@ export const TopicsManager: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 font-semibold text-white max-w-md">{t.topic}</td>
-                      <td className="py-3.5 px-3">
-                        <span className="px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold">
-                          {t.category || 'General'}
-                        </span>
-                      </td>
                       <td className="py-3.5 px-3 text-center">
                         <button
                           onClick={() => handleToggleStatus(t)}
@@ -390,17 +351,6 @@ export const TopicsManager: React.FC = () => {
                   value={topicText}
                   onChange={(e) => setTopicText(e.target.value)}
                   placeholder="e.g. Is Artificial Intelligence eroding or amplifying human empathy?"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:border-purple-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Category / Genre</label>
-                <input
-                  type="text"
-                  value={topicCategory}
-                  onChange={(e) => setTopicCategory(e.target.value)}
-                  placeholder="e.g. Technology, Ethics, Society, Leadership"
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:border-purple-500 focus:outline-none"
                 />
               </div>

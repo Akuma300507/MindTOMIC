@@ -866,9 +866,6 @@ export const Round2: React.FC = () => {
                       ID: {winningTopic.topicId || winningTopic.id || '—'}
                     </span>
                   </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-900/60 text-purple-200 border border-purple-700">
-                    {winningTopic.category || 'General'}
-                  </span>
                 </div>
                 <h3 className="text-lg sm:text-xl font-black text-white font-['Outfit'] leading-snug">
                   "{winningTopic.topic || 'Selected Topic'}"

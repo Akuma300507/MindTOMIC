@@ -62,7 +62,6 @@ export const SpinRevealCardModal: React.FC<SpinRevealCardModalProps> = ({
 
   const topicTitle = topic.topic || (topic as any).title || 'Selected Topic';
   const topicId = topic.topicId || topic.id || '—';
-  const topicCategory = topic.category || 'General Speech';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
@@ -173,11 +172,8 @@ export const SpinRevealCardModal: React.FC<SpinRevealCardModalProps> = ({
                   </div>
                 </div>
 
-                {/* Topic Title & Category */}
+                {/* Topic Title */}
                 <div className="space-y-2 flex-1">
-                  <div className="inline-block px-2.5 py-0.5 rounded-md bg-purple-900/50 border border-purple-700/60 text-purple-200 text-xs font-semibold">
-                    {topicCategory}
-                  </div>
                   <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white font-['Outfit'] tracking-tight leading-tight drop-shadow-md">
                     "{topicTitle}"
                   </h2>
