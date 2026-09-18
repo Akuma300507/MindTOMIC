@@ -205,7 +205,7 @@ export const Round3: React.FC = () => {
   }
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 w-full max-w-[1720px] mx-auto space-y-6 animate-in fade-in duration-300">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
       {/* Station Finished Finals Notice */}
       {(() => {
         const r3StationProg = currentStationId && currentStationId !== 'all' ? getStationRoundProgress(currentStationId, 3) : null;
@@ -378,109 +378,105 @@ export const Round3: React.FC = () => {
         </div>
       )}
 
-      {/* Main Grid: Contestant Spotlight Stage (Left compact) & Massive Timer (Right fills whole remaining screen) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        {/* Left Column: Compact Contestant Stage Info Card */}
-        <div className="lg:col-span-4 xl:col-span-3 bg-slate-900/90 border border-purple-900/30 rounded-3xl p-6 sm:p-7 shadow-2xl flex flex-col justify-between space-y-5">
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                Finalist Stage Spotlight
-              </span>
-              <span className="text-xs font-mono font-bold text-slate-400">
-                {activeParticipant?.participantNumber || 'NO SELECTION'}
-              </span>
-            </div>
-
-            {activeParticipant ? (
-              <div className="space-y-4">
-                <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-indigo-950/40 border border-emerald-800/40 space-y-2">
-                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                    Active Speaker on Podium
-                  </span>
-                  <h2 className="text-2xl sm:text-3xl font-black text-white font-['Outfit'] leading-tight">
-                    {activeParticipant.name}
-                  </h2>
-                  {(activeParticipant.mobile || activeParticipant.phone) && (
-                    <p className="text-xs font-semibold text-slate-300 font-mono">
-                      {activeParticipant.mobile || activeParticipant.phone}
-                    </p>
-                  )}
-                </div>
-
-                {/* Progress Summary in Previous Rounds */}
-                <div className="grid grid-cols-1 gap-2.5 text-xs">
-                  <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-semibold text-[11px]">Round 1 Milestone</span>
-                      {activeParticipant.round1Qualified === 'qualified' ? (
-                        <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> QUALIFIED
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-semibold text-slate-500">PENDING</span>
-                      )}
-                    </div>
-                    <div className="text-xs font-bold text-blue-300 font-['Outfit']">
-                      Speech: {activeParticipant.round1Status === 'completed' ? 'Completed' : activeParticipant.round1Status || 'Pending'}
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      {activeParticipant.round1Qualified === 'qualified'
-                        ? '✓ Advanced to Round 2'
-                        : 'Not qualified in Round 1'}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-semibold text-[11px]">Round 2 Milestone</span>
-                      {activeParticipant.round2Qualified === 'qualified' ? (
-                        <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> QUALIFIED
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-semibold text-slate-500">PENDING</span>
-                      )}
-                    </div>
-                    <div className="text-xs font-bold text-purple-300 font-['Outfit']">
-                      Speech: {activeParticipant.round2Status === 'completed' ? 'Completed' : activeParticipant.round2Status || 'Pending'}
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      {activeParticipant.round2Qualified === 'qualified'
-                        ? '✓ Advanced to Championship Finals'
-                        : 'Round 2 qualification required'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Finalist Status Badge */}
-                <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between text-xs">
-                  <span className="text-emerald-300 font-semibold flex items-center gap-2 text-[11px]">
-                    <Trophy className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>
-                      {activeParticipant.round2Qualified === 'qualified'
-                        ? 'Official Grand Finalist'
-                        : 'Speaking in Override Mode'}
-                    </span>
-                  </span>
-                  <span className="text-[10px] font-mono font-bold text-emerald-400/80">ROUND 3 PODIUM</span>
-                </div>
-              </div>
-            ) : (
-              <div className="p-8 text-center text-slate-500">
-                <p>No participant selected. Please choose a contestant from the top bar.</p>
-              </div>
-            )}
+      {/* Main Grid: Contestant Spotlight Stage & Timer */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Contestant Stage Info Card */}
+        <div className="lg:col-span-7 bg-slate-900/90 border border-purple-900/30 rounded-3xl p-8 shadow-2xl space-y-6">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              Finalist Stage Spotlight
+            </span>
+            <span className="text-xs font-mono font-bold text-slate-400">
+              {activeParticipant?.participantNumber || 'NO SELECTION'}
+            </span>
           </div>
+
+          {activeParticipant ? (
+            <div className="space-y-6">
+              <div className="p-6 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-indigo-950/40 border border-emerald-800/40 space-y-2">
+                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                  Active Speaker on Podium
+                </span>
+                <h2 className="text-3xl font-black text-white font-['Outfit']">
+                  {activeParticipant.name}
+                </h2>
+                {(activeParticipant.mobile || activeParticipant.phone) && (
+                  <p className="text-sm font-semibold text-slate-300 font-mono">
+                    {activeParticipant.mobile || activeParticipant.phone}
+                  </p>
+                )}
+              </div>
+
+              {/* Progress Summary in Previous Rounds */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-semibold">Round 1 Milestone</span>
+                    {activeParticipant.round1Qualified === 'qualified' ? (
+                      <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> QUALIFIED
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-slate-500">PENDING</span>
+                    )}
+                  </div>
+                  <div className="text-sm font-bold text-blue-300 font-['Outfit']">
+                    Speech: {activeParticipant.round1Status === 'completed' ? 'Completed' : activeParticipant.round1Status || 'Pending'}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {activeParticipant.round1Qualified === 'qualified'
+                      ? '✓ Advanced to Round 2'
+                      : 'Not qualified in Round 1'}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-semibold">Round 2 Milestone</span>
+                    {activeParticipant.round2Qualified === 'qualified' ? (
+                      <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> QUALIFIED
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-slate-500">PENDING</span>
+                    )}
+                  </div>
+                  <div className="text-sm font-bold text-purple-300 font-['Outfit']">
+                    Speech: {activeParticipant.round2Status === 'completed' ? 'Completed' : activeParticipant.round2Status || 'Pending'}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {activeParticipant.round2Qualified === 'qualified'
+                      ? '✓ Advanced to Championship Finals'
+                      : 'Round 2 qualification required'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Finalist Status Badge */}
+              <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between text-xs">
+                <span className="text-emerald-300 font-semibold flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-emerald-400" />
+                  {activeParticipant.round2Qualified === 'qualified'
+                    ? 'Qualified in Round 2 • Official Grand Finalist'
+                    : 'Contestant speaking in Override Mode'}
+                </span>
+                <span className="text-[10px] font-mono font-bold text-emerald-400/80">ROUND 3 PODIUM</span>
+              </div>
+            </div>
+          ) : (
+            <div className="p-8 text-center text-slate-500">
+              <p>No participant selected. Please choose a contestant from the top bar.</p>
+            </div>
+          )}
 
           {/* Last Result Log */}
           {lastSavedResult && (
-            <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs flex items-center justify-between">
+            <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="text-slate-200 text-[11px]">
-                  Saved for <strong>{lastSavedResult.participantName}</strong>:{' '}
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span className="text-slate-200">
+                  Final speech saved for <strong>{lastSavedResult.participantName}</strong>:{' '}
                   <span className="text-emerald-300 font-mono font-bold">
                     {lastSavedResult.speechDurationSeconds}s
                   </span>{' '}
@@ -494,8 +490,8 @@ export const Round3: React.FC = () => {
           )}
         </div>
 
-        {/* Right Column: Timer Engine taking up whole remaining screen */}
-        <div className="lg:col-span-8 xl:col-span-9 flex flex-col space-y-4">
+        {/* Right Column: Timer Engine */}
+        <div className="lg:col-span-5 space-y-4">
           <Timer
             prepDurationSeconds={0}
             speechDurationSeconds={speechSeconds}
@@ -506,14 +502,12 @@ export const Round3: React.FC = () => {
             warningBuzzerEnabled={warningBuzzerEnabled}
             warningTimeSeconds={warningTimeSeconds}
             stationId={currentStationId || undefined}
-            size="large"
-            className="flex-1 w-full justify-center py-10"
             onPhaseChange={setTimerPhase}
             onFinish={handleTimerFinish}
           />
 
           {/* Round 3 Warning Buzzer Status & Shortcut */}
-          <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-emerald-500/30 flex items-center justify-between gap-3 text-xs shadow-lg">
+          <div className="mt-3 p-3.5 rounded-2xl bg-slate-900/80 border border-emerald-500/30 flex items-center justify-between gap-3 text-xs shadow-lg">
             <div className="flex items-center gap-2.5">
               <span className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0">
                 <Bell className="w-4 h-4" />

@@ -375,6 +375,19 @@ export const ProjectorDisplay: React.FC = () => {
     return Math.max(220, Math.min(560, Math.floor(avail)));
   }, [stageDim.width, stageDim.height]);
 
+  // Dynamic responsive Round 3 timer gauge size strictly computed from available stage dimensions
+  const round3TimerSize = useMemo(() => {
+    // Stage available height minus contestant spotlight banner (~45px), card header (~55px), bottom status/progress bar (~75px), and paddings (~40px)
+    const availH = stageDim.height - 215;
+    const availW = stageDim.width - 64;
+    const size = Math.min(availW, availH);
+    return Math.max(260, Math.min(620, Math.floor(size)));
+  }, [stageDim.width, stageDim.height]);
+
+  const round3FontSize = useMemo(() => {
+    return Math.max(48, Math.min(136, Math.floor(round3TimerSize * 0.22)));
+  }, [round3TimerSize]);
+
   // STRICT STATION ISOLATION: Default active topics for this station
   const stationDefaultWheelTopics = useMemo(() => {
     if (!db?.topics) return [];
@@ -875,81 +888,252 @@ export const ProjectorDisplay: React.FC = () => {
           </div>
         )}
 
-        {/* Round 3: Championship Finals Arena & Stage Timer (Single Unified Card, Fits All Screens) */}
+        {/* Round 3: Championship Finals Arena & Stage Timer (Maximized Full Viewport Fill) */}
         {currentRound === 3 && (
-          <div className="w-full max-w-xl bg-slate-900/90 backdrop-blur-md border border-emerald-500/40 rounded-3xl p-4 sm:p-5 shadow-2xl space-y-2.5 my-auto animate-in zoom-in-95 duration-300">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-amber-400 animate-bounce" />
-                <span className="text-xs font-mono font-black tracking-widest text-emerald-400 uppercase truncate max-w-md">
-                  FINALS ARENA • {activeItem?.title && activeItem.title !== 'Championship Finals Speech' ? activeItem.title : 'GRAND FINALS'}
+          <div className="w-full h-full flex-1 min-h-0 max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto flex flex-col items-center justify-between p-3 sm:p-5 bg-slate-900/85 backdrop-blur-xl border border-emerald-500/40 rounded-3xl shadow-[0_0_80px_rgba(16,185,129,0.15)] relative overflow-hidden animate-in zoom-in-95 duration-300">
+            {/* Ambient background glow */}
+            <div
+              className={`absolute inset-0 pointer-events-none transition-opacity duration-700 ${
+                isOvertime
+                  ? 'bg-rose-600/10'
+                  : isWarning
+                  ? 'bg-amber-500/10'
+                  : timerMode === 'speech'
+                  ? 'bg-emerald-500/10'
+                  : 'bg-transparent'
+              }`}
+            />
+
+            {/* Top Header Banner */}
+            <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-2.5 z-10 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center shadow-lg shrink-0">
+                  <Trophy className="w-5 h-5 text-amber-400 animate-bounce" />
+                </div>
+                <div className="text-left min-w-0">
+                  <span className="text-[11px] sm:text-xs font-mono font-black tracking-widest text-emerald-400 uppercase block truncate">
+                    FINALS ARENA • {activeItem?.title && activeItem.title !== 'Championship Finals Speech' ? activeItem.title : 'THE MYSTERY CARTRIDGE'}
+                  </span>
+                  <span className="text-xs text-slate-400 hidden sm:block">
+                    Official Championship Finalist Podium Clock
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {(db?.settings?.round3?.warningBuzzerEnabled ?? true) && (
+                  <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full bg-slate-950/80 border border-slate-800 text-slate-400">
+                    <Bell className="w-3 h-3 text-amber-400" />
+                    Alert at {warningTimeSeconds}s
+                  </span>
+                )}
+                <span
+                  className={`text-xs sm:text-sm font-bold px-3 py-1 rounded-full border shadow-md ${
+                    isOvertime
+                      ? 'bg-rose-950 text-rose-300 border-rose-500 animate-pulse'
+                      : isTimeUp
+                      ? 'bg-rose-950 text-rose-400 border-rose-600 animate-pulse'
+                      : isWarning
+                      ? 'bg-amber-950 text-amber-300 border-amber-500 animate-pulse'
+                      : timerMode === 'speech'
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-600'
+                      : timerMode === 'prep'
+                      ? 'bg-blue-950 text-blue-300 border-blue-600'
+                      : 'bg-slate-950 text-slate-400 border-slate-800'
+                  }`}
+                >
+                  {isOvertime ? '⚠️ OVERTIME' : timerMode === 'speech' ? 'LIVE PODIUM' : timerMode.toUpperCase()}
                 </span>
               </div>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
-                  isOvertime
-                    ? 'bg-rose-950 text-rose-300 border-rose-600 animate-pulse'
+            </div>
+
+            {/* Giant Circular Countdown Dial */}
+            <div className="relative flex items-center justify-center my-auto z-10">
+              <svg
+                width={round3TimerSize}
+                height={round3TimerSize}
+                viewBox="0 0 400 400"
+                className={`transition-transform duration-300 ${
+                  isOvertime || isTimeUp
+                    ? 'drop-shadow-[0_0_50px_rgba(244,63,94,0.6)]'
+                    : isWarning
+                    ? 'drop-shadow-[0_0_40px_rgba(251,191,36,0.5)]'
                     : timerMode === 'speech'
-                    ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                    : timerMode === 'prep'
-                    ? 'bg-blue-950 text-blue-400 border-blue-800'
-                    : timerMode === 'time_up'
-                    ? 'bg-rose-950 text-rose-400 border-rose-800 animate-pulse'
-                    : 'bg-slate-950 text-slate-400 border-slate-800'
+                    ? 'drop-shadow-[0_0_35px_rgba(16,185,129,0.35)]'
+                    : 'drop-shadow-[0_0_20px_rgba(0,0,0,0.5)]'
                 }`}
               >
-                {isOvertime ? 'OVERTIME' : timerMode === 'speech' ? 'LIVE' : timerMode.toUpperCase()}
-              </span>
-            </div>
+                <defs>
+                  <linearGradient id="r3EmeraldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#10b981" />
+                    <stop offset="100%" stopColor="#06b6d4" />
+                  </linearGradient>
+                  <linearGradient id="r3AmberGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#fbbf24" />
+                    <stop offset="100%" stopColor="#f59e0b" />
+                  </linearGradient>
+                  <linearGradient id="r3RoseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#f43f5e" />
+                    <stop offset="100%" stopColor="#e11d48" />
+                  </linearGradient>
+                  <linearGradient id="r3BlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="100%" stopColor="#60a5fa" />
+                  </linearGradient>
+                </defs>
 
-            {/* Large Digits */}
-            <div
-              className={`font-mono text-5xl sm:text-6xl md:text-7xl font-black tracking-tight leading-none transition-colors duration-200 ${
-                isOvertime
-                  ? 'text-rose-400 animate-pulse drop-shadow-[0_0_35px_rgba(244,63,94,0.7)]'
-                  : isTimeUp
-                  ? 'text-rose-500 animate-pulse drop-shadow-[0_0_30px_rgba(244,63,94,0.6)]'
-                  : isWarning
-                  ? 'text-amber-400 animate-pulse drop-shadow-[0_0_25px_rgba(251,191,36,0.5)]'
-                  : timerMode === 'speech'
-                  ? 'text-emerald-400 drop-shadow-[0_0_25px_rgba(52,211,153,0.3)]'
-                  : timerMode === 'prep'
-                  ? 'text-blue-400 drop-shadow-[0_0_25px_rgba(96,165,250,0.3)]'
-                  : 'text-white'
-              }`}
-            >
-              {isOvertime ? computedTimer.formattedOvertime : formatTime(remainingSeconds)}
-            </div>
+                {/* Ambient Dark Inner Circle */}
+                <circle cx="200" cy="200" r="156" fill="rgba(15, 23, 42, 0.75)" />
 
-            {/* Progress Bar */}
-            <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  isOvertime
-                    ? 'bg-rose-500'
-                    : isTimeUp
-                    ? 'bg-rose-500'
-                    : isWarning
-                    ? 'bg-amber-400'
-                    : timerMode === 'prep'
-                    ? 'bg-gradient-to-r from-blue-500 to-cyan-400'
-                    : 'bg-gradient-to-r from-purple-500 to-emerald-400'
-                }`}
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
+                {/* Track Circle */}
+                <circle
+                  cx="200"
+                  cy="200"
+                  r="165"
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.08)"
+                  strokeWidth="15"
+                />
 
-            {/* Time's Up / Overtime Banner */}
-            {isOvertime ? (
-              <div className="py-1.5 px-3 rounded-xl bg-rose-600/30 border border-rose-500/60 text-rose-200 font-bold text-xs animate-pulse flex items-center justify-center gap-1.5">
-                <span>⚠️</span>
-                <span>SPEAKING LIMIT REACHED • OVERTIME ({computedTimer.formattedOvertime})</span>
+                {/* Animated Progress Ring */}
+                <circle
+                  cx="200"
+                  cy="200"
+                  r="165"
+                  fill="none"
+                  strokeWidth="15"
+                  strokeLinecap="round"
+                  stroke={
+                    isOvertime || isTimeUp
+                      ? 'url(#r3RoseGrad)'
+                      : isWarning
+                      ? 'url(#r3AmberGrad)'
+                      : timerMode === 'speech'
+                      ? 'url(#r3EmeraldGrad)'
+                      : timerMode === 'prep'
+                      ? 'url(#r3BlueGrad)'
+                      : '#94a3b8'
+                  }
+                  strokeDasharray={1036.73}
+                  strokeDashoffset={
+                    isOvertime
+                      ? 0
+                      : 1036.73 * (1 - Math.max(0, Math.min(100, progressPercent)) / 100)
+                  }
+                  transform="rotate(-90 200 200)"
+                  className="transition-[stroke-dashoffset] duration-200"
+                />
+              </svg>
+
+              {/* Centered Giant Typography Over Dial */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center select-none pointer-events-none">
+                {/* Phase Badge */}
+                <div className="mb-1 sm:mb-2">
+                  <span
+                    className={`text-[10px] sm:text-xs font-mono font-black uppercase tracking-widest px-3 py-1 rounded-full border shadow-md ${
+                      isOvertime
+                        ? 'bg-rose-950/90 text-rose-300 border-rose-500 animate-pulse'
+                        : isTimeUp
+                        ? 'bg-rose-950/90 text-rose-300 border-rose-500 animate-bounce'
+                        : isWarning
+                        ? 'bg-amber-950/90 text-amber-300 border-amber-500 animate-pulse'
+                        : timerMode === 'speech'
+                        ? 'bg-emerald-950/90 text-emerald-300 border-emerald-600'
+                        : timerMode === 'prep'
+                        ? 'bg-blue-950/90 text-blue-300 border-blue-600'
+                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    {isOvertime
+                      ? '⚠️ OVERTIME ACTIVE'
+                      : isTimeUp
+                      ? 'TIME EXPIRED'
+                      : isWarning
+                      ? '⚠️ WARNING PHASE'
+                      : timerMode === 'speech'
+                      ? 'FINAL SPEECH'
+                      : timerMode === 'prep'
+                      ? 'PREPARATION'
+                      : 'PODIUM CLOCK'}
+                  </span>
+                </div>
+
+                {/* Monumental Clock Digits */}
+                <div
+                  style={{ fontSize: `${round3FontSize}px` }}
+                  className={`font-mono font-black tracking-tight leading-none transition-colors duration-200 ${
+                    isOvertime
+                      ? 'text-rose-400 animate-pulse drop-shadow-[0_0_60px_rgba(244,63,94,0.9)]'
+                      : isTimeUp
+                      ? 'text-rose-500 animate-pulse drop-shadow-[0_0_50px_rgba(244,63,94,0.8)]'
+                      : isWarning
+                      ? 'text-amber-400 animate-pulse drop-shadow-[0_0_40px_rgba(251,191,36,0.7)]'
+                      : timerMode === 'speech'
+                      ? 'text-emerald-300 drop-shadow-[0_0_35px_rgba(52,211,153,0.4)]'
+                      : timerMode === 'prep'
+                      ? 'text-blue-300 drop-shadow-[0_0_35px_rgba(96,165,250,0.4)]'
+                      : 'text-white'
+                  }`}
+                >
+                  {isOvertime ? computedTimer.formattedOvertime : formatTime(remainingSeconds)}
+                </div>
+
+                {/* Subtext info */}
+                <div className="mt-1 sm:mt-2 text-xs sm:text-sm font-mono font-semibold">
+                  {isOvertime ? (
+                    <span className="text-rose-300">+{overtimeSeconds}s speaking overtime</span>
+                  ) : isWarning ? (
+                    <span className="text-amber-300">{remainingSeconds}s remaining to conclude</span>
+                  ) : (
+                    <span className="text-slate-400">{computedTimer.speechDurationSeconds}s total speech limit</span>
+                  )}
+                </div>
               </div>
-            ) : isTimeUp ? (
-              <div className="py-1.5 px-3 rounded-xl bg-rose-600/30 border border-rose-500/60 text-rose-300 font-bold text-xs animate-bounce">
-                ⚠️ TIME EXPIRED • BUZZER ACTIVE
+            </div>
+
+            {/* Bottom Progress Bar & Prominent Status / Alert Strip */}
+            <div className="w-full max-w-4xl space-y-2.5 z-10 shrink-0">
+              {/* Progress Bar */}
+              <div className="w-full bg-slate-950/90 h-3 sm:h-3.5 rounded-full overflow-hidden border border-slate-800 shadow-inner">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    isOvertime
+                      ? 'bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.8)]'
+                      : isTimeUp
+                      ? 'bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.7)]'
+                      : isWarning
+                      ? 'bg-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.7)]'
+                      : timerMode === 'prep'
+                      ? 'bg-gradient-to-r from-blue-500 to-cyan-400'
+                      : 'bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-400'
+                  }`}
+                  style={{ width: `${progressPercent}%` }}
+                />
               </div>
-            ) : null}
+
+              {/* Context Banner */}
+              {isOvertime ? (
+                <div className="w-full py-2 px-4 rounded-2xl bg-rose-950/80 border border-rose-500/80 text-rose-200 font-bold text-xs sm:text-sm animate-pulse flex items-center justify-center gap-2 shadow-lg shadow-rose-950/60">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>OFFICIAL TIME LIMIT EXCEEDED • OVERTIME ({computedTimer.formattedOvertime})</span>
+                </div>
+              ) : isTimeUp ? (
+                <div className="w-full py-2 px-4 rounded-2xl bg-rose-950/80 border border-rose-500/80 text-rose-300 font-bold text-xs sm:text-sm animate-bounce flex items-center justify-center gap-2 shadow-lg shadow-rose-950/60">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>SPEECH TIME EXPIRED • BUZZER ACTIVE</span>
+                </div>
+              ) : isWarning ? (
+                <div className="w-full py-2 px-4 rounded-2xl bg-amber-950/80 border border-amber-500/80 text-amber-200 font-bold text-xs sm:text-sm animate-pulse flex items-center justify-center gap-2 shadow-lg shadow-amber-950/60">
+                  <Bell className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>WARNING ALERT • {remainingSeconds} SECONDS REMAINING ON PODIUM</span>
+                </div>
+              ) : (
+                <div className="w-full py-1.5 px-4 rounded-2xl bg-slate-950/60 border border-emerald-500/30 text-emerald-300/90 font-semibold text-xs flex items-center justify-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>GRAND FINALS ARENA • AUDITORIUM LIVE TIMING</span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
