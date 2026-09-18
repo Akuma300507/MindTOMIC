@@ -114,7 +114,16 @@ export const api = {
     return res.json();
   },
 
-  async setEventRound(round: 1 | 2 | 3, force?: boolean): Promise<{ success: boolean; currentRound: 1 | 2 | 3; stations: Record<string, StationState> }> {
+  async setEventRound(
+    round: 1 | 2 | 3,
+    force?: boolean
+  ): Promise<{
+    success: boolean;
+    currentRound: 1 | 2 | 3;
+    round2PermissionGranted?: boolean;
+    round3PermissionGranted?: boolean;
+    stations: Record<string, StationState>;
+  }> {
     const res = await fetch('/api/event/set-round', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -127,8 +136,36 @@ export const api = {
     return res.json();
   },
 
+  async grantStagePermission(
+    targetRound: 2 | 3,
+    markAbsent = true,
+    force = false
+  ): Promise<{
+    success: boolean;
+    message?: string;
+    currentRound: 2 | 3;
+    markedAbsentCount: number;
+    round2PermissionGranted?: boolean;
+    round3PermissionGranted?: boolean;
+    stations: Record<string, StationState>;
+  }> {
+    const res = await fetch('/api/event/stage-permission', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetRound, markAbsent, force }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to grant stage permission for Round ${targetRound}`);
+    }
+    return res.json();
+  },
+
   async getRoundStatus(): Promise<{
     currentRound: 1 | 2 | 3;
+    round2PermissionGranted?: boolean;
+    round3PermissionGranted?: boolean;
+    stagePermissions?: Record<string, any>;
     rounds: Record<1 | 2 | 3, any>;
   }> {
     const res = await fetch('/api/event/round-status');

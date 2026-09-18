@@ -504,6 +504,34 @@ export const Round1: React.FC = () => {
         </div>
       )}
 
+      {/* Station Round 1 Complete (Arrived Contestants Evaluated) */}
+      {round1Progress && round1Progress.isComplete && round1Progress.arrivedCount > 0 && (
+        <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-extrabold text-white text-sm block">
+                Stage Round 1 Completed ({round1Progress.completed}/{round1Progress.arrivedCount} Present Contestants)
+              </span>
+              <span className="text-xs text-emerald-300/90">
+                All present contestants at this station have concluded their speeches.{' '}
+                {round1Progress.absentCount > 0 && (
+                  <span className="text-amber-300/90">
+                    ({round1Progress.absentCount} did not check in / absent).{' '}
+                  </span>
+                )}
+                Awaiting Master permission to begin Round 2.
+              </span>
+            </div>
+          </div>
+          <span className="px-3 py-1 rounded-full bg-emerald-900/50 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 shrink-0 self-start sm:self-center">
+            Waiting for Master Authorization
+          </span>
+        </div>
+      )}
+
       {/* Pool Status & Alerts */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-xs">
         <div className="flex items-center gap-2">

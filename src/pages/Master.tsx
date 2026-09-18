@@ -34,6 +34,7 @@ import {
   Unlock,
   ArrowRight,
   Trophy,
+  UserX,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { computeStationTimer } from '../lib/timerUtils';
@@ -63,6 +64,9 @@ export const Master: React.FC = () => {
     reloadState,
     checkInParticipant,
     currentEventRound,
+    round2PermissionGranted,
+    round3PermissionGranted,
+    grantStagePermission,
     advanceCompetitionRound,
     getStationRoundProgress,
     getGlobalRoundProgress,
@@ -85,49 +89,80 @@ export const Master: React.FC = () => {
   const [pingingProjectId, setPingingProjectId] = useState<string | null>(null);
   const [assigningProjectId, setAssigningProjectId] = useState<string | null>(null);
 
-  // Synchronized Round Advancement Modal State
-  const [advanceModal, setAdvanceModal] = useState<{
-    targetRound: 1 | 2 | 3;
+  // Synchronized Round Stage Permission Modal State
+  const [stagePermissionModal, setStagePermissionModal] = useState<{
+    targetRound: 2 | 3;
     isForce: boolean;
-    remainingContestants: Array<{ id: string; name: string; stationName: string; participantNumber: string }>;
+    arrivedCount: number;
+    completedCount: number;
+    absentCount: number;
+    totalRegistered: number;
+    markAbsent: boolean;
+    pendingArrivedContestants: Array<{ id: string; name: string; stationName: string; participantNumber: string }>;
+    absentContestants: Array<{ id: string; name: string; stationName: string; participantNumber: string }>;
   } | null>(null);
   const [isAdvancing, setIsAdvancing] = useState<boolean>(false);
 
   const handleInitiateAdvance = (targetRound: 1 | 2 | 3) => {
+    if (targetRound === 1) {
+      if (confirm('Return all stations to Round 1? Current station active media will be reset.')) {
+        advanceCompetitionRound(1, true).then((res) => {
+          setToastMessage(res.message || 'All stations switched to Round 1.');
+          setTimeout(() => setToastMessage(null), 3500);
+        });
+      }
+      return;
+    }
+
     const priorRound = (targetRound === 2 ? 1 : 2) as 1 | 2;
     const progress = getGlobalRoundProgress(priorRound);
 
-    const remaining: Array<{ id: string; name: string; stationName: string; participantNumber: string }> = [];
-    if (!progress.isComplete) {
-      progress.pendingParticipants.forEach((p) => {
-        remaining.push({
-          id: p.id,
-          name: p.name,
-          stationName: p.stationName || 'Station',
-          participantNumber: p.participantNumber || '',
-        });
-      });
-    }
+    const pendingArrived = progress.pendingParticipants.map((p) => ({
+      id: p.id,
+      name: p.name,
+      stationName: p.stationName || 'Station',
+      participantNumber: p.participantNumber || '',
+    }));
 
-    setAdvanceModal({
-      targetRound,
-      isForce: remaining.length > 0,
-      remainingContestants: remaining,
+    const absentees = progress.absentParticipants.map((p) => ({
+      id: p.id,
+      name: p.name,
+      stationName: p.stationName || 'Station',
+      participantNumber: p.participantNumber || '',
+    }));
+
+    setStagePermissionModal({
+      targetRound: targetRound as 2 | 3,
+      isForce: !progress.isComplete,
+      arrivedCount: progress.arrivedCount,
+      completedCount: progress.completed,
+      absentCount: progress.absentCount,
+      totalRegistered: progress.total,
+      markAbsent: true,
+      pendingArrivedContestants: pendingArrived,
+      absentContestants: absentees,
     });
   };
 
-  const handleConfirmAdvance = async (force: boolean) => {
-    if (!advanceModal) return;
+  const handleConfirmStagePermission = async () => {
+    if (!stagePermissionModal) return;
     setIsAdvancing(true);
-    const res = await advanceCompetitionRound(advanceModal.targetRound, force);
+    const res = await grantStagePermission(
+      stagePermissionModal.targetRound,
+      stagePermissionModal.markAbsent,
+      stagePermissionModal.isForce
+    );
     setIsAdvancing(false);
     if (res.success) {
-      setToastMessage(res.message || `All stations successfully advanced to Round ${advanceModal.targetRound}!`);
-      setAdvanceModal(null);
+      setToastMessage(
+        res.message ||
+        `Permission granted! All stations advanced to Round ${stagePermissionModal.targetRound}.`
+      );
+      setStagePermissionModal(null);
     } else {
       setToastMessage(`Action blocked: ${res.message}`);
     }
-    setTimeout(() => setToastMessage(null), 4000);
+    setTimeout(() => setToastMessage(null), 4500);
   };
 
   // Station Handler Edit Form
@@ -386,9 +421,9 @@ export const Master: React.FC = () => {
         const round2Prog = getGlobalRoundProgress(2);
         const round3Prog = getGlobalRoundProgress(3);
 
-        const r1Pct = round1Prog.total > 0 ? Math.round((round1Prog.completed / round1Prog.total) * 100) : 0;
-        const r2Pct = round2Prog.total > 0 ? Math.round((round2Prog.completed / round2Prog.total) * 100) : 0;
-        const r3Pct = round3Prog.total > 0 ? Math.round((round3Prog.completed / round3Prog.total) * 100) : 0;
+        const r1Pct = round1Prog.arrivedCount > 0 ? Math.round((round1Prog.completed / round1Prog.arrivedCount) * 100) : 0;
+        const r2Pct = round2Prog.arrivedCount > 0 ? Math.round((round2Prog.completed / round2Prog.arrivedCount) * 100) : (round2Prog.total > 0 ? Math.round((round2Prog.completed / round2Prog.total) * 100) : 0);
+        const r3Pct = round3Prog.arrivedCount > 0 ? Math.round((round3Prog.completed / round3Prog.arrivedCount) * 100) : (round3Prog.total > 0 ? Math.round((round3Prog.completed / round3Prog.total) * 100) : 0);
 
         return (
           <div className="bg-slate-900/95 border border-purple-800/40 rounded-3xl p-5 md:p-6 shadow-2xl backdrop-blur-md space-y-5">
@@ -408,7 +443,7 @@ export const Master: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Stations progress strictly in sync: All stations finish Round 1 before Round 2 starts.
+                    Stations progress in sync: Master grants permission to conclude each round and launch the next.
                   </p>
                 </div>
               </div>
@@ -428,8 +463,8 @@ export const Master: React.FC = () => {
                     {round1Prog.isComplete ? <Unlock className="w-4 h-4 text-emerald-300" /> : <Lock className="w-4 h-4 text-amber-400" />}
                     <span>
                       {round1Prog.isComplete
-                        ? 'All Stations Ready ➔ Start Round 2'
-                        : `Advance All Stations to Round 2 (${round1Prog.remaining} pending)`}
+                        ? 'Ready ➔ Grant Permission & Start Round 2'
+                        : `Review Attendance & Authorize Round 2 (${round1Prog.remaining} in progress)`}
                     </span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
@@ -448,8 +483,8 @@ export const Master: React.FC = () => {
                     {round2Prog.isComplete ? <Trophy className="w-4 h-4 text-slate-950" /> : <Lock className="w-4 h-4 text-amber-400" />}
                     <span>
                       {round2Prog.isComplete
-                        ? 'All Stations Ready ➔ Start Finals (Round 3)'
-                        : `Advance All Stations to Finals (${round2Prog.remaining} pending)`}
+                        ? 'Ready ➔ Grant Permission & Start Finals'
+                        : `Review Attendance & Authorize Finals (${round2Prog.remaining} in progress)`}
                     </span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
@@ -488,9 +523,15 @@ export const Master: React.FC = () => {
                       <CheckCircle2 className="w-3 h-3" /> Completed
                     </span>
                   ) : currentEventRound === 1 ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">
-                      In Progress
-                    </span>
+                    round1Prog.isComplete ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Ready for Round 2
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">
+                        In Progress
+                      </span>
+                    )
                   ) : (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-800 text-slate-400">
                       Pending
@@ -501,9 +542,9 @@ export const Master: React.FC = () => {
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400 text-[11px]">Contestants Done</span>
+                    <span className="text-slate-400 text-[11px]">Present Evaluated</span>
                     <span className="font-bold text-white font-mono text-xs">
-                      {round1Prog.completed} / {round1Prog.total} ({r1Pct}%)
+                      {round1Prog.completed} / {round1Prog.arrivedCount} ({r1Pct}%)
                     </span>
                   </div>
                   <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
@@ -515,9 +556,14 @@ export const Master: React.FC = () => {
                     />
                   </div>
                   <div className="text-[10px] text-slate-400 pt-0.5 flex items-center justify-between">
-                    <span>{round1Prog.remaining === 0 ? 'All stations completed' : `${round1Prog.remaining} contestants waiting`}</span>
+                    <span>
+                      {round1Prog.remaining === 0
+                        ? 'All arrived contestants completed'
+                        : `${round1Prog.remaining} arrived waiting`}
+                      {round1Prog.absentCount > 0 && ` • ${round1Prog.absentCount} absent`}
+                    </span>
                     {currentEventRound === 1 && (
-                      <span className="text-purple-300 font-semibold font-mono">Live on all stations</span>
+                      <span className="text-purple-300 font-semibold font-mono">Live</span>
                     )}
                   </div>
                 </div>
@@ -558,9 +604,9 @@ export const Master: React.FC = () => {
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-400 text-[11px]">Qualified Done</span>
+                    <span className="text-slate-400 text-[11px]">Qualified Evaluated</span>
                     <span className="font-bold text-white font-mono text-xs">
-                      {round2Prog.completed} / {round2Prog.total} ({r2Pct}%)
+                      {round2Prog.completed} / {round2Prog.arrivedCount || round2Prog.total} ({r2Pct}%)
                     </span>
                   </div>
                   <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
@@ -573,9 +619,13 @@ export const Master: React.FC = () => {
                   </div>
                   <div className="text-[10px] text-slate-400 pt-0.5">
                     {currentEventRound < 2 ? (
-                      <span className="text-amber-400/90 font-medium">Locked until Round 1 ends on all stations</span>
+                      <span className="text-amber-400/90 font-medium">Locked until Master authorizes Round 2</span>
                     ) : (
-                      <span>{round2Prog.remaining === 0 ? 'All qualified finished' : `${round2Prog.remaining} contestants waiting`}</span>
+                      <span>
+                        {round2Prog.remaining === 0
+                          ? 'All qualified finished'
+                          : `${round2Prog.remaining} qualified waiting`}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -612,7 +662,7 @@ export const Master: React.FC = () => {
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-400 text-[11px]">Finalists Done</span>
                     <span className="font-bold text-white font-mono text-xs">
-                      {round3Prog.completed} / {round3Prog.total} ({r3Pct}%)
+                      {round3Prog.completed} / {round3Prog.arrivedCount || round3Prog.total} ({r3Pct}%)
                     </span>
                   </div>
                   <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
@@ -1858,103 +1908,163 @@ export const Master: React.FC = () => {
         </div>
       )}
 
-      {/* Round Advancement Confirmation Modal */}
-      {advanceModal && (
+      {/* Master Stage Permission & Attendance Review Modal */}
+      {stagePermissionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
           <div className="bg-slate-900 border border-purple-800/60 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-5">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
                 <div
                   className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                    advanceModal.isForce
+                    stagePermissionModal.isForce
                       ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400'
                       : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
                   }`}
                 >
-                  {advanceModal.isForce ? <AlertTriangle className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
+                  {stagePermissionModal.isForce ? <AlertTriangle className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-white font-['Outfit']">
-                    {advanceModal.isForce
-                      ? 'Unfinished Contestants Detected'
-                      : `Advance All Stations to Round ${advanceModal.targetRound}`}
+                    Authorize & Launch Round {stagePermissionModal.targetRound}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Synchronized stage progression across all event stations
+                    Master stage clearance and attendance review
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setAdvanceModal(null)}
+                onClick={() => setStagePermissionModal(null)}
                 className="text-slate-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {advanceModal.isForce ? (
-              <div className="space-y-3">
-                <div className="p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-amber-300">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>
-                      Warning: {advanceModal.remainingContestants.length} contestant(s) have not completed Round{' '}
-                      {advanceModal.targetRound - 1}!
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
-                    By design, all stations must finish their contestants before moving to the next round. If you force advance now, these contestants will be skipped for this round.
-                  </p>
-                </div>
+            {/* Attendance & Completion KPI Summary */}
+            <div className="grid grid-cols-3 gap-2 p-3 bg-slate-950 rounded-2xl border border-slate-800 text-center">
+              <div className="p-2">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Present Done</span>
+                <span className="text-base font-black text-emerald-400 font-mono">
+                  {stagePermissionModal.completedCount} / {stagePermissionModal.arrivedCount}
+                </span>
+                <span className="text-[9px] text-slate-500 block">
+                  {stagePermissionModal.arrivedCount > 0
+                    ? `${Math.round((stagePermissionModal.completedCount / stagePermissionModal.arrivedCount) * 100)}% Done`
+                    : '0 Present'}
+                </span>
+              </div>
+              <div className="p-2 border-x border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Absent / No-Show</span>
+                <span className="text-base font-black text-amber-400 font-mono">
+                  {stagePermissionModal.absentCount}
+                </span>
+                <span className="text-[9px] text-slate-500 block">Unchecked</span>
+              </div>
+              <div className="p-2">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Roster</span>
+                <span className="text-base font-black text-purple-300 font-mono">
+                  {stagePermissionModal.totalRegistered}
+                </span>
+                <span className="text-[9px] text-slate-500 block">Registered</span>
+              </div>
+            </div>
 
-                <div className="max-h-40 overflow-y-auto space-y-1.5 p-2.5 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
-                    Pending Contestants:
+            {/* Unfinished Arrived Contestants Warning (if any arrived contestants are pending) */}
+            {stagePermissionModal.isForce && (
+              <div className="p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-amber-300">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>
+                    Warning: {stagePermissionModal.pendingArrivedContestants.length} arrived contestant(s) haven't completed Round{' '}
+                    {stagePermissionModal.targetRound - 1}!
                   </span>
-                  {advanceModal.remainingContestants.slice(0, 10).map((c) => (
+                </div>
+                <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                  These contestants checked in but have not finished speaking. Advancing now will skip them.
+                </p>
+                <div className="max-h-28 overflow-y-auto space-y-1 pt-1">
+                  {stagePermissionModal.pendingArrivedContestants.map((c) => (
                     <div
                       key={c.id}
-                      className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800"
+                      className="flex items-center justify-between px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px]"
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-purple-300 font-bold">#{c.participantNumber}</span>
-                        <span className="text-white font-medium">{c.name}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-400">{c.stationName}</span>
+                      <span className="font-mono text-purple-300 font-bold">#{c.participantNumber} {c.name}</span>
+                      <span className="text-slate-400">{c.stationName}</span>
                     </div>
                   ))}
-                  {advanceModal.remainingContestants.length > 10 && (
-                    <div className="text-[11px] text-slate-500 text-center pt-1 italic">
-                      + {advanceModal.remainingContestants.length - 10} more contestants
-                    </div>
-                  )}
                 </div>
               </div>
-            ) : (
-              <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-200 space-y-2">
+            )}
+
+            {/* Absent / No-Show Contestants Management */}
+            {stagePermissionModal.absentCount > 0 && (
+              <div className="space-y-2 p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <UserX className="w-3.5 h-3.5 text-amber-400" />
+                    <span>No-Show Contestants ({stagePermissionModal.absentCount})</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400">Did not check in to Round 1</span>
+                </div>
+
+                <div className="max-h-28 overflow-y-auto space-y-1 p-1 bg-slate-900/60 rounded-xl border border-slate-800/80">
+                  {stagePermissionModal.absentContestants.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between px-2 py-1 text-[11px] text-slate-300"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-amber-400/90 font-bold">#{c.participantNumber}</span>
+                        <span>{c.name}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500">{c.stationName}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={stagePermissionModal.markAbsent}
+                    onChange={(e) =>
+                      setStagePermissionModal((prev) =>
+                        prev ? { ...prev, markAbsent: e.target.checked } : null
+                      )
+                    }
+                    className="mt-0.5 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-0 cursor-pointer"
+                  />
+                  <span className="text-[11px] text-slate-300 leading-snug">
+                    Mark these <strong>{stagePermissionModal.absentCount}</strong> contestants as <strong>Absent</strong> (excludes them from Round {stagePermissionModal.targetRound} qualification).
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {!stagePermissionModal.isForce && (
+              <div className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-200 space-y-1">
                 <div className="flex items-center gap-2 font-bold text-emerald-300">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>All stations have finished Round {advanceModal.targetRound - 1}!</span>
+                  <span>All present contestants have completed Round {stagePermissionModal.targetRound - 1}!</span>
                 </div>
                 <p className="text-[11px] text-emerald-200/80 leading-relaxed">
-                  Advancing will simultaneously switch all stations to <strong>Round {advanceModal.targetRound}</strong>, reset station timers, and unlock Round {advanceModal.targetRound} for all operators.
+                  Granting permission will simultaneously switch all stations to <strong>Round {stagePermissionModal.targetRound}</strong>, reset station timers, and unlock Round {stagePermissionModal.targetRound} for all operators.
                 </p>
               </div>
             )}
 
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-purple-900/30">
               <button
-                onClick={() => setAdvanceModal(null)}
+                onClick={() => setStagePermissionModal(null)}
                 disabled={isAdvancing}
                 className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={() => handleConfirmAdvance(advanceModal.isForce)}
+                onClick={handleConfirmStagePermission}
                 disabled={isAdvancing}
                 className={`px-5 py-2.5 rounded-xl text-white text-xs font-extrabold flex items-center gap-2 shadow-lg transition-all ${
-                  advanceModal.isForce
+                  stagePermissionModal.isForce
                     ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/60'
                     : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/60'
                 }`}
@@ -1962,15 +2072,15 @@ export const Master: React.FC = () => {
                 {isAdvancing ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Advancing...</span>
+                    <span>Authorizing...</span>
                   </>
                 ) : (
                   <>
-                    {advanceModal.isForce ? <AlertTriangle className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+                    <Unlock className="w-3.5 h-3.5" />
                     <span>
-                      {advanceModal.isForce
-                        ? `Force Advance to Round ${advanceModal.targetRound}`
-                        : `Advance to Round ${advanceModal.targetRound}`}
+                      {stagePermissionModal.isForce
+                        ? `Force Authorize Round ${stagePermissionModal.targetRound}`
+                        : `Grant Permission & Launch Round ${stagePermissionModal.targetRound}`}
                     </span>
                   </>
                 )}

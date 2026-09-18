@@ -139,6 +139,7 @@ const defaultHistory: EventLog[] = [];
 function isParticipantCheckedIn(p?: Participant | null): boolean {
   if (!p) return false;
   if (p.checkedIn === false) return false;
+  if (p.status === 'absent' || p.status === 'eliminated' || p.status === 'disqualified') return false;
   return Boolean(p.checkedIn === true || p.status === 'checked_in' || p.checkedInAt);
 }
 
@@ -1537,7 +1538,7 @@ app.post('/api/stations/:id/ping', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Ping sent to station' });
 });
 
-// Helper to calculate round completion progress across stations
+// Helper to calculate round completion progress across stations (attendance-aware)
 function checkRoundCompletionStatus(round: 1 | 2 | 3) {
   const stationDetails: Record<
     string,
@@ -1545,14 +1546,22 @@ function checkRoundCompletionStatus(round: 1 | 2 | 3) {
       stationId: string;
       stationName: string;
       total: number;
+      arrivedCount: number;
       completed: number;
+      absentCount: number;
       remaining: number;
       isComplete: boolean;
       pendingContestants: { id: string; name: string; participantNumber: string }[];
+      absentContestants: { id: string; name: string; participantNumber: string }[];
     }
   > = {};
   let totalAcrossStations = 0;
+  let arrivedAcrossStations = 0;
   let completedAcrossStations = 0;
+  let absentAcrossStations = 0;
+  let remainingAcrossStations = 0;
+  const allPendingContestants: { id: string; name: string; participantNumber: string; stationName: string }[] = [];
+  const allAbsentContestants: { id: string; name: string; participantNumber: string; stationName: string }[] = [];
 
   const stations = Object.values(db.stations || {});
   const participants = db.participants || [];
@@ -1582,7 +1591,11 @@ function checkRoundCompletionStatus(round: 1 | 2 | 3) {
       return true;
     });
 
-    const completed = allocated.filter((p) => {
+    // Separate into arrived (checked-in) vs absent (never checked-in or marked absent)
+    const arrived = allocated.filter((p) => isParticipantCheckedIn(p));
+    const absent = allocated.filter((p) => !isParticipantCheckedIn(p));
+
+    const completed = arrived.filter((p) => {
       const hasResult = results.some((r) => r.participantId === p.id);
       const statusCompleted =
         round === 1
@@ -1593,16 +1606,26 @@ function checkRoundCompletionStatus(round: 1 | 2 | 3) {
       return hasResult || statusCompleted;
     });
 
-    const pending = allocated.filter((p) => !completed.some((c) => c.id === p.id));
+    const pendingArrived = arrived.filter((p) => !completed.some((c) => c.id === p.id));
+
+    // A station is complete if all arrived contestants have completed their speech
+    const stationIsComplete = arrived.length > 0 ? pendingArrived.length === 0 : true;
 
     stationDetails[st.id] = {
       stationId: st.id,
       stationName: st.name,
       total: allocated.length,
+      arrivedCount: arrived.length,
       completed: completed.length,
-      remaining: pending.length,
-      isComplete: pending.length === 0,
-      pendingContestants: pending.map((p) => ({
+      absentCount: absent.length,
+      remaining: pendingArrived.length,
+      isComplete: stationIsComplete,
+      pendingContestants: pendingArrived.map((p) => ({
+        id: p.id,
+        name: p.name,
+        participantNumber: p.participantNumber,
+      })),
+      absentContestants: absent.map((p) => ({
         id: p.id,
         name: p.name,
         participantNumber: p.participantNumber,
@@ -1610,15 +1633,42 @@ function checkRoundCompletionStatus(round: 1 | 2 | 3) {
     };
 
     totalAcrossStations += allocated.length;
+    arrivedAcrossStations += arrived.length;
     completedAcrossStations += completed.length;
+    absentAcrossStations += absent.length;
+    remainingAcrossStations += pendingArrived.length;
+
+    pendingArrived.forEach((p) => {
+      allPendingContestants.push({
+        id: p.id,
+        name: p.name,
+        participantNumber: p.participantNumber,
+        stationName: st.name,
+      });
+    });
+
+    absent.forEach((p) => {
+      allAbsentContestants.push({
+        id: p.id,
+        name: p.name,
+        participantNumber: p.participantNumber,
+        stationName: st.name,
+      });
+    });
   });
 
-  const remainingAcrossStations = totalAcrossStations - completedAcrossStations;
+  // Overall isComplete is true when all arrived contestants across stations have finished
+  const isComplete = arrivedAcrossStations > 0 ? remainingAcrossStations === 0 : true;
+
   return {
-    isComplete: remainingAcrossStations === 0,
+    isComplete,
     totalParticipants: totalAcrossStations,
+    arrivedParticipants: arrivedAcrossStations,
     completedParticipants: completedAcrossStations,
+    absentParticipants: absentAcrossStations,
     remainingParticipants: remainingAcrossStations,
+    pendingContestants: allPendingContestants,
+    absentContestants: allAbsentContestants,
     stationDetails,
   };
 }
@@ -1628,11 +1678,144 @@ app.get('/api/event/round-status', (_req: Request, res: Response) => {
   const currentRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
   res.json({
     currentRound,
+    round2PermissionGranted: Boolean(db.liveSync?.round2PermissionGranted),
+    round3PermissionGranted: Boolean(db.liveSync?.round3PermissionGranted),
+    stagePermissions: db.liveSync?.stagePermissions || {},
     rounds: {
       1: checkRoundCompletionStatus(1),
       2: checkRoundCompletionStatus(2),
       3: checkRoundCompletionStatus(3),
     },
+  });
+});
+
+// Dedicated Master Stage Permission & Launch Endpoint
+app.post('/api/event/stage-permission', (req: Request, res: Response) => {
+  const { targetRound, markAbsent, force } = req.body;
+  if (![2, 3].includes(Number(targetRound))) {
+    return res.status(400).json({ error: 'Permission target round must be 2 or 3.' });
+  }
+
+  const roundNum = Number(targetRound) as 2 | 3;
+  const prevRound = (roundNum - 1) as 1 | 2;
+  const status = checkRoundCompletionStatus(prevRound);
+
+  if (!status.isComplete && !force) {
+    return res.status(400).json({
+      error: `Cannot authorize Round ${roundNum}: Round ${prevRound} still has ${status.remainingParticipants} arrived contestants in progress across stations.`,
+      status,
+    });
+  }
+
+  // If markAbsent is requested, resolve un-arrived contestants from the roster
+  let markedAbsentCount = 0;
+  if (markAbsent && db.participants) {
+    db.participants.forEach((p) => {
+      const wasCheckedIn = isParticipantCheckedIn(p);
+      if (!wasCheckedIn && p.status !== 'eliminated' && p.status !== 'disqualified') {
+        p.status = 'absent';
+        if (prevRound === 1) {
+          p.round1Status = 'not_started';
+          p.round1Qualified = 'disqualified';
+        } else if (prevRound === 2) {
+          p.round2Status = 'not_started';
+          p.round2Qualified = 'disqualified';
+        }
+        markedAbsentCount++;
+      }
+    });
+  }
+
+  if (!db.liveSync) {
+    db.liveSync = {
+      currentRound: roundNum,
+      activeParticipantId: null,
+      timerMode: 'idle',
+      timerRemainingSeconds: 120,
+      timerTotalSeconds: 120,
+      isTimerRunning: false,
+      stationStates: db.stations || {},
+    };
+  }
+
+  // Grant permission
+  if (roundNum === 2) {
+    db.liveSync.round2PermissionGranted = true;
+  } else if (roundNum === 3) {
+    db.liveSync.round3PermissionGranted = true;
+  }
+
+  if (!db.liveSync.stagePermissions) {
+    db.liveSync.stagePermissions = {};
+  }
+  const permKey = roundNum === 2 ? 'round2' : 'round3';
+  db.liveSync.stagePermissions[permKey] = {
+    granted: true,
+    grantedAt: new Date().toISOString(),
+    grantedBy: 'Master Supervisor',
+    absentCount: markedAbsentCount,
+  };
+
+  // Synchronize all stations to the authorized round
+  db.liveSync.currentRound = roundNum;
+  const roundDuration =
+    roundNum === 2
+      ? db.settings.round2.speechTimeSeconds || 120
+      : db.settings.round3.speechTimeSeconds || 120;
+
+  if (db.stations) {
+    Object.values(db.stations).forEach((station) => {
+      station.currentRound = roundNum;
+      station.status = 'WAITING';
+      station.selectedImageId = null;
+      station.selectedImage = null;
+      station.selectedTopicId = null;
+      station.selectedTopic = null;
+      station.wheelSpin = null;
+      station.timerMode = 'idle';
+      station.timerTotalSeconds = roundDuration;
+      station.timerRemainingSeconds = roundDuration;
+      station.isTimerRunning = false;
+      station.timerStartedAt = null;
+      station.timerEndsAt = null;
+
+      if (station.activeParticipantId) {
+        const p = db.participants.find((item) => item.id === station.activeParticipantId);
+        if (
+          !p ||
+          (roundNum === 2 && p.round1Qualified !== 'qualified') ||
+          (roundNum === 3 && p.round2Qualified !== 'qualified')
+        ) {
+          station.activeParticipantId = null;
+          station.activeParticipant = null;
+        }
+      }
+    });
+  }
+
+  persistDB();
+  logAction(
+    `Stage Permission Granted for Round ${roundNum}`,
+    `Master authorized Round ${roundNum} start. Marked ${markedAbsentCount} no-shows as absent.`
+  );
+  broadcastSSE('event_round_changed', {
+    currentRound: roundNum,
+    stations: db.stations,
+    round2PermissionGranted: db.liveSync.round2PermissionGranted,
+    round3PermissionGranted: db.liveSync.round3PermissionGranted,
+    stagePermissions: db.liveSync.stagePermissions,
+  });
+  broadcastSSE('stations_updated', db.stations);
+  broadcastSSE('participants_updated', db.participants);
+
+  res.json({
+    success: true,
+    message: `Permission granted for Round ${roundNum}. All stations advanced to Round ${roundNum}.`,
+    currentRound: roundNum,
+    markedAbsentCount,
+    round2PermissionGranted: db.liveSync.round2PermissionGranted,
+    round3PermissionGranted: db.liveSync.round3PermissionGranted,
+    stations: db.stations,
   });
 });
 
@@ -1646,13 +1829,13 @@ app.post('/api/event/set-round', (req: Request, res: Response) => {
   const targetRound = Number(round) as 1 | 2 | 3;
   const currentRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
 
-  // If advancing forward, verify that preceding round is complete unless forced by Master
+  // If advancing forward, verify that preceding round is complete for arrived participants unless forced by Master
   if (targetRound > currentRound && !force) {
     const prevRound = (targetRound - 1) as 1 | 2;
     const prevStatus = checkRoundCompletionStatus(prevRound);
     if (!prevStatus.isComplete) {
       return res.status(400).json({
-        error: `Cannot advance to Round ${targetRound}: Round ${prevRound} is still in progress across stations (${prevStatus.remainingParticipants} contestants pending).`,
+        error: `Cannot advance to Round ${targetRound}: Round ${prevRound} is still in progress across stations (${prevStatus.remainingParticipants} arrived contestants pending).`,
         details: prevStatus,
       });
     }
@@ -1670,6 +1853,14 @@ app.post('/api/event/set-round', (req: Request, res: Response) => {
     };
   } else {
     db.liveSync.currentRound = targetRound;
+  }
+
+  // Update permission flags accordingly
+  if (targetRound >= 2) db.liveSync.round2PermissionGranted = true;
+  if (targetRound >= 3) db.liveSync.round3PermissionGranted = true;
+  if (targetRound === 1) {
+    db.liveSync.round2PermissionGranted = false;
+    db.liveSync.round3PermissionGranted = false;
   }
 
   // Set all stations to the new round simultaneously
@@ -1713,12 +1904,19 @@ app.post('/api/event/set-round', (req: Request, res: Response) => {
 
   persistDB();
   logAction('Competition Round Advanced', `All stations synchronized and advanced to Round ${targetRound}`);
-  broadcastSSE('event_round_changed', { currentRound: targetRound, stations: db.stations });
+  broadcastSSE('event_round_changed', {
+    currentRound: targetRound,
+    stations: db.stations,
+    round2PermissionGranted: db.liveSync.round2PermissionGranted,
+    round3PermissionGranted: db.liveSync.round3PermissionGranted,
+  });
   broadcastSSE('stations_updated', db.stations);
 
   res.json({
     success: true,
     currentRound: targetRound,
+    round2PermissionGranted: db.liveSync.round2PermissionGranted,
+    round3PermissionGranted: db.liveSync.round3PermissionGranted,
     stations: db.stations,
   });
 });

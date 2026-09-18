@@ -46,6 +46,7 @@ export const Round2: React.FC = () => {
     updateSettings,
     setStationParticipant,
     currentEventRound,
+    round2PermissionGranted,
     getGlobalRoundProgress,
     getStationRoundProgress,
   } = useApp();
@@ -448,9 +449,9 @@ export const Round2: React.FC = () => {
     [activeParticipant, winningTopic, speechSeconds, saveRound2Result, db?.topics, topicsPool, activeWheelTopics, currentStationId]
   );
 
-  if (currentEventRound < 2) {
+  if (currentEventRound < 2 || !round2PermissionGranted) {
     const round1Global = getGlobalRoundProgress(1);
-    const r1Pct = round1Global.total > 0 ? Math.round((round1Global.completed / round1Global.total) * 100) : 0;
+    const r1Pct = round1Global.arrivedCount > 0 ? Math.round((round1Global.completed / round1Global.arrivedCount) * 100) : 0;
 
     return (
       <div className="p-6 md:p-10 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
@@ -461,22 +462,22 @@ export const Round2: React.FC = () => {
 
           <div className="space-y-2">
             <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
-              Stage Locked — Round 1 in Progress
+              Stage Locked — Awaiting Master Permission
             </span>
             <h1 className="text-3xl md:text-4xl font-black text-white font-['Outfit']">
-              Round 2 (Topic Wheel) is Locked
+              Round 2 Pending Master Authorization
             </h1>
             <p className="text-sm text-slate-300 max-w-lg mx-auto">
-              Per competition rules, all station stages must finish Round 1 before Round 2 begins.
+              Round 1 is concluding across stations. Master Supervisor must grant permission to authorize Round 2 before operators can start.
             </p>
           </div>
 
           {/* Round 1 Global Progress Bar */}
           <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 max-w-md mx-auto space-y-3 text-left">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Round 1 Overall Progress</span>
+              <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Round 1 Present Contestants Progress</span>
               <span className="text-white font-mono font-bold">
-                {round1Global.completed} / {round1Global.total} ({r1Pct}%)
+                {round1Global.completed} / {round1Global.arrivedCount} ({r1Pct}%)
               </span>
             </div>
             <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
@@ -486,7 +487,12 @@ export const Round2: React.FC = () => {
               />
             </div>
             <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-              <span>{round1Global.remaining === 0 ? 'All contestants done! Awaiting Master advance.' : `${round1Global.remaining} contestants still remaining`}</span>
+              <span>
+                {round1Global.remaining === 0
+                  ? 'All present contestants done! Awaiting Master permission.'
+                  : `${round1Global.remaining} arrived contestants still speaking`}
+                {round1Global.absentCount > 0 && ` (${round1Global.absentCount} absent / no-show)`}
+              </span>
               <span className="text-purple-300 font-mono">Round 1</span>
             </div>
           </div>
@@ -498,13 +504,15 @@ export const Round2: React.FC = () => {
               return (
                 <div key={st.id} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2 text-xs">
                   <span className="font-bold text-white truncate">{st.name || 'Station'}</span>
-                  {prog.isComplete && prog.total > 0 ? (
+                  {prog.isComplete && prog.arrivedCount > 0 ? (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Finished
+                      <CheckCircle2 className="w-3 h-3" /> Finished ({prog.completed}/{prog.arrivedCount})
                     </span>
+                  ) : prog.arrivedCount === 0 ? (
+                    <span className="text-slate-500 text-[11px]">0 Arrived</span>
                   ) : (
                     <span className="text-slate-400 font-mono text-[11px]">
-                      {prog.completed}/{prog.total} Done
+                      {prog.completed}/{prog.arrivedCount} Done
                     </span>
                   )}
                 </div>

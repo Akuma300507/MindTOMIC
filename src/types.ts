@@ -29,7 +29,7 @@ export interface Participant {
   round2StationName?: string;
   round3StationId?: string;
   round3StationName?: string;
-  status: 'registered' | 'checked_in' | 'active' | 'eliminated' | 'completed' | 'qualified' | 'disqualified';
+  status: 'registered' | 'checked_in' | 'active' | 'eliminated' | 'completed' | 'qualified' | 'disqualified' | 'absent';
   checkedIn?: boolean;
   checkedInAt?: string;
   checkedInStationId?: string;
@@ -53,7 +53,19 @@ export interface Participant {
 export function isParticipantCheckedIn(p?: Participant | null): boolean {
   if (!p) return false;
   if (p.checkedIn === false) return false;
+  if (p.status === 'absent' || p.status === 'eliminated' || p.status === 'disqualified') return false;
   return Boolean(p.checkedIn === true || p.status === 'checked_in' || p.checkedInAt);
+}
+
+export interface StageAttendanceProgress {
+  totalRegistered: number;
+  arrivedCount: number;
+  completedCount: number;
+  absentCount: number;
+  remainingArrived: number;
+  isComplete: boolean; // true when remainingArrived === 0
+  pendingArrivedContestants: Participant[];
+  absentContestants: Participant[];
 }
 
 export interface Topic {
@@ -353,6 +365,12 @@ export interface LiveSyncState {
   buzzerTimestamp?: number;
   locationId?: string;
   stationStates?: Record<string, StationState>;
+  round2PermissionGranted?: boolean;
+  round3PermissionGranted?: boolean;
+  stagePermissions?: {
+    round2?: { granted: boolean; grantedAt?: string; grantedBy?: string; absentCount?: number };
+    round3?: { granted: boolean; grantedAt?: string; grantedBy?: string; absentCount?: number };
+  };
 }
 
 export interface AppDatabase {

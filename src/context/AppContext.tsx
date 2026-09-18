@@ -73,26 +73,42 @@ interface AppContextType {
 
   // Event Stage & Competition Round Management
   currentEventRound: 1 | 2 | 3;
+  round2PermissionGranted: boolean;
+  round3PermissionGranted: boolean;
+  grantStagePermission: (
+    targetRound: 2 | 3,
+    markAbsent?: boolean,
+    force?: boolean
+  ) => Promise<{ success: boolean; message?: string; markedAbsentCount?: number }>;
   advanceCompetitionRound: (round: 1 | 2 | 3, force?: boolean) => Promise<{ success: boolean; message?: string }>;
   getStationRoundProgress: (stationId: string, round: 1 | 2 | 3) => {
     total: number;
+    arrivedCount: number;
     completed: number;
+    absentCount: number;
     remaining: number;
     isComplete: boolean;
     pendingParticipants: Participant[];
+    absentParticipants: Participant[];
   };
   getGlobalRoundProgress: (round: 1 | 2 | 3) => {
     total: number;
+    arrivedCount: number;
     completed: number;
+    absentCount: number;
     remaining: number;
     isComplete: boolean;
     pendingParticipants: Participant[];
+    absentParticipants: Participant[];
     stationProgress: Record<string, {
       total: number;
+      arrivedCount: number;
       completed: number;
+      absentCount: number;
       remaining: number;
       isComplete: boolean;
       pendingParticipants: Participant[];
+      absentParticipants: Participant[];
     }>;
   };
 
@@ -632,8 +648,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Active Competition Stage derived from liveSync
   const currentEventRound: 1 | 2 | 3 = (db?.liveSync?.currentRound || 1) as 1 | 2 | 3;
+  const round2PermissionGranted = Boolean(db?.liveSync?.round2PermissionGranted || currentEventRound >= 2);
+  const round3PermissionGranted = Boolean(db?.liveSync?.round3PermissionGranted || currentEventRound >= 3);
 
-  // Station Round Completion Progress calculation
+  // Station Round Completion Progress calculation (attendance-grounded)
   const getStationRoundProgress = useCallback(
     (stationId: string, round: 1 | 2 | 3) => {
       const participants = db?.participants || [];
@@ -655,7 +673,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return true;
       });
 
-      const completed = allocated.filter((p) => {
+      const arrived = allocated.filter((p) => isParticipantCheckedIn(p));
+      const absent = allocated.filter((p) => !isParticipantCheckedIn(p));
+
+      const completed = arrived.filter((p) => {
         const hasResult = results.some((r) => r.participantId === p.id);
         const statusCompleted =
           round === 1
@@ -666,13 +687,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return hasResult || statusCompleted;
       });
 
-      const remaining = allocated.length - completed.length;
+      const pendingArrived = arrived.filter((p) => !completed.some((c) => c.id === p.id));
+      const remaining = pendingArrived.length;
+      const isComplete = arrived.length > 0 ? remaining === 0 : true;
+
       return {
         total: allocated.length,
+        arrivedCount: arrived.length,
         completed: completed.length,
+        absentCount: absent.length,
         remaining,
-        isComplete: allocated.length > 0 ? remaining === 0 : true,
-        pendingParticipants: allocated.filter((p) => !completed.some((c) => c.id === p.id)),
+        isComplete,
+        pendingParticipants: pendingArrived,
+        absentParticipants: absent,
       };
     },
     [db?.participants, db?.round1Results, db?.round2Results, db?.round3Results]
@@ -681,26 +708,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getGlobalRoundProgress = useCallback(
     (round: 1 | 2 | 3) => {
       let total = 0;
+      let arrived = 0;
       let completed = 0;
+      let absent = 0;
       let remaining = 0;
       const allPending: Participant[] = [];
+      const allAbsent: Participant[] = [];
       const stationMap: Record<string, ReturnType<typeof getStationRoundProgress>> = {};
 
       allStations.forEach((st) => {
         const prog = getStationRoundProgress(st.id, round);
         stationMap[st.id] = prog;
         total += prog.total;
+        arrived += prog.arrivedCount;
         completed += prog.completed;
+        absent += prog.absentCount;
         remaining += prog.remaining;
         allPending.push(...prog.pendingParticipants);
+        allAbsent.push(...prog.absentParticipants);
       });
 
       return {
         total,
+        arrivedCount: arrived,
         completed,
+        absentCount: absent,
         remaining,
-        isComplete: total > 0 ? remaining === 0 : false,
+        isComplete: arrived > 0 ? remaining === 0 : true,
         pendingParticipants: allPending,
+        absentParticipants: allAbsent,
         stationProgress: stationMap,
       };
     },
@@ -719,6 +755,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             liveSync: {
               ...prev.liveSync,
               currentRound: res.currentRound,
+              round2PermissionGranted: res.round2PermissionGranted ?? (res.currentRound >= 2),
+              round3PermissionGranted: res.round3PermissionGranted ?? (res.currentRound >= 3),
               stationStates: res.stations,
             },
           };
@@ -727,6 +765,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err: any) {
         console.error('Failed to advance competition round:', err);
         return { success: false, message: err?.message || 'Failed to advance competition round' };
+      }
+    },
+    []
+  );
+
+  const grantStagePermission = useCallback(
+    async (
+      targetRound: 2 | 3,
+      markAbsent = true,
+      force = false
+    ): Promise<{ success: boolean; message?: string; markedAbsentCount?: number }> => {
+      try {
+        const res = await api.grantStagePermission(targetRound, markAbsent, force);
+        setDb((prev) => {
+          if (!prev) return prev;
+          let updatedParticipants = prev.participants;
+          if (markAbsent && res.markedAbsentCount > 0) {
+            updatedParticipants = prev.participants.map((p) => {
+              if (!isParticipantCheckedIn(p) && p.status !== 'eliminated' && p.status !== 'disqualified') {
+                return {
+                  ...p,
+                  status: 'absent' as const,
+                  round1Qualified: 'disqualified' as const,
+                };
+              }
+              return p;
+            });
+          }
+          return {
+            ...prev,
+            participants: updatedParticipants,
+            stations: res.stations,
+            liveSync: {
+              ...prev.liveSync,
+              currentRound: res.currentRound,
+              round2PermissionGranted: res.round2PermissionGranted ?? (res.currentRound >= 2),
+              round3PermissionGranted: res.round3PermissionGranted ?? (res.currentRound >= 3),
+              stationStates: res.stations,
+            },
+          };
+        });
+        return {
+          success: true,
+          message: res.message || `Stage permission granted for Round ${targetRound}`,
+          markedAbsentCount: res.markedAbsentCount,
+        };
+      } catch (err: any) {
+        console.error('Failed to grant stage permission:', err);
+        return { success: false, message: err?.message || 'Failed to grant stage permission' };
       }
     },
     []
@@ -1448,6 +1535,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               liveSync: {
                 ...prev.liveSync,
                 currentRound,
+                round2PermissionGranted: payload.round2PermissionGranted ?? (currentRound >= 2),
+                round3PermissionGranted: payload.round3PermissionGranted ?? (currentRound >= 3),
+                stagePermissions: payload.stagePermissions || prev.liveSync?.stagePermissions,
                 stationStates: updatedStations,
               },
             };
@@ -2276,6 +2366,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearProjectorPingNotification,
         // Event Stage & Competition Round Management
         currentEventRound,
+        round2PermissionGranted,
+        round3PermissionGranted,
+        grantStagePermission,
         advanceCompetitionRound,
         getStationRoundProgress,
         getGlobalRoundProgress,
