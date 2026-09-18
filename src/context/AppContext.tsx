@@ -329,15 +329,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setActiveParticipant(staged);
             return currDb;
           }
-          const stationParticipants = currDb.participants.filter(
-            (p) => p.stationId === id || p.checkedInStationId === id || !p.stationId
-          );
-          if (stationParticipants.length > 0) {
-            setActiveParticipant((currPart) => {
-              if (currPart && (currPart.stationId === id || currPart.checkedInStationId === id)) return currPart;
-              return stationParticipants[0];
-            });
-          }
+          // Do not auto-stage contestants; keep current only if it belongs to this station, otherwise reset
+          setActiveParticipant((currPart) => {
+            if (currPart && (currPart.stationId === id || currPart.checkedInStationId === id)) return currPart;
+            return null;
+          });
         }
         return currDb;
       });
@@ -521,12 +517,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (currentStationId && currentStationId !== 'all') {
           const staged = mergedDb.stations?.[currentStationId]?.activeParticipant;
           if (staged) return staged;
-          const stationMatch = mergedDb.participants.find(
-            (p) => p.stationId === currentStationId
-          );
-          if (stationMatch) return stationMatch;
         }
-        return mergedDb.participants[0] ?? null;
+        return null;
       });
     } catch (err) {
       console.error('Failed to load initial state from server, falling back to persistent storage:', err);
@@ -1298,9 +1290,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (curr?.id === participant.id) {
               return participant;
             }
-            if (!curr) {
-              return participant;
-            }
             return curr;
           });
         } catch (err) {
@@ -1343,9 +1332,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             return nextDb;
           });
           setActiveParticipant((curr) => {
-            if (!curr) {
-              return list[0] ?? null;
-            }
+            if (!curr) return null;
             const updated = map.get(curr.id);
             if (updated) {
               return updated;
@@ -1805,9 +1792,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (curr?.id === id) {
           return res.participant;
         }
-        if (!curr) {
-          return res.participant;
-        }
         return curr;
       });
       return res.participant;
@@ -1832,9 +1816,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return nextDb;
       });
       setActiveParticipant((curr) => {
-        if (!curr) {
-          return res.participants[0] ?? null;
-        }
+        if (!curr) return null;
         const updated = res.participants.find((p) => p.id === curr.id);
         if (updated) {
           return updated;

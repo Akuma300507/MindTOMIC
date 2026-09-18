@@ -390,23 +390,6 @@ try {
             station.activeParticipant = { ...p };
           }
         }
-
-        // Auto-stage first contestant allocated to this station if station is currently empty
-        if (!station.activeParticipantId) {
-          const candidateP =
-            db.participants.find(
-              (item) =>
-                (item.stationId === station.id || (!item.stationId && station.id === 'station-a')) &&
-                isParticipantCheckedIn(item)
-            ) ||
-            db.participants.find(
-              (item) => item.stationId === station.id || (!item.stationId && station.id === 'station-a')
-            );
-          if (candidateP) {
-            station.activeParticipantId = candidateP.id;
-            station.activeParticipant = { ...candidateP };
-          }
-        }
       });
     }
 
@@ -1609,15 +1592,6 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
         error: 'Participant not found.',
         station,
       });
-    }
-    // Auto-mark checked-in when staged on station so check-in states remain consistent
-    if (!isParticipantCheckedIn(p)) {
-      p.checkedIn = true;
-      if (!p.status || p.status === 'registered' || (p.status as string) === 'awaiting_checkin') {
-        p.status = 'checked_in';
-      }
-      p.checkedInStationId = station.id;
-      p.checkedInAt = p.checkedInAt || new Date().toISOString();
     }
     assignedParticipant = p;
   }
