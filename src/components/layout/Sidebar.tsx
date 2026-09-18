@@ -15,6 +15,8 @@ import {
   Tv,
   ShieldAlert,
   Bell,
+  Lock,
+  CheckCircle2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MindToMicLogo } from '../common/MindToMicLogo';
@@ -47,7 +49,7 @@ const navItems: NavItem[] = [
 ];
 
 export const Sidebar: React.FC = () => {
-  const { currentPage, setCurrentPage, db } = useApp();
+  const { currentPage, setCurrentPage, db, currentEventRound } = useApp();
 
   return (
     <aside className="w-64 bg-slate-900/95 border-r border-purple-900/30 flex flex-col flex-shrink-0 h-[calc(100vh-4rem)] overflow-y-auto custom-scrollbar">
@@ -128,25 +130,59 @@ export const Sidebar: React.FC = () => {
                         : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <Icon className={`w-4 h-4 ${active ? 'text-white' : 'text-blue-400'}`} />
-                      <span>{item.label}</span>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-white' : 'text-blue-400'}`} />
+                      <span className="truncate">{item.label}</span>
                     </div>
-                    {item.id === 'round1' && db?.round1Results.length ? (
-                      <span className="text-[10px] bg-purple-950/80 border border-purple-500/40 text-purple-200 px-1.5 py-0.5 rounded-md">
-                        {db.round1Results.length}
-                      </span>
-                    ) : null}
-                    {item.id === 'round2' && db?.round2Results.length ? (
-                      <span className="text-[10px] bg-purple-950/80 border border-purple-500/40 text-purple-200 px-1.5 py-0.5 rounded-md">
-                        {db.round2Results.length}
-                      </span>
-                    ) : null}
-                    {item.id === 'round3' && db?.round3Results.length ? (
-                      <span className="text-[10px] bg-purple-950/80 border border-purple-500/40 text-purple-200 px-1.5 py-0.5 rounded-md">
-                        {db.round3Results.length}
-                      </span>
-                    ) : null}
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {item.id === 'round1' && (
+                        currentEventRound === 1 ? (
+                          <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            Live
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            Done
+                          </span>
+                        )
+                      )}
+
+                      {item.id === 'round2' && (
+                        currentEventRound < 2 ? (
+                          <span className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                            <Lock className="w-2.5 h-2.5" />
+                            Locked
+                          </span>
+                        ) : currentEventRound === 2 ? (
+                          <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            Live
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            Done
+                          </span>
+                        )
+                      )}
+
+                      {item.id === 'round3' && (
+                        currentEventRound < 3 ? (
+                          <span className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                            <Lock className="w-2.5 h-2.5" />
+                            Locked
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            Finals
+                          </span>
+                        )
+                      )}
+                    </div>
                   </button>
                 );
               })}

@@ -39,6 +39,8 @@ export const Round1: React.FC = () => {
     setCurrentPage,
     checkInParticipant,
     setStationParticipant,
+    currentEventRound,
+    getStationRoundProgress,
   } = useApp();
 
   const [selectedImage, setSelectedImage] = useState<EventImage | null>(null);
@@ -98,6 +100,11 @@ export const Round1: React.FC = () => {
   const isCurrentParticipantCheckedIn = Boolean(
     activeParticipant && isParticipantCheckedIn(activeParticipant)
   );
+
+  const round1Progress = useMemo(() => {
+    if (!currentStationId || currentStationId === 'all') return null;
+    return getStationRoundProgress(currentStationId, 1);
+  }, [currentStationId, getStationRoundProgress]);
 
   const handleCheckIn = useCallback(
     async (participantId: string, checkedIn: boolean) => {
@@ -237,6 +244,48 @@ export const Round1: React.FC = () => {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
+      {/* Event Round Concluded Notice */}
+      {currentEventRound > 1 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-indigo-950/40 border border-indigo-500/40 text-indigo-200">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div>
+              <span className="font-bold text-white text-sm block">Round 1 has concluded</span>
+              <span className="text-xs text-indigo-300">The entire competition has progressed to Round {currentEventRound}.</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setCurrentPage(currentEventRound === 2 ? 'round2' : 'round3')}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shrink-0 transition-colors"
+          >
+            <span>Go to Round {currentEventRound}</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Station Finished Round 1 Waiting State */}
+      {currentEventRound === 1 && round1Progress && round1Progress.isComplete && round1Progress.total > 0 && (
+        <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-extrabold text-white text-sm block">
+                Stage Round 1 Completed ({round1Progress.completed}/{round1Progress.total} Contestants)
+              </span>
+              <span className="text-xs text-emerald-300/90">
+                All assigned contestants for this station have finished Round 1. Please wait for other stations to finish before Round 2 begins.
+              </span>
+            </div>
+          </div>
+          <span className="px-3 py-1 rounded-full bg-emerald-900/50 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 shrink-0 self-start sm:self-center">
+            Waiting for All Stations
+          </span>
+        </div>
+      )}
+
       {/* Top Bar: Participant Selector & Round Status */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/90 border border-purple-900/30 p-4 sm:p-5 rounded-2xl shadow-xl">
         <div className="flex items-center gap-3">

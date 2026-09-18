@@ -30,6 +30,10 @@ import {
   Plus,
   Monitor,
   MapPin,
+  Lock,
+  Unlock,
+  ArrowRight,
+  Trophy,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { computeStationTimer } from '../lib/timerUtils';
@@ -58,6 +62,10 @@ export const Master: React.FC = () => {
     refreshConnectedProjectors,
     reloadState,
     checkInParticipant,
+    currentEventRound,
+    advanceCompetitionRound,
+    getStationRoundProgress,
+    getGlobalRoundProgress,
   } = useApp();
 
   const safeProjectors: ProjectorDevice[] = Array.isArray(connectedProjectors)
@@ -76,6 +84,51 @@ export const Master: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [pingingProjectId, setPingingProjectId] = useState<string | null>(null);
   const [assigningProjectId, setAssigningProjectId] = useState<string | null>(null);
+
+  // Synchronized Round Advancement Modal State
+  const [advanceModal, setAdvanceModal] = useState<{
+    targetRound: 1 | 2 | 3;
+    isForce: boolean;
+    remainingContestants: Array<{ id: string; name: string; stationName: string; participantNumber: string }>;
+  } | null>(null);
+  const [isAdvancing, setIsAdvancing] = useState<boolean>(false);
+
+  const handleInitiateAdvance = (targetRound: 1 | 2 | 3) => {
+    const priorRound = (targetRound === 2 ? 1 : 2) as 1 | 2;
+    const progress = getGlobalRoundProgress(priorRound);
+
+    const remaining: Array<{ id: string; name: string; stationName: string; participantNumber: string }> = [];
+    if (!progress.isComplete) {
+      progress.pendingParticipants.forEach((p) => {
+        remaining.push({
+          id: p.id,
+          name: p.name,
+          stationName: p.stationName || 'Station',
+          participantNumber: p.participantNumber || '',
+        });
+      });
+    }
+
+    setAdvanceModal({
+      targetRound,
+      isForce: remaining.length > 0,
+      remainingContestants: remaining,
+    });
+  };
+
+  const handleConfirmAdvance = async (force: boolean) => {
+    if (!advanceModal) return;
+    setIsAdvancing(true);
+    const res = await advanceCompetitionRound(advanceModal.targetRound, force);
+    setIsAdvancing(false);
+    if (res.success) {
+      setToastMessage(res.message || `All stations successfully advanced to Round ${advanceModal.targetRound}!`);
+      setAdvanceModal(null);
+    } else {
+      setToastMessage(`Action blocked: ${res.message}`);
+    }
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   // Station Handler Edit Form
   const [handlerForm, setHandlerForm] = useState({
@@ -327,6 +380,293 @@ export const Master: React.FC = () => {
         </div>
       </div>
 
+      {/* Synchronized Competition Stage Progression Controller */}
+      {(() => {
+        const round1Prog = getGlobalRoundProgress(1);
+        const round2Prog = getGlobalRoundProgress(2);
+        const round3Prog = getGlobalRoundProgress(3);
+
+        const r1Pct = round1Prog.total > 0 ? Math.round((round1Prog.completed / round1Prog.total) * 100) : 0;
+        const r2Pct = round2Prog.total > 0 ? Math.round((round2Prog.completed / round2Prog.total) * 100) : 0;
+        const r3Pct = round3Prog.total > 0 ? Math.round((round3Prog.completed / round3Prog.total) * 100) : 0;
+
+        return (
+          <div className="bg-slate-900/95 border border-purple-800/40 rounded-3xl p-5 md:p-6 shadow-2xl backdrop-blur-md space-y-5">
+            {/* Header & Status Indicator */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-purple-900/30 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-purple-950/60">
+                  <Trophy className="w-5 h-5 text-amber-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h2 className="text-lg md:text-xl font-black text-white font-['Outfit']">
+                      Synchronized Competition Progression
+                    </h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                      Active: Round {currentEventRound}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Stations progress strictly in sync: All stations finish Round 1 before Round 2 starts.
+                  </p>
+                </div>
+              </div>
+
+              {/* Advancement Action Button */}
+              <div className="flex items-center gap-2">
+                {currentEventRound === 1 && (
+                  <button
+                    id="master-advance-round2-btn"
+                    onClick={() => handleInitiateAdvance(2)}
+                    className={`px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-xl hover:scale-[1.02] active:scale-[0.98] ${
+                      round1Prog.isComplete
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-950/70 border border-emerald-400/40 animate-pulse'
+                        : 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-purple-100 shadow-purple-950/70 border border-purple-500/40'
+                    }`}
+                  >
+                    {round1Prog.isComplete ? <Unlock className="w-4 h-4 text-emerald-300" /> : <Lock className="w-4 h-4 text-amber-400" />}
+                    <span>
+                      {round1Prog.isComplete
+                        ? 'All Stations Ready ➔ Start Round 2'
+                        : `Advance All Stations to Round 2 (${round1Prog.remaining} pending)`}
+                    </span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                )}
+
+                {currentEventRound === 2 && (
+                  <button
+                    id="master-advance-round3-btn"
+                    onClick={() => handleInitiateAdvance(3)}
+                    className={`px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-xl hover:scale-[1.02] active:scale-[0.98] ${
+                      round2Prog.isComplete
+                        ? 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 shadow-amber-950/70 border border-amber-300 animate-pulse'
+                        : 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-purple-100 shadow-purple-950/70 border border-purple-500/40'
+                    }`}
+                  >
+                    {round2Prog.isComplete ? <Trophy className="w-4 h-4 text-slate-950" /> : <Lock className="w-4 h-4 text-amber-400" />}
+                    <span>
+                      {round2Prog.isComplete
+                        ? 'All Stations Ready ➔ Start Finals (Round 3)'
+                        : `Advance All Stations to Finals (${round2Prog.remaining} pending)`}
+                    </span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                )}
+
+                {currentEventRound === 3 && (
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-extrabold">
+                    <Trophy className="w-4 h-4" />
+                    <span>Championship Finals Active</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 3 Stage Progression Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+              {/* Stage 1 Card */}
+              <div
+                className={`p-4 rounded-2xl border transition-all ${
+                  currentEventRound === 1
+                    ? 'bg-purple-950/40 border-purple-500/50 shadow-lg shadow-purple-950/50 ring-1 ring-purple-500/30'
+                    : currentEventRound > 1
+                    ? 'bg-emerald-950/20 border-emerald-500/30'
+                    : 'bg-slate-950/60 border-slate-800 opacity-60'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-purple-900/60 flex items-center justify-center font-bold text-xs text-purple-300 font-mono">
+                      1
+                    </span>
+                    <span className="font-extrabold text-sm text-white">Round 1</span>
+                  </div>
+                  {currentEventRound > 1 ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Completed
+                    </span>
+                  ) : currentEventRound === 1 ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">
+                      In Progress
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-800 text-slate-400">
+                      Pending
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mb-3">Image Description Speech</p>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 text-[11px]">Contestants Done</span>
+                    <span className="font-bold text-white font-mono text-xs">
+                      {round1Prog.completed} / {round1Prog.total} ({r1Pct}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        round1Prog.isComplete ? 'bg-emerald-500' : 'bg-gradient-to-r from-purple-500 to-indigo-500'
+                      }`}
+                      style={{ width: `${r1Pct}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-400 pt-0.5 flex items-center justify-between">
+                    <span>{round1Prog.remaining === 0 ? 'All stations completed' : `${round1Prog.remaining} contestants waiting`}</span>
+                    {currentEventRound === 1 && (
+                      <span className="text-purple-300 font-semibold font-mono">Live on all stations</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Stage 2 Card */}
+              <div
+                className={`p-4 rounded-2xl border transition-all ${
+                  currentEventRound === 2
+                    ? 'bg-purple-950/40 border-purple-500/50 shadow-lg shadow-purple-950/50 ring-1 ring-purple-500/30'
+                    : currentEventRound > 2
+                    ? 'bg-emerald-950/20 border-emerald-500/30'
+                    : 'bg-slate-950/60 border-slate-800/80 opacity-75'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-purple-900/60 flex items-center justify-center font-bold text-xs text-purple-300 font-mono">
+                      2
+                    </span>
+                    <span className="font-extrabold text-sm text-white">Round 2</span>
+                  </div>
+                  {currentEventRound > 2 ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Completed
+                    </span>
+                  ) : currentEventRound === 2 ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">
+                      In Progress
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-800/80 text-slate-400 flex items-center gap-1 border border-slate-700">
+                      <Lock className="w-2.5 h-2.5" /> Locked
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mb-3">Wheel of Topics Spin</p>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 text-[11px]">Qualified Done</span>
+                    <span className="font-bold text-white font-mono text-xs">
+                      {round2Prog.completed} / {round2Prog.total} ({r2Pct}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        round2Prog.isComplete ? 'bg-emerald-500' : 'bg-gradient-to-r from-purple-500 to-indigo-500'
+                      }`}
+                      style={{ width: `${r2Pct}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-400 pt-0.5">
+                    {currentEventRound < 2 ? (
+                      <span className="text-amber-400/90 font-medium">Locked until Round 1 ends on all stations</span>
+                    ) : (
+                      <span>{round2Prog.remaining === 0 ? 'All qualified finished' : `${round2Prog.remaining} contestants waiting`}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Stage 3 Card */}
+              <div
+                className={`p-4 rounded-2xl border transition-all ${
+                  currentEventRound === 3
+                    ? 'bg-amber-950/30 border-amber-500/50 shadow-lg shadow-amber-950/50 ring-1 ring-amber-500/30'
+                    : 'bg-slate-950/60 border-slate-800/80 opacity-75'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-amber-900/60 flex items-center justify-center font-bold text-xs text-amber-300 font-mono">
+                      3
+                    </span>
+                    <span className="font-extrabold text-sm text-white">Round 3</span>
+                  </div>
+                  {currentEventRound === 3 ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                      <Trophy className="w-3 h-3 text-amber-400" /> Finals Active
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-800/80 text-slate-400 flex items-center gap-1 border border-slate-700">
+                      <Lock className="w-2.5 h-2.5" /> Locked
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mb-3">Championship Finals</p>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 text-[11px]">Finalists Done</span>
+                    <span className="font-bold text-white font-mono text-xs">
+                      {round3Prog.completed} / {round3Prog.total} ({r3Pct}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        round3Prog.isComplete ? 'bg-amber-400' : 'bg-gradient-to-r from-amber-500 to-yellow-500'
+                      }`}
+                      style={{ width: `${r3Pct}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-400 pt-0.5">
+                    {currentEventRound < 3 ? (
+                      <span className="text-amber-400/90 font-medium">Locked until Round 2 ends on all stations</span>
+                    ) : (
+                      <span className="text-amber-300 font-medium">Top finalists competing</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Admin Override Controls Footer */}
+            <div className="pt-2 border-t border-purple-900/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-slate-400 text-[11px]">
+                <ShieldAlert className="w-3.5 h-3.5 text-purple-400" />
+                <span>Station operators are synchronized and locked to Round {currentEventRound}.</span>
+              </div>
+
+              {/* Master Manual Stage Switcher */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Master Stage Switch:</span>
+                {([1, 2, 3] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => {
+                      if (r === currentEventRound) return;
+                      handleInitiateAdvance(r);
+                    }}
+                    disabled={r === currentEventRound}
+                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all ${
+                      r === currentEventRound
+                        ? 'bg-purple-600/30 text-purple-300 border border-purple-500/50 cursor-default'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    Round {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Filter Tabs */}
       <div className="flex items-center justify-between border-b border-purple-900/20 pb-3">
         <div className="flex items-center gap-2">
@@ -403,6 +743,21 @@ export const Master: React.FC = () => {
                       <span className="text-purple-300 font-semibold font-mono">
                         Round {station.currentRound || 1}
                       </span>
+                      {(() => {
+                        const stProg = getStationRoundProgress(station.id, (station.currentRound || 1) as 1 | 2 | 3);
+                        return (
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              stProg.isComplete
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                : 'bg-purple-900/40 text-purple-300 border border-purple-700/40'
+                            }`}
+                            title={`${stProg.completed} of ${stProg.total} contestants finished in this round`}
+                          >
+                            {stProg.completed}/{stProg.total} {stProg.isComplete ? '✓ Done' : 'Done'}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -496,26 +851,32 @@ export const Master: React.FC = () => {
                 </div>
               </div>
 
-              {/* Station Round Selector */}
+              {/* Synchronized Station Round Status & Completion */}
               <div className="flex items-center justify-between gap-2 bg-slate-950 p-2.5 rounded-2xl border border-slate-800">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-1">
-                  Station Round:
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {([1, 2, 3] as const).map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setStationRound(station.id, r)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
-                        station.currentRound === r
-                          ? 'bg-purple-600 text-white shadow-md'
-                          : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-                      }`}
-                    >
-                      Round {r}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 pl-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Stage Status:
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-purple-900/40 text-purple-300 border border-purple-700/40 text-xs font-mono font-bold">
+                    Round {station.currentRound || 1}
+                  </span>
                 </div>
+                {(() => {
+                  const stProg = getStationRoundProgress(station.id, (station.currentRound || 1) as 1 | 2 | 3);
+                  if (stProg.isComplete && stProg.total > 0) {
+                    return (
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1.5 animate-in fade-in">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>All {stProg.completed} Contestants Done</span>
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="text-xs text-slate-400 font-medium">
+                      {stProg.completed} / {stProg.total} Finished ({stProg.remaining} remaining)
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Active Contestant Information & Station-Specific Assignment */}
@@ -1491,6 +1852,128 @@ export const Master: React.FC = () => {
                 className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Round Advancement Confirmation Modal */}
+      {advanceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-purple-800/60 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-5">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                    advanceModal.isForce
+                      ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400'
+                      : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
+                  }`}
+                >
+                  {advanceModal.isForce ? <AlertTriangle className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white font-['Outfit']">
+                    {advanceModal.isForce
+                      ? 'Unfinished Contestants Detected'
+                      : `Advance All Stations to Round ${advanceModal.targetRound}`}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Synchronized stage progression across all event stations
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAdvanceModal(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {advanceModal.isForce ? (
+              <div className="space-y-3">
+                <div className="p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-amber-300">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>
+                      Warning: {advanceModal.remainingContestants.length} contestant(s) have not completed Round{' '}
+                      {advanceModal.targetRound - 1}!
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    By design, all stations must finish their contestants before moving to the next round. If you force advance now, these contestants will be skipped for this round.
+                  </p>
+                </div>
+
+                <div className="max-h-40 overflow-y-auto space-y-1.5 p-2.5 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                    Pending Contestants:
+                  </span>
+                  {advanceModal.remainingContestants.slice(0, 10).map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-purple-300 font-bold">#{c.participantNumber}</span>
+                        <span className="text-white font-medium">{c.name}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">{c.stationName}</span>
+                    </div>
+                  ))}
+                  {advanceModal.remainingContestants.length > 10 && (
+                    <div className="text-[11px] text-slate-500 text-center pt-1 italic">
+                      + {advanceModal.remainingContestants.length - 10} more contestants
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-200 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-emerald-300">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>All stations have finished Round {advanceModal.targetRound - 1}!</span>
+                </div>
+                <p className="text-[11px] text-emerald-200/80 leading-relaxed">
+                  Advancing will simultaneously switch all stations to <strong>Round {advanceModal.targetRound}</strong>, reset station timers, and unlock Round {advanceModal.targetRound} for all operators.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-purple-900/30">
+              <button
+                onClick={() => setAdvanceModal(null)}
+                disabled={isAdvancing}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleConfirmAdvance(advanceModal.isForce)}
+                disabled={isAdvancing}
+                className={`px-5 py-2.5 rounded-xl text-white text-xs font-extrabold flex items-center gap-2 shadow-lg transition-all ${
+                  advanceModal.isForce
+                    ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-950/60'
+                    : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/60'
+                }`}
+              >
+                {isAdvancing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Advancing...</span>
+                  </>
+                ) : (
+                  <>
+                    {advanceModal.isForce ? <AlertTriangle className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+                    <span>
+                      {advanceModal.isForce
+                        ? `Force Advance to Round ${advanceModal.targetRound}`
+                        : `Advance to Round ${advanceModal.targetRound}`}
+                    </span>
+                  </>
+                )}
               </button>
             </div>
           </div>

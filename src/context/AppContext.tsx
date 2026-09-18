@@ -71,8 +71,33 @@ interface AppContextType {
   projectorPingNotification: { timestamp: number; message: string } | null;
   clearProjectorPingNotification: () => void;
 
+  // Event Stage & Competition Round Management
+  currentEventRound: 1 | 2 | 3;
+  advanceCompetitionRound: (round: 1 | 2 | 3, force?: boolean) => Promise<{ success: boolean; message?: string }>;
+  getStationRoundProgress: (stationId: string, round: 1 | 2 | 3) => {
+    total: number;
+    completed: number;
+    remaining: number;
+    isComplete: boolean;
+    pendingParticipants: Participant[];
+  };
+  getGlobalRoundProgress: (round: 1 | 2 | 3) => {
+    total: number;
+    completed: number;
+    remaining: number;
+    isComplete: boolean;
+    pendingParticipants: Participant[];
+    stationProgress: Record<string, {
+      total: number;
+      completed: number;
+      remaining: number;
+      isComplete: boolean;
+      pendingParticipants: Participant[];
+    }>;
+  };
+
   // Station Actions
-  setStationRound: (stationId: string, round: 1 | 2 | 3) => Promise<void>;
+  setStationRound: (stationId: string, round: 1 | 2 | 3, force?: boolean) => Promise<void>;
   setStationParticipant: (stationId: string, participantId: string | null) => Promise<void>;
   updateStationHandler: (stationId: string, data: {
     handlerName?: string | null;
@@ -605,29 +630,107 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setStationParticipant,
   ]);
 
-  // Synchronize round switch when operator navigates pages (Operator station role only)
-  useEffect(() => {
-    if (deviceRole === 'projector' || currentPage === 'projector' || deviceRole === 'master') {
-      return;
-    }
+  // Active Competition Stage derived from liveSync
+  const currentEventRound: 1 | 2 | 3 = (db?.liveSync?.currentRound || 1) as 1 | 2 | 3;
 
-    let roundNum: 1 | 2 | 3 | null = null;
-    if (currentPage === 'round1') roundNum = 1;
-    else if (currentPage === 'round2') roundNum = 2;
-    else if (currentPage === 'round3') roundNum = 3;
+  // Station Round Completion Progress calculation
+  const getStationRoundProgress = useCallback(
+    (stationId: string, round: 1 | 2 | 3) => {
+      const participants = db?.participants || [];
+      const results =
+        round === 1 ? db?.round1Results || [] : round === 2 ? db?.round2Results || [] : db?.round3Results || [];
 
-    if (roundNum && currentStationId && currentStationId !== 'all') {
-      const currentSt = db?.stations?.[currentStationId];
-      if (currentSt?.currentRound !== roundNum) {
-        api.setStationRound(currentStationId, roundNum).catch(() => {});
+      const allocated = participants.filter((p) => {
+        const stationMatches =
+          p.stationId === stationId ||
+          (round === 1 && p.round1StationId === stationId) ||
+          (round === 2 && p.round2StationId === stationId) ||
+          (round === 3 && p.round3StationId === stationId) ||
+          (!p.stationId && stationId === 'station-a');
+
+        if (!stationMatches) return false;
+        if (round === 2 && p.round1Qualified !== 'qualified') return false;
+        if (round === 3 && p.round2Qualified !== 'qualified') return false;
+        if (p.status === 'eliminated' || p.status === 'disqualified') return false;
+        return true;
+      });
+
+      const completed = allocated.filter((p) => {
+        const hasResult = results.some((r) => r.participantId === p.id);
+        const statusCompleted =
+          round === 1
+            ? p.round1Status === 'completed'
+            : round === 2
+            ? p.round2Status === 'completed'
+            : p.round3Status === 'completed';
+        return hasResult || statusCompleted;
+      });
+
+      const remaining = allocated.length - completed.length;
+      return {
+        total: allocated.length,
+        completed: completed.length,
+        remaining,
+        isComplete: allocated.length > 0 ? remaining === 0 : true,
+        pendingParticipants: allocated.filter((p) => !completed.some((c) => c.id === p.id)),
+      };
+    },
+    [db?.participants, db?.round1Results, db?.round2Results, db?.round3Results]
+  );
+
+  const getGlobalRoundProgress = useCallback(
+    (round: 1 | 2 | 3) => {
+      let total = 0;
+      let completed = 0;
+      let remaining = 0;
+      const allPending: Participant[] = [];
+      const stationMap: Record<string, ReturnType<typeof getStationRoundProgress>> = {};
+
+      allStations.forEach((st) => {
+        const prog = getStationRoundProgress(st.id, round);
+        stationMap[st.id] = prog;
+        total += prog.total;
+        completed += prog.completed;
+        remaining += prog.remaining;
+        allPending.push(...prog.pendingParticipants);
+      });
+
+      return {
+        total,
+        completed,
+        remaining,
+        isComplete: total > 0 ? remaining === 0 : false,
+        pendingParticipants: allPending,
+        stationProgress: stationMap,
+      };
+    },
+    [allStations, getStationRoundProgress]
+  );
+
+  const advanceCompetitionRound = useCallback(
+    async (round: 1 | 2 | 3, force?: boolean): Promise<{ success: boolean; message?: string }> => {
+      try {
+        const res = await api.setEventRound(round, force);
+        setDb((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            stations: res.stations,
+            liveSync: {
+              ...prev.liveSync,
+              currentRound: res.currentRound,
+              stationStates: res.stations,
+            },
+          };
+        });
+        return { success: true, message: `Successfully advanced all stations to Round ${round}` };
+      } catch (err: any) {
+        console.error('Failed to advance competition round:', err);
+        return { success: false, message: err?.message || 'Failed to advance competition round' };
       }
-    }
-  }, [
-    currentPage,
-    currentStationId,
-    deviceRole,
-    db?.stations?.[currentStationId || '']?.currentRound,
-  ]);
+    },
+    []
+  );
 
   // Station claim & takeover
   const claimStation = useCallback(
@@ -651,25 +754,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             });
           });
         }
-
-        if (res.success && res.station) {
-          setCurrentStationId(stationId);
-          setDb((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              stations: { ...(prev.stations || {}), [stationId]: res.station! },
-            };
-          });
-          return true;
-        }
-        return false;
-      } catch (err) {
+        return Boolean(res.success);
+      } catch (err: any) {
         console.error('Failed to claim station:', err);
         return false;
       }
     },
-    [db?.stations, deviceId, setCurrentStationId]
+    [deviceId, db?.stations]
   );
 
   const closeTakeoverModal = useCallback(
@@ -690,7 +781,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const releaseStation = useCallback(
     async (stationId?: string) => {
       const targetId = stationId || currentStationId;
-      if (targetId) {
+      if (targetId && deviceId) {
         await api.releaseStation(targetId, deviceId);
       }
     },
@@ -699,8 +790,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Station Actions
   const setStationRound = useCallback(
-    async (stationId: string, round: 1 | 2 | 3) => {
-      const res = await api.setStationRound(stationId, round);
+    async (stationId: string, round: 1 | 2 | 3, force?: boolean) => {
+      const res = await api.setStationRound(stationId, round, force);
       setDb((prev) => {
         if (!prev) return prev;
         return {
@@ -1341,6 +1432,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         } catch (err) {
           console.error(err);
+        }
+      });
+
+      eventSource.addEventListener('event_round_changed', (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const { currentRound, stations } = payload;
+          setDb((prev) => {
+            if (!prev) return prev;
+            const updatedStations = stations || prev.stations;
+            const nextDb = {
+              ...prev,
+              stations: updatedStations,
+              liveSync: {
+                ...prev.liveSync,
+                currentRound,
+                stationStates: updatedStations,
+              },
+            };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
+        } catch (err) {
+          console.error('Failed to handle event_round_changed SSE:', err);
         }
       });
 
@@ -2159,6 +2274,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshConnectedProjectors,
         projectorPingNotification,
         clearProjectorPingNotification,
+        // Event Stage & Competition Round Management
+        currentEventRound,
+        advanceCompetitionRound,
+        getStationRoundProgress,
+        getGlobalRoundProgress,
 
         // Station Actions
         setStationRound,

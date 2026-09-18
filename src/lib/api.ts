@@ -101,13 +101,38 @@ export const api = {
     }).catch(() => {});
   },
 
-  async setStationRound(id: string, round: 1 | 2 | 3): Promise<{ success: boolean; station: StationState }> {
+  async setStationRound(id: string, round: 1 | 2 | 3, force?: boolean): Promise<{ success: boolean; station: StationState }> {
     const res = await fetch(`/api/stations/${id}/set-round`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ round }),
+      body: JSON.stringify({ round, force }),
     });
-    if (!res.ok) throw new Error('Failed to set station round');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to set station round');
+    }
+    return res.json();
+  },
+
+  async setEventRound(round: 1 | 2 | 3, force?: boolean): Promise<{ success: boolean; currentRound: 1 | 2 | 3; stations: Record<string, StationState> }> {
+    const res = await fetch('/api/event/set-round', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ round, force }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to advance competition round');
+    }
+    return res.json();
+  },
+
+  async getRoundStatus(): Promise<{
+    currentRound: 1 | 2 | 3;
+    rounds: Record<1 | 2 | 3, any>;
+  }> {
+    const res = await fetch('/api/event/round-status');
+    if (!res.ok) throw new Error('Failed to fetch round status');
     return res.json();
   },
 

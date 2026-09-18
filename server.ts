@@ -1537,17 +1537,214 @@ app.post('/api/stations/:id/ping', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Ping sent to station' });
 });
 
-// Set Station Round (Round is station-specific, not event-global!)
+// Helper to calculate round completion progress across stations
+function checkRoundCompletionStatus(round: 1 | 2 | 3) {
+  const stationDetails: Record<
+    string,
+    {
+      stationId: string;
+      stationName: string;
+      total: number;
+      completed: number;
+      remaining: number;
+      isComplete: boolean;
+      pendingContestants: { id: string; name: string; participantNumber: string }[];
+    }
+  > = {};
+  let totalAcrossStations = 0;
+  let completedAcrossStations = 0;
+
+  const stations = Object.values(db.stations || {});
+  const participants = db.participants || [];
+  const results =
+    round === 1 ? db.round1Results || [] : round === 2 ? db.round2Results || [] : db.round3Results || [];
+
+  stations.forEach((st) => {
+    // Participants allocated to this station for this round
+    const allocated = participants.filter((p) => {
+      const stationMatches =
+        p.stationId === st.id ||
+        (round === 1 && p.round1StationId === st.id) ||
+        (round === 2 && p.round2StationId === st.id) ||
+        (round === 3 && p.round3StationId === st.id) ||
+        (!p.stationId && st.id === 'station-a');
+
+      if (!stationMatches) return false;
+
+      // In Round 2, only qualified contestants participate
+      if (round === 2 && p.round1Qualified !== 'qualified') return false;
+      // In Round 3, only qualified contestants participate
+      if (round === 3 && p.round2Qualified !== 'qualified') return false;
+
+      // Ignore eliminated or disqualified contestants
+      if (p.status === 'eliminated' || p.status === 'disqualified') return false;
+
+      return true;
+    });
+
+    const completed = allocated.filter((p) => {
+      const hasResult = results.some((r) => r.participantId === p.id);
+      const statusCompleted =
+        round === 1
+          ? p.round1Status === 'completed'
+          : round === 2
+          ? p.round2Status === 'completed'
+          : p.round3Status === 'completed';
+      return hasResult || statusCompleted;
+    });
+
+    const pending = allocated.filter((p) => !completed.some((c) => c.id === p.id));
+
+    stationDetails[st.id] = {
+      stationId: st.id,
+      stationName: st.name,
+      total: allocated.length,
+      completed: completed.length,
+      remaining: pending.length,
+      isComplete: pending.length === 0,
+      pendingContestants: pending.map((p) => ({
+        id: p.id,
+        name: p.name,
+        participantNumber: p.participantNumber,
+      })),
+    };
+
+    totalAcrossStations += allocated.length;
+    completedAcrossStations += completed.length;
+  });
+
+  const remainingAcrossStations = totalAcrossStations - completedAcrossStations;
+  return {
+    isComplete: remainingAcrossStations === 0,
+    totalParticipants: totalAcrossStations,
+    completedParticipants: completedAcrossStations,
+    remainingParticipants: remainingAcrossStations,
+    stationDetails,
+  };
+}
+
+// Get Synchronized Event Round Status across all stations
+app.get('/api/event/round-status', (_req: Request, res: Response) => {
+  const currentRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
+  res.json({
+    currentRound,
+    rounds: {
+      1: checkRoundCompletionStatus(1),
+      2: checkRoundCompletionStatus(2),
+      3: checkRoundCompletionStatus(3),
+    },
+  });
+});
+
+// Synchronized Event Round Advancement (Advances all stations together!)
+app.post('/api/event/set-round', (req: Request, res: Response) => {
+  const { round, force } = req.body;
+  if (![1, 2, 3].includes(Number(round))) {
+    return res.status(400).json({ error: 'Invalid round number. Must be 1, 2, or 3.' });
+  }
+
+  const targetRound = Number(round) as 1 | 2 | 3;
+  const currentRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
+
+  // If advancing forward, verify that preceding round is complete unless forced by Master
+  if (targetRound > currentRound && !force) {
+    const prevRound = (targetRound - 1) as 1 | 2;
+    const prevStatus = checkRoundCompletionStatus(prevRound);
+    if (!prevStatus.isComplete) {
+      return res.status(400).json({
+        error: `Cannot advance to Round ${targetRound}: Round ${prevRound} is still in progress across stations (${prevStatus.remainingParticipants} contestants pending).`,
+        details: prevStatus,
+      });
+    }
+  }
+
+  if (!db.liveSync) {
+    db.liveSync = {
+      currentRound: targetRound,
+      activeParticipantId: null,
+      timerMode: 'idle',
+      timerRemainingSeconds: 120,
+      timerTotalSeconds: 120,
+      isTimerRunning: false,
+      stationStates: db.stations || {},
+    };
+  } else {
+    db.liveSync.currentRound = targetRound;
+  }
+
+  // Set all stations to the new round simultaneously
+  const roundDuration =
+    targetRound === 1
+      ? db.settings.round1.speechTimeSeconds || 120
+      : targetRound === 2
+      ? db.settings.round2.speechTimeSeconds || 120
+      : db.settings.round3.speechTimeSeconds || 120;
+
+  if (db.stations) {
+    Object.values(db.stations).forEach((station) => {
+      station.currentRound = targetRound;
+      station.status = 'WAITING';
+      station.selectedImageId = null;
+      station.selectedImage = null;
+      station.selectedTopicId = null;
+      station.selectedTopic = null;
+      station.wheelSpin = null;
+      station.timerMode = 'idle';
+      station.timerTotalSeconds = roundDuration;
+      station.timerRemainingSeconds = roundDuration;
+      station.isTimerRunning = false;
+      station.timerStartedAt = null;
+      station.timerEndsAt = null;
+
+      // Clear active contestant if they are not qualified for the new round
+      if (station.activeParticipantId) {
+        const p = db.participants.find((item) => item.id === station.activeParticipantId);
+        if (
+          !p ||
+          (targetRound === 2 && p.round1Qualified !== 'qualified') ||
+          (targetRound === 3 && p.round2Qualified !== 'qualified')
+        ) {
+          station.activeParticipantId = null;
+          station.activeParticipant = null;
+        }
+      }
+    });
+  }
+
+  persistDB();
+  logAction('Competition Round Advanced', `All stations synchronized and advanced to Round ${targetRound}`);
+  broadcastSSE('event_round_changed', { currentRound: targetRound, stations: db.stations });
+  broadcastSSE('stations_updated', db.stations);
+
+  res.json({
+    success: true,
+    currentRound: targetRound,
+    stations: db.stations,
+  });
+});
+
+// Set Station Round (Protected: Stations operate in sync with global event round)
 app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
-  const { round } = req.body;
+  const { round, force } = req.body;
 
   if (![1, 2, 3].includes(Number(round))) {
     return res.status(400).json({ error: 'Invalid round number. Must be 1, 2, or 3.' });
   }
 
   const targetRound = Number(round) as 1 | 2 | 3;
-  if (station.currentRound === targetRound && !req.body.force) {
+  const currentGlobalRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
+
+  // Disallow individual stations from advancing ahead of the global event round unless forced by admin
+  if (targetRound !== currentGlobalRound && !force) {
+    return res.status(403).json({
+      error: `Station cannot change round independently. The active competition round is Round ${currentGlobalRound}. All stations advance rounds together.`,
+      currentGlobalRound,
+      stationRound: station.currentRound,
+    });
+  }
+
+  if (station.currentRound === targetRound && !force) {
     return res.json({ success: true, station });
   }
 
@@ -1574,7 +1771,7 @@ app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
   station.timerEndsAt = null;
 
   persistDB();
-  logAction('Station Round Updated', `${station.name} switched to Round ${station.currentRound}`);
+  logAction('Station Round Updated', `${station.name} set to Round ${station.currentRound}`);
   broadcastStationUpdate(station.id, 'station_updated', station);
   res.json({ success: true, station });
 });
@@ -1722,6 +1919,12 @@ function getOrAssignSlotItem(
 // Atomic Round 1 Image Assignment for Station (Supports Synchronized Heat Slots)
 app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
+  const currentGlobalRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
+  if (currentGlobalRound !== 1) {
+    return res.status(403).json({
+      error: `Cannot assign images: The event is currently in Round ${currentGlobalRound}, not Round 1.`,
+    });
+  }
   const { participantId, participantName, slotIndex: reqSlotIndex } = req.body;
 
   if (participantId) {
@@ -1841,6 +2044,12 @@ app.post('/api/stations/:id/rotate-image', (req: Request, res: Response) => {
 // Atomic Round 2 Topic Spin for Station (Supports Synchronized Heat Slots & Slot Preservation)
 app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
+  const currentGlobalRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
+  if (currentGlobalRound !== 2) {
+    return res.status(403).json({
+      error: `Cannot spin topic wheel: The event is currently in Round ${currentGlobalRound}, not Round 2.`,
+    });
+  }
   const { participantId, participantName, wheelTopicIds, slotIndex: reqSlotIndex } = req.body;
 
   if (participantId) {
@@ -2159,6 +2368,13 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
   const roundSettings = (db.settings as any)[`round${station.currentRound}`] || db.settings.round1;
 
   if (action === 'start') {
+    const currentGlobalRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
+    if (station.currentRound !== currentGlobalRound) {
+      return res.status(403).json({
+        error: `Station is currently in Round ${station.currentRound}, but the active event round is Round ${currentGlobalRound}. Timers can only be run for the active competition round.`,
+      });
+    }
+
     // Strict Round 1 check-in gating
     if (station.currentRound === 1 && station.activeParticipantId) {
       const activeP = db.participants.find((p) => p.id === station.activeParticipantId);
@@ -2202,6 +2418,13 @@ app.post('/api/stations/:id/timer', (req: Request, res: Response) => {
     const totalElapsedSec = Math.floor((station.timerAccumulatedMs || 0) / 1000);
     station.timerRemainingSeconds = Math.max(0, (station.timerDuration || 120) - totalElapsedSec);
   } else if (action === 'resume') {
+    const currentGlobalRound = (db.liveSync?.currentRound || 1) as 1 | 2 | 3;
+    if (station.currentRound !== currentGlobalRound) {
+      return res.status(403).json({
+        error: `Station is currently in Round ${station.currentRound}, but the active event round is Round ${currentGlobalRound}. Timers can only be run for the active competition round.`,
+      });
+    }
+
     // Strict Round 1 check-in gating
     if (station.currentRound === 1 && station.activeParticipantId) {
       const activeP = db.participants.find((p) => p.id === station.activeParticipantId);

@@ -14,6 +14,7 @@ import {
   Bell,
   Plus,
   Minus,
+  Lock,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
@@ -44,6 +45,9 @@ export const Round2: React.FC = () => {
     setCurrentPage,
     updateSettings,
     setStationParticipant,
+    currentEventRound,
+    getGlobalRoundProgress,
+    getStationRoundProgress,
   } = useApp();
 
   // Wheel topic font size adjustment state (synced with settings and localStorage)
@@ -444,8 +448,142 @@ export const Round2: React.FC = () => {
     [activeParticipant, winningTopic, speechSeconds, saveRound2Result, db?.topics, topicsPool, activeWheelTopics, currentStationId]
   );
 
+  if (currentEventRound < 2) {
+    const round1Global = getGlobalRoundProgress(1);
+    const r1Pct = round1Global.total > 0 ? Math.round((round1Global.completed / round1Global.total) * 100) : 0;
+
+    return (
+      <div className="p-6 md:p-10 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
+        <div className="bg-slate-900/90 border border-purple-800/40 rounded-3xl p-8 md:p-12 text-center shadow-2xl backdrop-blur-md space-y-6">
+          <div className="w-20 h-20 rounded-3xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400 shadow-xl shadow-amber-950/40">
+            <Lock className="w-10 h-10" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              Stage Locked — Round 1 in Progress
+            </span>
+            <h1 className="text-3xl md:text-4xl font-black text-white font-['Outfit']">
+              Round 2 (Topic Wheel) is Locked
+            </h1>
+            <p className="text-sm text-slate-300 max-w-lg mx-auto">
+              Per competition rules, all station stages must finish Round 1 before Round 2 begins.
+            </p>
+          </div>
+
+          {/* Round 1 Global Progress Bar */}
+          <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 max-w-md mx-auto space-y-3 text-left">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Round 1 Overall Progress</span>
+              <span className="text-white font-mono font-bold">
+                {round1Global.completed} / {round1Global.total} ({r1Pct}%)
+              </span>
+            </div>
+            <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-purple-500 to-indigo-500 h-full transition-all duration-500"
+                style={{ width: `${r1Pct}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+              <span>{round1Global.remaining === 0 ? 'All contestants done! Awaiting Master advance.' : `${round1Global.remaining} contestants still remaining`}</span>
+              <span className="text-purple-300 font-mono">Round 1</span>
+            </div>
+          </div>
+
+          {/* Per Station Status Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto text-left">
+            {allStations.map((st) => {
+              const prog = getStationRoundProgress(st.id, 1);
+              return (
+                <div key={st.id} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-white truncate">{st.name || 'Station'}</span>
+                  {prog.isComplete && prog.total > 0 ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Finished
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 font-mono text-[11px]">
+                      {prog.completed}/{prog.total} Done
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Action Navigation */}
+          <div className="pt-4 flex flex-wrap items-center justify-center gap-4">
+            <button
+              onClick={() => setCurrentPage('round1')}
+              className="px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider shadow-xl shadow-purple-950/80 flex items-center gap-2 transition-all hover:scale-105"
+            >
+              <span>Return to Round 1 Stage</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => setCurrentPage('master')}
+              className="px-5 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors"
+            >
+              Open Master Monitor
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
+      {/* Event Round Concluded Notice */}
+      {currentEventRound > 2 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-indigo-950/40 border border-indigo-500/40 text-indigo-200">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div>
+              <span className="font-bold text-white text-sm block">Round 2 has concluded</span>
+              <span className="text-xs text-indigo-300">The entire competition has progressed to Championship Finals (Round 3).</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setCurrentPage('round3')}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shrink-0 transition-colors"
+          >
+            <span>Go to Finals (Round 3)</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Station Finished Round 2 Waiting State */}
+      {(() => {
+        const r2StationProg = currentStationId && currentStationId !== 'all' ? getStationRoundProgress(currentStationId, 2) : null;
+        if (currentEventRound === 2 && r2StationProg && r2StationProg.isComplete && r2StationProg.total > 0) {
+          return (
+            <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="font-extrabold text-white text-sm block">
+                    Stage Round 2 Completed ({r2StationProg.completed}/{r2StationProg.total} Contestants)
+                  </span>
+                  <span className="text-xs text-emerald-300/90">
+                    All qualified contestants for this station have finished Round 2. Please wait for other stations before Championship Finals start.
+                  </span>
+                </div>
+              </div>
+              <span className="px-3 py-1 rounded-full bg-emerald-900/50 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 shrink-0 self-start sm:self-center">
+                Waiting for All Stations
+              </span>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       {/* Header Banner */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/90 border border-purple-900/30 p-4 sm:p-5 rounded-2xl shadow-xl">
         <div className="flex items-center gap-3">
