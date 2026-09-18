@@ -74,13 +74,21 @@ const AppContent: React.FC = () => {
           )}
           {currentPage === 'topics' && <TopicsManager />}
           {currentPage === 'images' && <ImagesManager />}
-          {currentPage === 'round1' && <Round1 />}
+          {currentPage === 'round1' && (
+            <ErrorBoundary fallbackTitle="Round 1 Pixel Pictionary Error">
+              <Round1 />
+            </ErrorBoundary>
+          )}
           {currentPage === 'round2' && (
-            <ErrorBoundary fallbackTitle="Round 2 Topic Wheel Error">
+            <ErrorBoundary fallbackTitle="Round 2 Arcade Wheel Error">
               <Round2 />
             </ErrorBoundary>
           )}
-          {currentPage === 'round3' && <Round3 />}
+          {currentPage === 'round3' && (
+            <ErrorBoundary fallbackTitle="Round 3 The Mystery Cartridge Error">
+              <Round3 />
+            </ErrorBoundary>
+          )}
           {currentPage === 'buzzer' && <BuzzerControl />}
           {currentPage === 'warning-buzzer' && <WarningBuzzer />}
           {currentPage === 'results' && <Results />}

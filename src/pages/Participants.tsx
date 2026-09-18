@@ -32,6 +32,7 @@ export const Participants: React.FC = () => {
     addParticipant,
     updateParticipant,
     deleteParticipant,
+    deleteAllParticipants,
     importParticipants,
     batchSetStation,
     addCustomField,
@@ -50,6 +51,10 @@ export const Participants: React.FC = () => {
   const [stationFilter, setStationFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'number' | 'name' | 'status' | 'station'>('number');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Delete all modal state
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   // Batch selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -576,6 +581,17 @@ export const Participants: React.FC = () => {
             <span>Template</span>
           </button>
 
+          {/* Remove All Contestants */}
+          <button
+            onClick={() => setShowDeleteAllModal(true)}
+            disabled={(db?.participants?.length || 0) === 0}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            title="Remove all contestants from roster"
+          >
+            <Trash2 className="w-4 h-4 text-rose-400" />
+            <span>Remove All</span>
+          </button>
+
           {/* Add Participant */}
           <button
             onClick={openAddModal}
@@ -618,9 +634,9 @@ export const Participants: React.FC = () => {
               <option value="registered">Registered</option>
               <option value="eliminated">Eliminated</option>
               <option value="completed">Completed</option>
-              <option value="r1_qualified">Round 1 Qualifiers</option>
-              <option value="r2_qualified">Round 2 Qualifiers</option>
-              <option value="r3_qualified">Round 3 Qualifiers / Champions</option>
+              <option value="r1_qualified">Round 1 (Pixel Pictionary) Qualifiers</option>
+              <option value="r2_qualified">Round 2 (Arcade Wheel) Qualifiers</option>
+              <option value="r3_qualified">Round 3 (The Mystery Cartridge) Qualifiers / Champions</option>
               <option value="disqualified">Disqualified Contestants</option>
             </select>
           </div>
@@ -916,9 +932,9 @@ export const Participants: React.FC = () => {
                 <th className="py-3.5 px-4">Mobile Number</th>
                 <th className="py-3.5 px-4">Station</th>
                 <th className="py-3.5 px-4 text-center">Arrival</th>
-                <th className="py-3.5 px-4 text-center">Round 1</th>
-                <th className="py-3.5 px-4 text-center">Round 2</th>
-                <th className="py-3.5 px-4 text-center">Round 3</th>
+                <th className="py-3.5 px-4 text-center">Round 1 (Pixel Pictionary)</th>
+                <th className="py-3.5 px-4 text-center">Round 2 (Arcade Wheel)</th>
+                <th className="py-3.5 px-4 text-center">Round 3 (Mystery Cartridge)</th>
                 {customFields.map((cf) => (
                   <th key={cf.id} className="py-3.5 px-4">
                     {cf.name}
@@ -1283,7 +1299,7 @@ export const Participants: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* Round 1 */}
                   <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
-                    <label className="block text-slate-300 text-xs font-bold">Round 1 (3 Places)</label>
+                    <label className="block text-slate-300 text-xs font-bold">Round 1: Pixel Pictionary</label>
                     <select
                       value={formData.round1Qualified}
                       onChange={(e) =>
@@ -1323,7 +1339,7 @@ export const Participants: React.FC = () => {
 
                   {/* Round 2 */}
                   <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
-                    <label className="block text-slate-300 text-xs font-bold">Round 2 (2 Places)</label>
+                    <label className="block text-slate-300 text-xs font-bold">Round 2: Arcade Wheel</label>
                     <select
                       value={formData.round2Qualified}
                       onChange={(e) =>
@@ -1366,7 +1382,7 @@ export const Participants: React.FC = () => {
 
                   {/* Round 3 */}
                   <div className="space-y-1.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
-                    <label className="block text-slate-300 text-xs font-bold">Round 3 Finals (1 Place)</label>
+                    <label className="block text-slate-300 text-xs font-bold">Round 3: The Mystery Cartridge</label>
                     <select
                       value={formData.round3Qualified}
                       onChange={(e) =>
@@ -1664,6 +1680,49 @@ export const Participants: React.FC = () => {
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50"
               >
                 Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Contestants Modal */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-white">Remove All Contestants?</h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete all <strong className="text-white">{db?.participants?.length || 0}</strong> contestants from the roster? This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={() => setShowDeleteAllModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={async () => {
+                  try {
+                    setIsDeletingAll(true);
+                    await deleteAllParticipants();
+                    setShowDeleteAllModal(false);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to remove all participants');
+                  } finally {
+                    setIsDeletingAll(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isDeletingAll ? 'Removing...' : 'Yes, Remove All Contestants'}
               </button>
             </div>
           </div>

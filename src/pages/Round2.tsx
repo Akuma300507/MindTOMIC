@@ -53,8 +53,8 @@ export const Round2: React.FC = () => {
 
   // Wheel topic font size adjustment state (synced with settings and localStorage)
   const initialWheelFontSize = useMemo(() => {
-    if (typeof db?.settings.round2.wheelFontSize === 'number') {
-      return db.settings.round2.wheelFontSize;
+    if (typeof db?.settings?.round2?.wheelFontSize === 'number') {
+      return db?.settings?.round2?.wheelFontSize;
     }
     const saved = localStorage.getItem('m2m_wheel_font_size');
     if (saved) {
@@ -67,8 +67,8 @@ export const Round2: React.FC = () => {
   const [wheelFontSize, setWheelFontSize] = useState<number | undefined>(initialWheelFontSize);
 
   useEffect(() => {
-    if (typeof db?.settings.round2.wheelFontSize === 'number') {
-      setWheelFontSize(db.settings.round2.wheelFontSize);
+    if (typeof db?.settings?.round2?.wheelFontSize === 'number') {
+      setWheelFontSize(db?.settings?.round2?.wheelFontSize);
     }
   }, [db?.settings?.round2?.wheelFontSize]);
 
@@ -84,7 +84,7 @@ export const Round2: React.FC = () => {
     }
     setWheelFontSize(nextSize);
 
-    if (updateSettings && db?.settings) {
+    if (updateSettings && db?.settings?.round2) {
       try {
         await updateSettings({
           round2: {
@@ -96,7 +96,7 @@ export const Round2: React.FC = () => {
         console.error('Failed to sync wheel font size to settings:', err);
       }
     }
-  }, [wheelFontSize, updateSettings, db?.settings]);
+  }, [wheelFontSize, updateSettings, db?.settings?.round2]);
 
   // Round 1 qualification workflow:
   // Contestants who are qualified in Round 1 advance to Round 2.
@@ -162,12 +162,12 @@ export const Round2: React.FC = () => {
   }, [allTopicsPool, currentStationId]);
 
   const topicsPool = stationTopicsPool;
-  const wheelCount = db?.settings.round2.activeWheelTopicCount ?? 20;
-  const speechSeconds = db?.settings.round2.speechTimeSeconds ?? 120;
-  const buzzerEnabled = db?.settings.round2.buzzerEnabled ?? true;
-  const warningBuzzerEnabled = db?.settings.round2.warningBuzzerEnabled ?? true;
-  const warningTimeSeconds = db?.settings.round2.warningTimeSeconds ?? 30;
-  const reuseAllowed = db?.settings.round2.topicReuseAllowed ?? false;
+  const wheelCount = db?.settings?.round2?.activeWheelTopicCount ?? 20;
+  const speechSeconds = db?.settings?.round2?.speechTimeSeconds ?? 120;
+  const buzzerEnabled = db?.settings?.round2?.buzzerEnabled ?? true;
+  const warningBuzzerEnabled = db?.settings?.round2?.warningBuzzerEnabled ?? true;
+  const warningTimeSeconds = db?.settings?.round2?.warningTimeSeconds ?? 30;
+  const reuseAllowed = db?.settings?.round2?.topicReuseAllowed ?? false;
 
   // Heat slot index within this station's eligible Round 2 roster
   const slotIndex = useMemo(() => {
@@ -550,8 +550,8 @@ export const Round2: React.FC = () => {
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
             <div>
-              <span className="font-bold text-white text-sm block">Round 2 has concluded</span>
-              <span className="text-xs text-indigo-300">The entire competition has progressed to Championship Finals (Round 3).</span>
+              <span className="font-bold text-white text-sm block">Round 2 (Arcade Wheel) has concluded</span>
+              <span className="text-xs text-indigo-300">The entire competition has progressed to Round 3 (The Mystery Cartridge).</span>
             </div>
           </div>
           <button
@@ -603,7 +603,7 @@ export const Round2: React.FC = () => {
               <span className="text-xs font-mono font-bold text-purple-400 px-2 py-0.5 rounded bg-purple-950/60 border border-purple-800">
                 ROUND 2
               </span>
-              <h1 className="text-xl sm:text-2xl font-black text-white font-['Outfit']">Spin the Topic Wheel</h1>
+              <h1 className="text-xl sm:text-2xl font-black text-white font-['Outfit']">Arcade Wheel</h1>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
               {activeWheelTopics.length} Wheel Topics • Immediate Speech: {speechSeconds}s (No Prep) • Buzzer: {buzzerEnabled ? 'ON' : 'OFF'}
@@ -980,7 +980,7 @@ export const Round2: React.FC = () => {
                   Warning Buzzer: {warningBuzzerEnabled ? `${warningTimeSeconds}s remaining` : 'Disabled'}
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  {warningBuzzerEnabled ? `Sounds alert at ${warningTimeSeconds}s left` : 'No mid-round alert'} • Tone: {db?.settings.buzzer.warningSound || 'double_beep'}
+                  {warningBuzzerEnabled ? `Sounds alert at ${warningTimeSeconds}s left` : 'No mid-round alert'} • Tone: {db?.settings?.buzzer?.warningSound || 'double_beep'}
                 </span>
               </div>
             </div>

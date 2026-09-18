@@ -239,7 +239,7 @@ export const excelService = {
       };
     });
     const wsR1 = XLSX.utils.json_to_sheet(r1Rows.length ? r1Rows : [{ 'Info': 'No Round 1 results recorded yet' }]);
-    XLSX.utils.book_append_sheet(wb, wsR1, 'Round 1 Results');
+    XLSX.utils.book_append_sheet(wb, wsR1, 'Round 1 - Pixel Pictionary');
 
     // 5. Round 2 Results Sheet
     const r2Rows = db.round2Results.map((r) => {
@@ -262,7 +262,7 @@ export const excelService = {
       };
     });
     const wsR2 = XLSX.utils.json_to_sheet(r2Rows.length ? r2Rows : [{ 'Info': 'No Round 2 results recorded yet' }]);
-    XLSX.utils.book_append_sheet(wb, wsR2, 'Round 2 Results');
+    XLSX.utils.book_append_sheet(wb, wsR2, 'Round 2 - Arcade Wheel');
 
     // 6. Round 3 Results Sheet
     const r3Rows = db.round3Results.map((r) => {
@@ -282,7 +282,7 @@ export const excelService = {
       };
     });
     const wsR3 = XLSX.utils.json_to_sheet(r3Rows.length ? r3Rows : [{ 'Info': 'No Round 3 results recorded yet' }]);
-    XLSX.utils.book_append_sheet(wb, wsR3, 'Round 3 Results');
+    XLSX.utils.book_append_sheet(wb, wsR3, 'Round 3 - Mystery Cartridge');
 
     // 7. Rank List Sheet
     const rankedList = [...db.participants]
@@ -347,16 +347,16 @@ export const excelService = {
 
     // 7. Settings Sheet
     const settingsRows = [
-      { 'Setting': 'Event Name', 'Value': db.settings.event.name },
-      { 'Setting': 'Tagline', 'Value': db.settings.event.tagline },
-      { 'Setting': 'Round 1 Prep Time (s)', 'Value': db.settings.round1.prepTimeSeconds },
-      { 'Setting': 'Round 1 Speech Time (s)', 'Value': db.settings.round1.speechTimeSeconds },
-      { 'Setting': 'Round 2 Active Wheel Topics', 'Value': db.settings.round2.activeWheelTopicCount },
-      { 'Setting': 'Round 2 Prep Time (s)', 'Value': db.settings.round2.prepTimeSeconds },
-      { 'Setting': 'Round 2 Speech Time (s)', 'Value': db.settings.round2.speechTimeSeconds },
-      { 'Setting': 'Round 3 Speech Time (s)', 'Value': db.settings.round3.speechTimeSeconds },
-      { 'Setting': 'Buzzer Sound', 'Value': db.settings.buzzer.sound },
-      { 'Setting': 'Buzzer Volume', 'Value': `${db.settings.buzzer.volume}%` },
+      { 'Setting': 'Event Name', 'Value': db?.settings?.event?.name || 'MIND TO MIC' },
+      { 'Setting': 'Tagline', 'Value': db?.settings?.event?.tagline || '' },
+      { 'Setting': 'Round 1 (Pixel Pictionary) Prep Time (s)', 'Value': db?.settings?.round1?.prepTimeSeconds ?? 30 },
+      { 'Setting': 'Round 1 (Pixel Pictionary) Speech Time (s)', 'Value': db?.settings?.round1?.speechTimeSeconds ?? 120 },
+      { 'Setting': 'Round 2 (Arcade Wheel) Active Wheel Topics', 'Value': db?.settings?.round2?.activeWheelTopicCount ?? 20 },
+      { 'Setting': 'Round 2 (Arcade Wheel) Prep Time (s)', 'Value': db?.settings?.round2?.prepTimeSeconds ?? 0 },
+      { 'Setting': 'Round 2 (Arcade Wheel) Speech Time (s)', 'Value': db?.settings?.round2?.speechTimeSeconds ?? 120 },
+      { 'Setting': 'Round 3 (The Mystery Cartridge) Speech Time (s)', 'Value': db?.settings?.round3?.speechTimeSeconds ?? 120 },
+      { 'Setting': 'Buzzer Sound', 'Value': db?.settings?.buzzer?.sound || 'horn' },
+      { 'Setting': 'Buzzer Volume', 'Value': `${db?.settings?.buzzer?.volume ?? 90}%` },
     ];
     const wsSettings = XLSX.utils.json_to_sheet(settingsRows);
     XLSX.utils.book_append_sheet(wb, wsSettings, 'Settings');

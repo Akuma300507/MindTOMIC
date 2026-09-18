@@ -353,6 +353,11 @@ export const api = {
     if (!res.ok) throw new Error('Failed to delete participant');
   },
 
+  async deleteAllParticipants(): Promise<void> {
+    const res = await fetch('/api/participants', { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete all participants');
+  },
+
   async batchAddParticipants(participants: Partial<Participant>[]): Promise<{ count: number; participants: Participant[] }> {
     const res = await fetch('/api/participants/batch', {
       method: 'POST',
@@ -474,6 +479,11 @@ export const api = {
     if (!res.ok) throw new Error('Failed to delete topic');
   },
 
+  async deleteAllTopics(): Promise<void> {
+    const res = await fetch('/api/topics', { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete all topics');
+  },
+
   async batchAddTopics(topics: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[], stationId?: string): Promise<{ count: number; topics: Topic[] }> {
     const res = await fetch('/api/topics/batch', {
       method: 'POST',
@@ -569,6 +579,11 @@ export const api = {
   async deleteImage(id: string): Promise<void> {
     const res = await fetch(`/api/images/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Failed to delete image');
+  },
+
+  async deleteAllImages(): Promise<void> {
+    const res = await fetch('/api/images', { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete all images');
   },
 
   async resetImagesStatus(): Promise<void> {

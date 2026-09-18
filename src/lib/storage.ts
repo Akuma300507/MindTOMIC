@@ -93,6 +93,15 @@ export const storageService = {
   },
 
   /**
+   * Record multiple participants as explicitly deleted by the user.
+   */
+  recordDeletedParticipants(ids: string[]): void {
+    const set = getStoredSet(STORAGE_KEYS.DELETED_PARTICIPANTS);
+    ids.forEach((id) => set.add(id));
+    saveStoredSet(STORAGE_KEYS.DELETED_PARTICIPANTS, set);
+  },
+
+  /**
    * Record a topic as explicitly deleted by the user.
    */
   recordDeletedTopic(id: string): void {
@@ -102,11 +111,29 @@ export const storageService = {
   },
 
   /**
+   * Record multiple topics as explicitly deleted by the user.
+   */
+  recordDeletedTopics(ids: string[]): void {
+    const set = getStoredSet(STORAGE_KEYS.DELETED_TOPICS);
+    ids.forEach((id) => set.add(id));
+    saveStoredSet(STORAGE_KEYS.DELETED_TOPICS, set);
+  },
+
+  /**
    * Record an image as explicitly deleted by the user.
    */
   recordDeletedImage(id: string): void {
     const set = getStoredSet(STORAGE_KEYS.DELETED_IMAGES);
     set.add(id);
+    saveStoredSet(STORAGE_KEYS.DELETED_IMAGES, set);
+  },
+
+  /**
+   * Record multiple images as explicitly deleted by the user.
+   */
+  recordDeletedImages(ids: string[]): void {
+    const set = getStoredSet(STORAGE_KEYS.DELETED_IMAGES);
+    ids.forEach((id) => set.add(id));
     saveStoredSet(STORAGE_KEYS.DELETED_IMAGES, set);
   },
 
@@ -129,6 +156,10 @@ export const storageService = {
     try {
       if (typeof localStorage === 'undefined') return;
       localStorage.removeItem(STORAGE_KEYS.DB);
+      localStorage.removeItem('m2m_current_station_id');
+      localStorage.removeItem('projector_assigned_station');
+      localStorage.removeItem('m2m_projector_station_id');
+      localStorage.removeItem('m2m_wheel_font_size');
       this.clearDeletedRecords();
     } catch {}
   },

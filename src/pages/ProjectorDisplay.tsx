@@ -57,8 +57,8 @@ export const ProjectorDisplay: React.FC = () => {
 
   // Wheel topic font size adjustment state (synced with settings and localStorage)
   const wheelFontSize = useMemo(() => {
-    if (typeof db?.settings.round2.wheelFontSize === 'number') {
-      return db.settings.round2.wheelFontSize;
+    if (typeof db?.settings?.round2?.wheelFontSize === 'number') {
+      return db?.settings?.round2?.wheelFontSize;
     }
     const saved = localStorage.getItem('m2m_wheel_font_size');
     if (saved) {
@@ -197,8 +197,8 @@ export const ProjectorDisplay: React.FC = () => {
     appActiveParticipant,
   ]);
 
-  const eventName = db?.settings.event.name || 'MIND TO MIC';
-  const tagline = db?.settings.event.tagline || 'THINK. SPEAK. EXPRESS.';
+  const eventName = db?.settings?.event?.name || 'MIND TO MIC';
+  const tagline = db?.settings?.event?.tagline || 'THINK. SPEAK. EXPRESS.';
 
   // STRICT STATION ISOLATION: Round number for this station
   const currentRound = useMemo(() => {
@@ -256,9 +256,9 @@ export const ProjectorDisplay: React.FC = () => {
   const overtimeSeconds = computedTimer.overtimeSeconds;
   const progressPercent = computedTimer.progressPercent;
   const warningTimeSeconds = useMemo(() => {
-    if (currentRound === 1) return db?.settings.round1.warningTimeSeconds ?? 30;
-    if (currentRound === 2) return db?.settings.round2.warningTimeSeconds ?? 30;
-    if (currentRound === 3) return db?.settings.round3.warningTimeSeconds ?? 30;
+    if (currentRound === 1) return db?.settings?.round1?.warningTimeSeconds ?? 30;
+    if (currentRound === 2) return db?.settings?.round2?.warningTimeSeconds ?? 30;
+    if (currentRound === 3) return db?.settings?.round3?.warningTimeSeconds ?? 30;
     return 30;
   }, [currentRound, db?.settings]);
 
@@ -378,7 +378,7 @@ export const ProjectorDisplay: React.FC = () => {
   // STRICT STATION ISOLATION: Default active topics for this station
   const stationDefaultWheelTopics = useMemo(() => {
     if (!db?.topics) return [];
-    const count = db.settings.round2.activeWheelTopicCount || 20;
+    const count = db?.settings?.round2?.activeWheelTopicCount || 20;
 
     if (selectedStationId) {
       const station = db.stations?.[selectedStationId];
@@ -402,7 +402,7 @@ export const ProjectorDisplay: React.FC = () => {
 
     const available = db.topics.filter((t) => t.status === 'available');
     return (available.length > 0 ? available : db.topics).slice(0, count);
-  }, [db?.topics, db?.settings.round2.activeWheelTopicCount, selectedStationId, db?.stations]);
+  }, [db?.topics, db?.settings?.round2?.activeWheelTopicCount, selectedStationId, db?.stations]);
 
   // The topics currently rendered on the projector wheel
   const activeTopics = useMemo(() => {
@@ -705,9 +705,9 @@ export const ProjectorDisplay: React.FC = () => {
           <div className="mt-1 flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-gradient-to-r from-amber-950/70 via-purple-950/90 to-amber-950/70 border border-amber-500/40 shadow-[0_0_16px_rgba(245,158,11,0.25)] backdrop-blur-md">
             <Sparkles className="w-3 h-3 text-amber-400 animate-pulse shrink-0" />
             <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-100 to-amber-300 font-['Outfit']">
-              {currentRound === 1 && 'ROUND 1 • IMAGE TO SPEECH'}
-              {currentRound === 2 && 'ROUND 2 • SPIN THE TOPIC WHEEL'}
-              {currentRound === 3 && 'ROUND 3 • CHAMPIONSHIP FINALS'}
+              {currentRound === 1 && 'ROUND 1 • PIXEL PICTIONARY'}
+              {currentRound === 2 && 'ROUND 2 • ARCADE WHEEL'}
+              {currentRound === 3 && 'ROUND 3 • THE MYSTERY CARTRIDGE'}
             </span>
             <Sparkles className="w-3 h-3 text-amber-400 animate-pulse shrink-0 hidden sm:inline" />
           </div>
@@ -1025,7 +1025,7 @@ export const ProjectorDisplay: React.FC = () => {
             <div className="w-full max-w-xl p-6 rounded-3xl bg-slate-900/60 border border-purple-900/30 text-slate-300 flex flex-col items-center space-y-2.5 animate-in fade-in my-auto">
               <Sparkles className="w-10 h-10 text-purple-400 animate-pulse" />
               <div className="space-y-1 text-center">
-                <h4 className="text-lg sm:text-xl font-bold text-white font-['Outfit']">ROUND 1 • IMAGE TO SPEECH</h4>
+                <h4 className="text-lg sm:text-xl font-bold text-white font-['Outfit']">ROUND 1 • PIXEL PICTIONARY</h4>
                 <p className="text-xs text-slate-400">
                   Awaiting random image prompt assignment from {currentStationState?.name || 'operator station'}
                 </p>

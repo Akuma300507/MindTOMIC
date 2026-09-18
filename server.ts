@@ -730,14 +730,115 @@ app.post('/api/sync-restore', (req: Request, res: Response) => {
 });
 
 
-// Reset database to initial factory defaults
-app.post('/api/reset-data', (req: Request, res: Response) => {
-  db = getInitialDatabase();
-  persistDB();
-  logAction('Reset All Data', 'Organizer restored factory defaults for the event database.');
-  broadcastSSE('state_reset', db);
-  res.json({ success: true, message: 'Database reset to initial template state.' });
-});
+// Reset database to completely clean new fresh state (Purge all data)
+const handleCompleteDataReset = (req: Request, res: Response) => {
+  try {
+    // 1. Clean uploaded image files in UPLOADS_DIR (protecting custom logo files)
+    if (fs.existsSync(UPLOADS_DIR)) {
+      try {
+        const files = fs.readdirSync(UPLOADS_DIR);
+        for (const file of files) {
+          if (file.toLowerCase().includes('logo')) continue;
+          try {
+            fs.unlinkSync(path.join(UPLOADS_DIR, file));
+          } catch {}
+        }
+      } catch (uploadErr) {
+        console.warn('[reset] Error cleaning uploads folder:', uploadErr);
+      }
+    }
+
+    // 2. Re-initialize database to an empty, fresh slate
+    db = getInitialDatabase();
+    db.participants = [];
+    db.topics = [];
+    db.images = [];
+    db.round1Results = [];
+    db.round2Results = [];
+    db.round3Results = [];
+    db.history = [];
+    db.synchronizedSlots = {
+      round1: {},
+      round2: {},
+    };
+    db.liveSync = {
+      currentRound: 1,
+      activeParticipantId: null,
+      timerMode: 'idle',
+      timerRemainingSeconds: 120,
+      timerTotalSeconds: 120,
+      isTimerRunning: false,
+      stationStates: db.stations,
+    };
+
+    // Ensure all stations are in clean WAITING status at Round 1
+    if (db.stations) {
+      Object.keys(db.stations).forEach((stId) => {
+        const s = db.stations[stId];
+        s.currentRound = 1;
+        s.status = 'WAITING';
+        s.activeParticipantId = null;
+        s.activeParticipant = null;
+        s.selectedImageId = null;
+        s.selectedImage = null;
+        s.imageRotation = 0;
+        s.selectedTopicId = null;
+        s.selectedTopic = null;
+        s.wheelSpin = null;
+        s.timerMode = 'idle';
+        s.timerStatus = 'idle';
+        s.timerDuration = 120;
+        s.timerStartTime = null;
+        s.timerAccumulatedMs = 0;
+        s.timerStopTime = null;
+        s.timerTotalSeconds = 120;
+        s.timerRemainingSeconds = 120;
+        s.isTimerRunning = false;
+        s.timerStartedAt = null;
+        s.timerEndsAt = null;
+        s.buzzerTimeSeconds = 120;
+        s.buzzerPlayed = false;
+        s.isOvertime = false;
+        s.overtimeSeconds = 0;
+      });
+    }
+
+    persistDB();
+    logAction('Reset All Data', 'Organizer performed a complete factory reset — purged all contestants, topics, images, and scores to start fresh.');
+
+    // 3. Broadcast to all clients and station channels
+    broadcastSSE('state_reset', db);
+    broadcastSSE('participants_updated', db.participants);
+    broadcastSSE('topics_updated', db.topics);
+    broadcastSSE('images_updated', db.images);
+    broadcastSSE('stations_updated', Object.values(db.stations));
+    broadcastSSE('event_round_changed', {
+      currentRound: 1,
+      round2PermissionGranted: false,
+      round3PermissionGranted: false,
+      stations: db.stations,
+    });
+    broadcastSSE('history_updated', null);
+
+    if (db.stations) {
+      Object.keys(db.stations).forEach((stId) => {
+        broadcastStationUpdate(stId, 'station_updated', db.stations[stId]);
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'All data permanently deleted. System initialized to clean fresh state.',
+      db,
+    });
+  } catch (err: any) {
+    console.error('[reset-data] Error resetting database:', err);
+    res.status(500).json({ error: err.message || 'Failed to perform complete data reset' });
+  }
+};
+
+app.post('/api/reset-data', handleCompleteDataReset);
+app.post('/api/event/reset-all', handleCompleteDataReset);
 
 // Get connected projectors list
 app.get('/api/projectors', (req: Request, res: Response) => {
@@ -1805,7 +1906,7 @@ app.post('/api/event/stage-permission', (req: Request, res: Response) => {
     round3PermissionGranted: db.liveSync.round3PermissionGranted,
     stagePermissions: db.liveSync.stagePermissions,
   });
-  broadcastSSE('stations_updated', db.stations);
+  broadcastSSE('stations_updated', Object.values(db.stations));
   broadcastSSE('participants_updated', db.participants);
 
   res.json({
@@ -1910,7 +2011,7 @@ app.post('/api/event/set-round', (req: Request, res: Response) => {
     round2PermissionGranted: db.liveSync.round2PermissionGranted,
     round3PermissionGranted: db.liveSync.round3PermissionGranted,
   });
-  broadcastSSE('stations_updated', db.stations);
+  broadcastSSE('stations_updated', Object.values(db.stations));
 
   res.json({
     success: true,
@@ -2984,6 +3085,32 @@ app.delete('/api/participants/:id', (req: Request, res: Response) => {
   res.json({ success: true, id });
 });
 
+// Delete all participants
+const removeAllParticipantsHandler = (req: Request, res: Response) => {
+  const count = db.participants.length;
+  db.participants = [];
+  // Clear active participant references in stations
+  if (db.stations) {
+    Object.values(db.stations).forEach((s: any) => {
+      delete s.activeParticipantId;
+      delete s.activeParticipant;
+    });
+  }
+  if (db.liveSync) {
+    db.liveSync.activeParticipantId = null;
+  }
+  persistDB();
+  logAction('All Participants Deleted', `Removed all ${count} contestants from the roster`);
+  broadcastSSE('participants_updated', db.participants);
+  if (db.stations) {
+    broadcastSSE('stations_updated', Object.values(db.stations));
+  }
+  res.json({ success: true, count, participants: [] });
+};
+
+app.delete('/api/participants', removeAllParticipantsHandler);
+app.post('/api/participants/delete-all', removeAllParticipantsHandler);
+
 app.post('/api/participants/batch', (req: Request, res: Response) => {
   const items: Partial<Participant>[] = req.body.participants || [];
   if (!Array.isArray(items) || items.length === 0) {
@@ -3355,6 +3482,44 @@ app.delete('/api/topics/:id', (req: Request, res: Response) => {
   res.json({ success: true, id });
 });
 
+const removeAllTopicsHandler = (req: Request, res: Response) => {
+  const count = db.topics.length;
+  db.topics = [];
+  // Clear topic references in stations
+  (db.settings.stations || []).forEach((st) => {
+    const s = db.stations && db.stations[st.id];
+    if (s) {
+      delete s.selectedTopicId;
+      delete s.selectedTopic;
+      if (s.activeItem && s.activeItem.type === 'topic') {
+        delete s.activeItem;
+      }
+    }
+  });
+  if (db.stations) {
+    Object.values(db.stations).forEach((s: any) => {
+      delete s.selectedTopicId;
+      delete s.selectedTopic;
+      if (s.activeItem && s.activeItem.type === 'topic') {
+        delete s.activeItem;
+      }
+    });
+  }
+  if (db.slotAssignments) {
+    db.slotAssignments = db.slotAssignments.filter((sa: any) => sa.round !== 'round2');
+  }
+  persistDB();
+  logAction('All Topics Deleted', `Removed all ${count} topics from universal repository`);
+  broadcastSSE('topics_updated', db.topics);
+  if (db.stations) {
+    broadcastSSE('stations_updated', Object.values(db.stations));
+  }
+  res.json({ success: true, count, topics: [] });
+};
+
+app.delete('/api/topics', removeAllTopicsHandler);
+app.post('/api/topics/delete-all', removeAllTopicsHandler);
+
 app.post('/api/topics/batch', (req: Request, res: Response) => {
   const items: { topic: string; category?: string; topicId?: string }[] = req.body.topics || [];
   const added: Topic[] = [];
@@ -3554,6 +3719,48 @@ app.delete('/api/images/:id', (req: Request, res: Response) => {
   broadcastSSE('images_updated', db.images);
   res.json({ success: true, id });
 });
+
+const removeAllImagesHandler = (req: Request, res: Response) => {
+  const count = db.images.length;
+  db.images = [];
+  // Clear image references in stations
+  (db.settings.stations || []).forEach((st) => {
+    const s = db.stations && db.stations[st.id];
+    if (s) {
+      delete s.selectedImageId;
+      delete s.selectedImage;
+      if (s.activeItem && s.activeItem.type === 'image') {
+        delete s.activeItem;
+      }
+    }
+  });
+  if (db.stations) {
+    Object.values(db.stations).forEach((s: any) => {
+      delete s.selectedImageId;
+      delete s.selectedImage;
+      if (s.activeItem && s.activeItem.type === 'image') {
+        delete s.activeItem;
+      }
+    });
+  }
+  if (db.slotAssignments) {
+    db.slotAssignments = db.slotAssignments.filter((sa: any) => sa.round !== 'round1');
+  }
+  db.participants.forEach((p) => {
+    delete p.round1ImageId;
+  });
+  persistDB();
+  logAction('All Images Deleted', `Removed all ${count} images from universal repository`);
+  broadcastSSE('images_updated', db.images);
+  if (db.stations) {
+    broadcastSSE('stations_updated', Object.values(db.stations));
+  }
+  broadcastSSE('participants_updated', db.participants);
+  res.json({ success: true, count, images: [] });
+};
+
+app.delete('/api/images', removeAllImagesHandler);
+app.post('/api/images/delete-all', removeAllImagesHandler);
 
 app.post('/api/images/reset-status', (req: Request, res: Response) => {
   db.images.forEach((img) => {

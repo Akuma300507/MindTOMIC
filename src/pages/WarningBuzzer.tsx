@@ -273,7 +273,7 @@ export const WarningBuzzer: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ImageIcon className="w-4 h-4 text-blue-400" />
-                    <h4 className="font-bold text-white text-sm font-['Outfit']">Round 1: Image to Speech</h4>
+                    <h4 className="font-bold text-white text-sm font-['Outfit']">Round 1: Pixel Pictionary</h4>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer text-xs">
                     <input
@@ -297,7 +297,7 @@ export const WarningBuzzer: React.FC = () => {
                       <input
                         type="number"
                         min={5}
-                        max={Math.max(5, (db?.settings.round1.speechTimeSeconds || 120) - 1)}
+                        max={Math.max(5, (db?.settings?.round1?.speechTimeSeconds || 120) - 1)}
                         value={r1Time}
                         onChange={(e) => setR1Time(parseInt(e.target.value) || 30)}
                         className="w-28 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold focus:border-blue-500 focus:outline-none text-sm"
@@ -307,8 +307,8 @@ export const WarningBuzzer: React.FC = () => {
                   </div>
 
                   <div className="text-[11px] text-slate-400 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
-                    With a {db?.settings.round1.speechTimeSeconds || 120}s speech limit, warning buzzer plays at{' '}
-                    <strong className="text-blue-300 font-mono">{r1Time}s</strong> remaining ({Math.max(0, (db?.settings.round1.speechTimeSeconds || 120) - r1Time)}s into speech).
+                    With a {db?.settings?.round1?.speechTimeSeconds || 120}s speech limit, warning buzzer plays at{' '}
+                    <strong className="text-blue-300 font-mono">{r1Time}s</strong> remaining ({Math.max(0, (db?.settings?.round1?.speechTimeSeconds || 120) - r1Time)}s into speech).
                   </div>
                 </div>
               </div>
@@ -318,7 +318,7 @@ export const WarningBuzzer: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Disc className="w-4 h-4 text-purple-400" />
-                    <h4 className="font-bold text-white text-sm font-['Outfit']">Round 2: Spinning Wheel & Speech</h4>
+                    <h4 className="font-bold text-white text-sm font-['Outfit']">Round 2: Arcade Wheel</h4>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer text-xs">
                     <input
@@ -342,7 +342,7 @@ export const WarningBuzzer: React.FC = () => {
                       <input
                         type="number"
                         min={5}
-                        max={Math.max(5, (db?.settings.round2.speechTimeSeconds || 120) - 1)}
+                        max={Math.max(5, (db?.settings?.round2?.speechTimeSeconds || 120) - 1)}
                         value={r2Time}
                         onChange={(e) => setR2Time(parseInt(e.target.value) || 30)}
                         className="w-28 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold focus:border-purple-500 focus:outline-none text-sm"
@@ -352,8 +352,8 @@ export const WarningBuzzer: React.FC = () => {
                   </div>
 
                   <div className="text-[11px] text-slate-400 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
-                    With a {db?.settings.round2.speechTimeSeconds || 120}s speech limit, warning buzzer plays at{' '}
-                    <strong className="text-purple-300 font-mono">{r2Time}s</strong> remaining ({Math.max(0, (db?.settings.round2.speechTimeSeconds || 120) - r2Time)}s into speech).
+                    With a {db?.settings?.round2?.speechTimeSeconds || 120}s speech limit, warning buzzer plays at{' '}
+                    <strong className="text-purple-300 font-mono">{r2Time}s</strong> remaining ({Math.max(0, (db?.settings?.round2?.speechTimeSeconds || 120) - r2Time)}s into speech).
                   </div>
                 </div>
               </div>
@@ -363,7 +363,7 @@ export const WarningBuzzer: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-emerald-400" />
-                    <h4 className="font-bold text-white text-sm font-['Outfit']">Round 3: Championship Finals</h4>
+                    <h4 className="font-bold text-white text-sm font-['Outfit']">Round 3: The Mystery Cartridge</h4>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer text-xs">
                     <input
@@ -387,7 +387,7 @@ export const WarningBuzzer: React.FC = () => {
                       <input
                         type="number"
                         min={5}
-                        max={Math.max(5, (db?.settings.round3.speechTimeSeconds || 120) - 1)}
+                        max={Math.max(5, (db?.settings?.round3?.speechTimeSeconds || 120) - 1)}
                         value={r3Time}
                         onChange={(e) => setR3Time(parseInt(e.target.value) || 30)}
                         className="w-28 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold focus:border-purple-500 focus:outline-none text-sm"
@@ -397,8 +397,8 @@ export const WarningBuzzer: React.FC = () => {
                   </div>
 
                   <div className="text-[11px] text-slate-400 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
-                    With a {db?.settings.round3.speechTimeSeconds || 120}s speech limit, warning buzzer plays at{' '}
-                    <strong className="text-emerald-300 font-mono">{r3Time}s</strong> remaining ({Math.max(0, (db?.settings.round3.speechTimeSeconds || 120) - r3Time)}s into speech).
+                    With a {db?.settings?.round3?.speechTimeSeconds || 120}s speech limit, warning buzzer plays at{' '}
+                    <strong className="text-emerald-300 font-mono">{r3Time}s</strong> remaining ({Math.max(0, (db?.settings?.round3?.speechTimeSeconds || 120) - r3Time)}s into speech).
                   </div>
                 </div>
               </div>

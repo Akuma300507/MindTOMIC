@@ -44,12 +44,22 @@ export const Settings: React.FC = () => {
     uploadInspireLogo,
     resetInspireLogo,
     startNewEvent,
+    deleteAllImages,
+    deleteAllTopics,
+    deleteAllParticipants,
   } = useApp();
 
   const [form, setForm] = useState<EventSettings | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [isResettingAll, setIsResettingAll] = useState(false);
   const [showNewEventModal, setShowNewEventModal] = useState(false);
+  const [showDeleteAllParticipantsModal, setShowDeleteAllParticipantsModal] = useState(false);
+  const [isDeletingAllParticipants, setIsDeletingAllParticipants] = useState(false);
+  const [showDeleteAllImagesModal, setShowDeleteAllImagesModal] = useState(false);
+  const [showDeleteAllTopicsModal, setShowDeleteAllTopicsModal] = useState(false);
+  const [isDeletingAllImages, setIsDeletingAllImages] = useState(false);
+  const [isDeletingAllTopics, setIsDeletingAllTopics] = useState(false);
   const [customAudioUploading, setCustomAudioUploading] = useState(false);
   const [customAudioError, setCustomAudioError] = useState<string | null>(null);
 
@@ -657,9 +667,19 @@ export const Settings: React.FC = () => {
 
         {/* Section: Round 1 Settings */}
         <div className="bg-slate-900/90 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-          <div className="flex items-center gap-2 text-blue-300 font-bold font-['Outfit'] text-base border-b border-slate-800 pb-3">
-            <ImageIcon className="w-5 h-5 text-blue-400" />
-            <span>Round 1: Image to Speech Configuration</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2 text-blue-300 font-bold font-['Outfit'] text-base">
+              <ImageIcon className="w-5 h-5 text-blue-400" />
+              <span>Round 1: Pixel Pictionary Configuration</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDeleteAllImagesModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 text-xs font-semibold transition-all cursor-pointer w-fit"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Remove All Images ({db?.images?.length || 0})</span>
+            </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
             <div>
@@ -787,9 +807,19 @@ export const Settings: React.FC = () => {
 
         {/* Section: Round 2 Settings */}
         <div className="bg-slate-900/90 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-          <div className="flex items-center gap-2 text-purple-300 font-bold font-['Outfit'] text-base border-b border-slate-800 pb-3">
-            <Disc className="w-5 h-5 text-purple-400" />
-            <span>Round 2: Spinning Wheel & Speech Configuration</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2 text-purple-300 font-bold font-['Outfit'] text-base">
+              <Disc className="w-5 h-5 text-purple-400" />
+              <span>Round 2: Arcade Wheel Configuration</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDeleteAllTopicsModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 text-xs font-semibold transition-all cursor-pointer w-fit"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Remove All Topics ({db?.topics?.length || 0})</span>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
@@ -957,7 +987,7 @@ export const Settings: React.FC = () => {
         <div className="bg-slate-900/90 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
           <div className="flex items-center gap-2 text-emerald-300 font-bold font-['Outfit'] text-base border-b border-slate-800 pb-3">
             <Clock className="w-5 h-5 text-emerald-400" />
-            <span>Round 3: Final Speaking Timer Configuration</span>
+            <span>Round 3: The Mystery Cartridge Configuration</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -1826,13 +1856,104 @@ export const Settings: React.FC = () => {
           </div>
         </div>
 
+        {/* Section: Danger Zone & Complete Data Purge */}
+        <div className="bg-rose-950/20 border border-rose-500/40 p-6 rounded-2xl shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-rose-900/40 pb-3">
+            <div className="flex items-center gap-2.5 text-rose-400 font-bold font-['Outfit'] text-base">
+              <AlertTriangle className="w-5 h-5 text-rose-400" />
+              <span>Danger Zone — Data Purge & Fresh Start</span>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              IRREVERSIBLE ACTIONS
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Perform a complete data wipe or selectively clear individual asset categories. Deleting all data permanently purges contestants, images, topics, and speech scores, clears browser local caches, and resets all stations back to an empty, fresh start.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+            {/* 1. Delete All Data & Start Fresh */}
+            <div className="p-4 rounded-xl bg-slate-950/80 border border-rose-500/40 flex flex-col justify-between space-y-3">
+              <div>
+                <span className="text-xs font-bold text-rose-400 block mb-1">Delete All Data (Fresh Start)</span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Permanently deletes all participants, topics, images, round results, speech history, and resets stages to Round 1.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetModal(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete All & Start Fresh</span>
+              </button>
+            </div>
+
+            {/* 2. Delete All Participants */}
+            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col justify-between space-y-3">
+              <div>
+                <span className="text-xs font-bold text-white block mb-1">Remove All Contestants</span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Permanently removes all {db?.participants?.length || 0} participants from the roster.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllParticipantsModal(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-slate-800 hover:bg-rose-950/70 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Remove All Contestants</span>
+              </button>
+            </div>
+
+            {/* 3. Delete All Topics */}
+            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col justify-between space-y-3">
+              <div>
+                <span className="text-xs font-bold text-white block mb-1">Remove All Topics</span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Permanently removes all {db?.topics?.length || 0} topics from the wheel repository.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllTopicsModal(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-slate-800 hover:bg-rose-950/70 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Remove All Topics</span>
+              </button>
+            </div>
+
+            {/* 4. Delete All Images */}
+            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col justify-between space-y-3">
+              <div>
+                <span className="text-xs font-bold text-white block mb-1">Remove All Images</span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Permanently removes all {db?.images?.length || 0} images from the Round 1 repository.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteAllImagesModal(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-slate-800 hover:bg-rose-950/70 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Remove All Images</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Action Save Bar & Event Reset */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-800">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setShowNewEventModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all cursor-pointer"
             >
               <Flame className="w-4 h-4 text-amber-400" />
               <span>Start New Event (Reset Rounds & Topics)</span>
@@ -1841,16 +1962,16 @@ export const Settings: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowResetModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold transition-all"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 hover:text-white border border-rose-500/40 text-xs font-bold transition-all cursor-pointer"
             >
-              <RotateCcw className="w-4 h-4" />
-              <span>Restore Factory Defaults</span>
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>Delete All Data & Start Fresh</span>
             </button>
           </div>
 
           <button
             type="submit"
-            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-xl shadow-purple-950/60 active:scale-95 transition-all"
+            className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-xl shadow-purple-950/60 active:scale-95 transition-all cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>Save All Settings</span>
@@ -1871,19 +1992,21 @@ export const Settings: React.FC = () => {
             </p>
             <div className="flex justify-center gap-3 pt-2">
               <button
+                type="button"
                 onClick={() => setShowNewEventModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold"
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={async () => {
                   await startNewEvent();
                   setShowNewEventModal(false);
                   setSavedSuccess(true);
                   setTimeout(() => setSavedSuccess(false), 3000);
                 }}
-                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-lg shadow-amber-950/50"
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-lg shadow-amber-950/50 transition-colors"
               >
                 Yes, Start New Event
               </button>
@@ -1892,30 +2015,212 @@ export const Settings: React.FC = () => {
         </div>
       )}
 
-      {/* Reset Confirmation Modal */}
+      {/* Delete All Data & Start Fresh Confirmation Modal */}
       {showResetModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
-            <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto mb-3" />
-            <h4 className="text-base font-bold text-white mb-1">Reset All Event Data?</h4>
-            <p className="text-xs text-slate-300 mb-5">
-              This will restore all default settings, seed topics, sample contestants, and clear all logged speech results.
-            </p>
-            <div className="flex justify-center gap-3">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-md w-full p-6 shadow-2xl text-center space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400 shadow-xl shadow-rose-950/40">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-1">
+              <h4 className="text-lg font-black text-white font-['Outfit']">Delete All Data & Start Fresh?</h4>
+              <p className="text-xs text-rose-300 font-semibold uppercase tracking-wider">
+                Permanent deletion — Cannot be undone
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-left space-y-2 text-xs text-slate-300">
+              <p className="font-bold text-white mb-1.5">The following data will be permanently purged:</p>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="flex items-center gap-1.5 text-rose-300">
+                  <span className="font-bold text-rose-400">✕</span> {db?.participants?.length || 0} Contestants
+                </div>
+                <div className="flex items-center gap-1.5 text-rose-300">
+                  <span className="font-bold text-rose-400">✕</span> {db?.topics?.length || 0} Topics
+                </div>
+                <div className="flex items-center gap-1.5 text-rose-300">
+                  <span className="font-bold text-rose-400">✕</span> {db?.images?.length || 0} Uploaded Images
+                </div>
+                <div className="flex items-center gap-1.5 text-rose-300">
+                  <span className="font-bold text-rose-400">✕</span> All Speech Results
+                </div>
+                <div className="flex items-center gap-1.5 text-rose-300">
+                  <span className="font-bold text-rose-400">✕</span> Event Logs & History
+                </div>
+                <div className="flex items-center gap-1.5 text-rose-300">
+                  <span className="font-bold text-rose-400">✕</span> Heat Schedules
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 pt-2 border-t border-slate-800/80 leading-relaxed">
+                Stations and stage progression will be reset to Round 1 WAITING state. Local browser storage will be purged clean.
+              </p>
+            </div>
+
+            <div className="flex justify-center gap-3 pt-2">
               <button
+                type="button"
+                disabled={isResettingAll}
                 onClick={() => setShowResetModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold"
+                className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
+                disabled={isResettingAll}
                 onClick={async () => {
-                  await resetAllData();
-                  setShowResetModal(false);
+                  try {
+                    setIsResettingAll(true);
+                    await resetAllData();
+                    setShowResetModal(false);
+                    setSavedSuccess(true);
+                    setTimeout(() => setSavedSuccess(false), 3000);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to reset all data');
+                  } finally {
+                    setIsResettingAll(false);
+                  }
                 }}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold"
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black shadow-lg shadow-rose-950/60 transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer"
               >
-                Yes, Reset All
+                <Trash2 className="w-4 h-4" />
+                <span>{isResettingAll ? 'Purging Everything...' : 'Yes, Delete All & Start Fresh'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Participants Modal */}
+      {showDeleteAllParticipantsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-white">Remove All Contestants?</h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete all <strong className="text-white">{db?.participants?.length || 0}</strong> contestants from the roster? This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingAllParticipants}
+                onClick={() => setShowDeleteAllParticipantsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAllParticipants}
+                onClick={async () => {
+                  try {
+                    setIsDeletingAllParticipants(true);
+                    await deleteAllParticipants();
+                    setShowDeleteAllParticipantsModal(false);
+                    setSavedSuccess(true);
+                    setTimeout(() => setSavedSuccess(false), 3000);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to remove all participants');
+                  } finally {
+                    setIsDeletingAllParticipants(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isDeletingAllParticipants ? 'Removing...' : 'Yes, Remove All Contestants'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Images Modal */}
+      {showDeleteAllImagesModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-white">Remove All Images?</h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete all <strong className="text-white">{db?.images?.length || 0}</strong> images from the repository? This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingAllImages}
+                onClick={() => setShowDeleteAllImagesModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAllImages}
+                onClick={async () => {
+                  try {
+                    setIsDeletingAllImages(true);
+                    await deleteAllImages();
+                    setShowDeleteAllImagesModal(false);
+                    setSavedSuccess(true);
+                    setTimeout(() => setSavedSuccess(false), 3000);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to remove all images');
+                  } finally {
+                    setIsDeletingAllImages(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50 transition-all disabled:opacity-50"
+              >
+                {isDeletingAllImages ? 'Removing...' : 'Yes, Remove All Images'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Topics Modal */}
+      {showDeleteAllTopicsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-white">Remove All Topics?</h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete all <strong className="text-white">{db?.topics?.length || 0}</strong> topics from the repository? This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingAllTopics}
+                onClick={() => setShowDeleteAllTopicsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAllTopics}
+                onClick={async () => {
+                  try {
+                    setIsDeletingAllTopics(true);
+                    await deleteAllTopics();
+                    setShowDeleteAllTopicsModal(false);
+                    setSavedSuccess(true);
+                    setTimeout(() => setSavedSuccess(false), 3000);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to remove all topics');
+                  } finally {
+                    setIsDeletingAllTopics(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50 transition-all disabled:opacity-50"
+              >
+                {isDeletingAllTopics ? 'Removing...' : 'Yes, Remove All Topics'}
               </button>
             </div>
           </div>

@@ -337,7 +337,7 @@ export const Results: React.FC = () => {
             }`}
           >
             <ImageIcon className="w-3.5 h-3.5" />
-            <span>Round 1 ({r1Results.length})</span>
+            <span>Round 1 — Pixel Pictionary ({r1Results.length})</span>
           </button>
 
           <button
@@ -352,7 +352,7 @@ export const Results: React.FC = () => {
             }`}
           >
             <Disc className="w-3.5 h-3.5" />
-            <span>Round 2 ({r2Results.length})</span>
+            <span>Round 2 — Arcade Wheel ({r2Results.length})</span>
           </button>
 
           <button
@@ -367,7 +367,7 @@ export const Results: React.FC = () => {
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
-            <span>Round 3 ({r3Results.length})</span>
+            <span>Round 3 — The Mystery Cartridge ({r3Results.length})</span>
           </button>
         </div>
 

@@ -117,7 +117,7 @@ export const ExcelPage: React.FC = () => {
             Export Master Event Excel Workbook
           </h3>
           <p className="text-xs text-slate-300 max-w-xl">
-            Generates a multi-tab Microsoft Excel (.xlsx) file containing: Contestant Roster & Dynamic Custom Fields, Topic Repository, Round 1 Results, Round 2 Results, Round 3 Finals, and Event Configuration.
+            Generates a multi-tab Microsoft Excel (.xlsx) file containing: Contestant Roster & Dynamic Custom Fields, Topic Repository, Round 1 (Pixel Pictionary) Results, Round 2 (Arcade Wheel) Results, Round 3 (The Mystery Cartridge) Finals, and Event Configuration.
           </p>
         </div>
 

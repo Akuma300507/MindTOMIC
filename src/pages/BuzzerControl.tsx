@@ -24,16 +24,16 @@ export const BuzzerControl: React.FC = () => {
   const [buzzerFiring, setBuzzerFiring] = useState(false);
   const [warningBuzzerFiring, setWarningBuzzerFiring] = useState(false);
   const [selectedSound, setSelectedSound] = useState<'horn' | 'digital' | 'alarm' | 'siren' | 'custom'>(
-    db?.settings.buzzer.sound || 'horn'
+    db?.settings?.buzzer?.sound || 'horn'
   );
-  const [volume, setVolume] = useState<number>(db?.settings.buzzer.volume ?? 90);
+  const [volume, setVolume] = useState<number>(db?.settings?.buzzer?.volume ?? 90);
 
   useEffect(() => {
-    if (db?.settings.buzzer) {
+    if (db?.settings?.buzzer) {
       setSelectedSound(db.settings.buzzer.sound);
       setVolume(db.settings.buzzer.volume);
     }
-  }, [db?.settings.buzzer]);
+  }, [db?.settings?.buzzer]);
 
   const mobileBuzzerUrl = `${window.location.origin}/?page=buzzer&mode=mobile`;
 
@@ -396,9 +396,9 @@ export const BuzzerControl: React.FC = () => {
             <button
               onClick={() =>
                 soundEngine.playPrepOverBuzzer(
-                  db?.settings.buzzer.prepSound || 'dual_alert',
+                  db?.settings?.buzzer?.prepSound || 'dual_alert',
                   volume,
-                  db?.settings.buzzer.prepCustomAudioUrl
+                  db?.settings?.buzzer?.prepCustomAudioUrl
                 )
               }
               className="w-full py-2 px-3 rounded-xl bg-amber-950/60 hover:bg-amber-900/80 text-amber-200 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
@@ -424,9 +424,9 @@ export const BuzzerControl: React.FC = () => {
             <button
               onClick={() =>
                 soundEngine.playWarningBuzzer(
-                  db?.settings.buzzer.warningSound || 'double_beep',
-                  db?.settings.buzzer.warningVolume ?? volume,
-                  db?.settings.buzzer.warningCustomAudioUrl
+                  db?.settings?.buzzer?.warningSound || 'double_beep',
+                  db?.settings?.buzzer?.warningVolume ?? volume,
+                  db?.settings?.buzzer?.warningCustomAudioUrl
                 )
               }
               className="w-full py-2 px-3 rounded-xl bg-blue-950/60 hover:bg-blue-900/80 text-blue-200 border border-blue-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"

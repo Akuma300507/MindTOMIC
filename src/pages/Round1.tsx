@@ -55,11 +55,11 @@ export const Round1: React.FC = () => {
   const [poolNotice, setPoolNotice] = useState<string | null>(null);
 
   const images = db?.images || [];
-  const prepSeconds = db?.settings.round1.prepTimeSeconds ?? 30;
-  const speechSeconds = db?.settings.round1.speechTimeSeconds ?? 120;
-  const buzzerEnabled = db?.settings.round1.buzzerEnabled ?? true;
-  const warningBuzzerEnabled = db?.settings.round1.warningBuzzerEnabled ?? true;
-  const warningTimeSeconds = db?.settings.round1.warningTimeSeconds ?? 30;
+  const prepSeconds = db?.settings?.round1?.prepTimeSeconds ?? 30;
+  const speechSeconds = db?.settings?.round1?.speechTimeSeconds ?? 120;
+  const buzzerEnabled = db?.settings?.round1?.buzzerEnabled ?? true;
+  const warningBuzzerEnabled = db?.settings?.round1?.warningBuzzerEnabled ?? true;
+  const warningTimeSeconds = db?.settings?.round1?.warningTimeSeconds ?? 30;
 
   // Filter images eligible for the active station (never include images assigned to other stations)
   const stationImages = useMemo(() => {
@@ -162,12 +162,12 @@ export const Round1: React.FC = () => {
 
   // Available images based on reuse policy or synchronized slots
   const availableImages = useMemo(() => {
-    if (db?.settings.round1.allowImageReuse || db?.settings.round1.synchronizedSlots !== false) {
+    if (db?.settings?.round1?.allowImageReuse || db?.settings?.round1?.synchronizedSlots !== false) {
       return stationImages;
     }
     const filtered = stationImages.filter((img) => img.status === 'available');
     return filtered.length > 0 ? filtered : stationImages;
-  }, [stationImages, db?.settings.round1.allowImageReuse, db?.settings.round1.synchronizedSlots]);
+  }, [stationImages, db?.settings?.round1?.allowImageReuse, db?.settings?.round1?.synchronizedSlots]);
 
   // Atomic Random image selector
   const handleRandomImage = useCallback(async () => {
@@ -297,7 +297,7 @@ export const Round1: React.FC = () => {
               <span className="text-xs font-mono font-bold text-blue-400 px-2 py-0.5 rounded bg-blue-950/60 border border-blue-800">
                 ROUND 1
               </span>
-              <h1 className="text-xl sm:text-2xl font-black text-white font-['Outfit']">Image to Speech</h1>
+              <h1 className="text-xl sm:text-2xl font-black text-white font-['Outfit']">Pixel Pictionary</h1>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
               Prep: {prepSeconds}s • Speech: {speechSeconds}s • Buzzer: {buzzerEnabled ? 'ON' : 'OFF'}
@@ -547,7 +547,7 @@ export const Round1: React.FC = () => {
           <span className="text-[11px] text-purple-300 bg-purple-950/50 border border-purple-800/40 px-2 py-0.5 rounded-full font-semibold">
             {stationImages.length} In Pool
           </span>
-          {db?.settings.round1.allowImageReuse && (
+          {db?.settings?.round1?.allowImageReuse && (
             <span className="text-[10px] text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40">
               Reuse Allowed
             </span>
@@ -722,7 +722,7 @@ export const Round1: React.FC = () => {
                   Warning Buzzer: {warningBuzzerEnabled ? `${warningTimeSeconds}s remaining` : 'Disabled'}
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  {warningBuzzerEnabled ? `Sounds alert at ${warningTimeSeconds}s left` : 'No mid-round alert'} • Tone: {db?.settings.buzzer.warningSound || 'double_beep'}
+                  {warningBuzzerEnabled ? `Sounds alert at ${warningTimeSeconds}s left` : 'No mid-round alert'} • Tone: {db?.settings?.buzzer?.warningSound || 'double_beep'}
                 </span>
               </div>
             </div>

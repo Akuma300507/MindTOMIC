@@ -538,7 +538,7 @@ export const Master: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-400 mb-3">Image Description Speech</p>
+                <p className="text-xs text-slate-400 mb-3">Pixel Pictionary</p>
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
@@ -600,7 +600,7 @@ export const Master: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-400 mb-3">Wheel of Topics Spin</p>
+                <p className="text-xs text-slate-400 mb-3">Arcade Wheel</p>
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
@@ -656,7 +656,7 @@ export const Master: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-400 mb-3">Championship Finals</p>
+                <p className="text-xs text-slate-400 mb-3">The Mystery Cartridge</p>
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">

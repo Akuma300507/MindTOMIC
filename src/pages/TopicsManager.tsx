@@ -20,6 +20,7 @@ export const TopicsManager: React.FC = () => {
     addTopic,
     updateTopic,
     deleteTopic,
+    deleteAllTopics,
     importTopics,
     resetTopicsStatus,
   } = useApp();
@@ -29,6 +30,8 @@ export const TopicsManager: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
   const [topicIdInput, setTopicIdInput] = useState('');
   const [topicText, setTopicText] = useState('');
@@ -132,7 +135,7 @@ export const TopicsManager: React.FC = () => {
             Topic Repository
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Manage thought-provoking speech themes for Round 2. Topics are drawn and spun from the universal competition pool.
+            Manage thought-provoking speech themes for Round 2 (Arcade Wheel). Topics are drawn and spun from the universal competition pool.
           </p>
         </div>
 
@@ -149,6 +152,18 @@ export const TopicsManager: React.FC = () => {
             <RotateCcw className="w-4 h-4" />
             <span>Reset All Statuses</span>
           </button>
+
+          {db?.topics && db.topics.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowDeleteAllModal(true)}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-xs font-semibold transition-colors"
+              title="Remove all topics from the repository"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>Remove All Topics</span>
+            </button>
+          )}
 
           <label className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer transition-colors">
             <Upload className="w-4 h-4 text-emerald-400" />
@@ -406,6 +421,49 @@ export const TopicsManager: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Topics Confirmation Modal */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-white">Remove All Topics?</h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete all <strong className="text-white">{db?.topics.length || 0}</strong> topics from the repository? This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={() => setShowDeleteAllModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={async () => {
+                  try {
+                    setIsDeletingAll(true);
+                    await deleteAllTopics();
+                    setShowDeleteAllModal(false);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to remove all topics');
+                  } finally {
+                    setIsDeletingAll(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50 transition-all disabled:opacity-50"
+              >
+                {isDeletingAll ? 'Removing...' : 'Yes, Remove All Topics'}
+              </button>
+            </div>
           </div>
         </div>
       )}

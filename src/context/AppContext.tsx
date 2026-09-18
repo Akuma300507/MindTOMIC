@@ -150,6 +150,7 @@ interface AppContextType {
   addParticipant: (p: Partial<Participant>) => Promise<Participant>;
   updateParticipant: (id: string, p: Partial<Participant>) => Promise<Participant>;
   deleteParticipant: (id: string) => Promise<void>;
+  deleteAllParticipants: () => Promise<void>;
   importParticipants: (list: Partial<Participant>[]) => Promise<number>;
   batchSetStation: (participantIds: string[], stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => Promise<any>;
   moveParticipantStation: (participantId: string, stationId: string, stationName?: string, forRound?: 1 | 2 | 3) => Promise<Participant>;
@@ -169,6 +170,7 @@ interface AppContextType {
   addTopic: (topic: string, category?: string, topicId?: string, stationId?: string, stationName?: string) => Promise<Topic>;
   updateTopic: (id: string, updates: Partial<Topic>) => Promise<Topic>;
   deleteTopic: (id: string) => Promise<void>;
+  deleteAllTopics: () => Promise<void>;
   importTopics: (list: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[], defaultStationId?: string) => Promise<number>;
   batchUpdateTopicStations: (
     topicIds: string[],
@@ -193,6 +195,7 @@ interface AppContextType {
     stationName?: string
   ) => Promise<{ success: boolean; count: number; images: EventImage[]; allImages: EventImage[] }>;
   deleteImage: (id: string) => Promise<void>;
+  deleteAllImages: () => Promise<void>;
   resetImagesStatus: () => Promise<void>;
   // Settings
   updateSettings: (settings: Partial<EventSettings>) => Promise<EventSettings>;
@@ -260,6 +263,11 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [db, setDb] = useState<AppDatabase | null>(() => storageService.loadPersistedDatabase());
+  const dbRef = useRef<AppDatabase | null>(db);
+  dbRef.current = db;
+  useEffect(() => {
+    dbRef.current = db;
+  }, [db]);
   const [loading, setLoading] = useState(() => !storageService.loadPersistedDatabase());
 
   // Stable Device Identification
@@ -363,21 +371,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Auto-switch active participant to match new station
     if (id && id !== 'all') {
-      setDb((currDb) => {
-        if (currDb?.participants) {
-          const staged = currDb.stations?.[id]?.activeParticipant;
-          if (staged) {
-            setActiveParticipant(staged);
-            return currDb;
-          }
+      const currentDb = dbRef.current;
+      if (currentDb?.participants) {
+        const staged = currentDb.stations?.[id]?.activeParticipant;
+        if (staged) {
+          setActiveParticipant(staged);
+        } else {
           // Do not auto-stage contestants; keep current only if it belongs to this station, otherwise reset
           setActiveParticipant((currPart) => {
             if (currPart && (currPart.stationId === id || currPart.checkedInStationId === id)) return currPart;
             return null;
           });
         }
-        return currDb;
-      });
+      }
     }
   }, []);
 
@@ -480,16 +486,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const playBuzzerLocal = useCallback(() => {
-    setDb((currentDb) => {
-      if (currentDb?.settings.buzzer.laptopBuzzer !== false) {
-        soundEngine.playBuzzer(
-          currentDb?.settings.buzzer.sound || 'horn',
-          currentDb?.settings.buzzer.volume ?? 90,
-          currentDb?.settings.buzzer.customAudioUrl
-        );
-      }
-      return currentDb;
-    });
+    const currentDb = dbRef.current;
+    if (currentDb?.settings?.buzzer?.laptopBuzzer !== false) {
+      soundEngine.playBuzzer(
+        currentDb?.settings?.buzzer?.sound || 'horn',
+        currentDb?.settings?.buzzer?.volume ?? 90,
+        currentDb?.settings?.buzzer?.customAudioUrl
+      );
+    }
   }, []);
 
   const playBuzzerWithDebounce = useCallback((eventId?: string) => {
@@ -508,16 +512,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [playBuzzerLocal]);
 
   const playWarningBuzzerLocal = useCallback(() => {
-    setDb((currentDb) => {
-      if (currentDb?.settings.buzzer.laptopBuzzer !== false) {
-        soundEngine.playWarningBuzzer(
-          currentDb?.settings.buzzer.warningSound || 'double_beep',
-          currentDb?.settings.buzzer.warningVolume ?? 85,
-          currentDb?.settings.buzzer.warningCustomAudioUrl
-        );
-      }
-      return currentDb;
-    });
+    const currentDb = dbRef.current;
+    if (currentDb?.settings?.buzzer?.laptopBuzzer !== false) {
+      soundEngine.playWarningBuzzer(
+        currentDb?.settings?.buzzer?.warningSound || 'double_beep',
+        currentDb?.settings?.buzzer?.warningVolume ?? 85,
+        currentDb?.settings?.buzzer?.warningCustomAudioUrl
+      );
+    }
   }, []);
 
   const playWarningBuzzerWithDebounce = useCallback((eventId?: string) => {
@@ -1237,13 +1239,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       eventSource.addEventListener('stations_updated', (e) => {
         try {
-          const stationList: (StationState & { serverTime?: number })[] = JSON.parse(e.data);
+          const raw = JSON.parse(e.data);
+          const stationList: (StationState & { serverTime?: number })[] = Array.isArray(raw)
+            ? raw
+            : Object.values(raw || {});
           if (stationList[0]?.serverTime) recordServerTimestamp(stationList[0].serverTime);
           setDb((prev) => {
             if (!prev) return prev;
             const stations = { ...(prev.stations || {}) };
             stationList.forEach((s) => {
-              stations[s.id] = s;
+              if (s && s.id) {
+                stations[s.id] = s;
+              }
             });
             return {
               ...prev,
@@ -1255,7 +1262,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             };
           });
         } catch (err) {
-          console.error(err);
+          console.error('Failed to handle stations_updated SSE:', err);
         }
       });
 
@@ -1617,96 +1624,93 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Next participant selector (round-aware and qualification-gated)
   const selectNextParticipant = useCallback(
     (customList?: Participant[]) => {
-      setDb((currentDb) => {
-        if (!currentDb || currentDb.participants.length === 0) return currentDb;
+      const currentDb = dbRef.current;
+      if (!currentDb || !currentDb.participants || currentDb.participants.length === 0) return;
 
-        const targetStationId =
-          currentStationId && currentStationId !== 'all'
-            ? currentStationId
-            : (allStations[0]?.id || 'station-a');
+      const targetStationId =
+        currentStationId && currentStationId !== 'all'
+          ? currentStationId
+          : (allStations[0]?.id || 'station-a');
 
-        let candidateList = customList;
-        if (!candidateList || candidateList.length === 0) {
-          let pool = currentDb.participants;
-          if (currentPage === 'round2') {
-            // Round 2 is for contestants who qualified in Round 1
-            const r1Qualifiers = currentDb.participants.filter(
-              (p) => p.round1Qualified === 'qualified'
-            );
-            pool = r1Qualifiers.length > 0 ? r1Qualifiers : currentDb.participants;
-          } else if (currentPage === 'round3') {
-            // Round 3 is for contestants who qualified in Round 2
-            const r2Qualifiers = currentDb.participants.filter(
-              (p) => p.round2Qualified === 'qualified'
-            );
-            pool = r2Qualifiers.length > 0 ? r2Qualifiers : currentDb.participants;
-          } else {
-            // Round 1 or other pages: active, non-eliminated contestants
-            const r1Eligible = currentDb.participants.filter(
-              (p) => p.status !== 'eliminated' && p.round1Qualified !== 'disqualified'
-            );
-            pool = r1Eligible.length > 0 ? r1Eligible : currentDb.participants;
-          }
-
-          // If a station is selected, prioritize contestants assigned to this station
-          if (targetStationId) {
-            const stationSpecific = pool.filter(
-              (p) =>
-                p.stationId === targetStationId ||
-                p.checkedInStationId === targetStationId ||
-                !p.stationId
-            );
-            candidateList = stationSpecific.length > 0 ? stationSpecific : pool;
-          } else {
-            candidateList = pool;
-          }
+      let candidateList = customList;
+      if (!candidateList || candidateList.length === 0) {
+        let pool = currentDb.participants;
+        if (currentPage === 'round2') {
+          // Round 2 is for contestants who qualified in Round 1
+          const r1Qualifiers = currentDb.participants.filter(
+            (p) => p.round1Qualified === 'qualified'
+          );
+          pool = r1Qualifiers.length > 0 ? r1Qualifiers : currentDb.participants;
+        } else if (currentPage === 'round3') {
+          // Round 3 is for contestants who qualified in Round 2
+          const r2Qualifiers = currentDb.participants.filter(
+            (p) => p.round2Qualified === 'qualified'
+          );
+          pool = r2Qualifiers.length > 0 ? r2Qualifiers : currentDb.participants;
+        } else {
+          // Round 1 or other pages: active, non-eliminated contestants
+          const r1Eligible = currentDb.participants.filter(
+            (p) => p.status !== 'eliminated' && p.round1Qualified !== 'disqualified'
+          );
+          pool = r1Eligible.length > 0 ? r1Eligible : currentDb.participants;
         }
 
-        if (!candidateList || candidateList.length === 0) return currentDb;
-
-        // Current staged participant on this station or locally active
-        const stagedId =
-          currentDb.stations?.[targetStationId]?.activeParticipantId ||
-          currentDb.stations?.[targetStationId]?.activeParticipant?.id;
-
-        const currentIdx = stagedId
-          ? candidateList.findIndex((p) => p.id === stagedId)
-          : activeParticipant
-          ? candidateList.findIndex((p) => p.id === activeParticipant.id)
-          : -1;
-
-        const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % candidateList.length : 0;
-        const nextParticipant = candidateList[nextIdx] ?? null;
-
-        if (nextParticipant) {
-          setActiveParticipant(nextParticipant);
-
-          if (targetStationId) {
-            // Immediately stage on station and broadcast to projector
-            api.setStationParticipant(targetStationId, nextParticipant.id).then((res) => {
-              if (res?.station) {
-                setDb((prev) => {
-                  if (!prev) return prev;
-                  const updatedStations = { ...(prev.stations || {}), [targetStationId]: res.station };
-                  return {
-                    ...prev,
-                    stations: updatedStations,
-                    liveSync: {
-                      ...prev.liveSync,
-                      activeParticipantId: nextParticipant.id,
-                      stationStates: updatedStations,
-                    },
-                  };
-                });
-              }
-            }).catch((err) => {
-              console.error('Failed to stage next participant on station:', err);
-            });
-          }
+        // If a station is selected, prioritize contestants assigned to this station
+        if (targetStationId) {
+          const stationSpecific = pool.filter(
+            (p) =>
+              p.stationId === targetStationId ||
+              p.checkedInStationId === targetStationId ||
+              !p.stationId
+          );
+          candidateList = stationSpecific.length > 0 ? stationSpecific : pool;
+        } else {
+          candidateList = pool;
         }
+      }
 
-        return currentDb;
-      });
+      if (!candidateList || candidateList.length === 0) return;
+
+      // Current staged participant on this station or locally active
+      const stagedId =
+        currentDb.stations?.[targetStationId]?.activeParticipantId ||
+        currentDb.stations?.[targetStationId]?.activeParticipant?.id;
+
+      const currentIdx = stagedId
+        ? candidateList.findIndex((p) => p.id === stagedId)
+        : activeParticipant
+        ? candidateList.findIndex((p) => p.id === activeParticipant.id)
+        : -1;
+
+      const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % candidateList.length : 0;
+      const nextParticipant = candidateList[nextIdx] ?? null;
+
+      if (nextParticipant) {
+        setActiveParticipant(nextParticipant);
+
+        if (targetStationId) {
+          // Immediately stage on station and broadcast to projector
+          api.setStationParticipant(targetStationId, nextParticipant.id).then((res) => {
+            if (res?.station) {
+              setDb((prev) => {
+                if (!prev) return prev;
+                const updatedStations = { ...(prev.stations || {}), [targetStationId]: res.station };
+                return {
+                  ...prev,
+                  stations: updatedStations,
+                  liveSync: {
+                    ...prev.liveSync,
+                    activeParticipantId: nextParticipant.id,
+                    stationStates: updatedStations,
+                  },
+                };
+              });
+            }
+          }).catch((err) => {
+            console.error('Failed to stage next participant on station:', err);
+          });
+        }
+      }
     },
     [currentPage, currentStationId, allStations, activeParticipant]
   );
@@ -1937,6 +1941,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveParticipant((curr) => (curr?.id === id ? null : curr));
   }, []);
 
+  const deleteAllParticipants = useCallback(async () => {
+    const ids = db?.participants?.map((p) => p.id) || [];
+    if (ids.length > 0) {
+      storageService.recordDeletedParticipants(ids);
+    }
+    await api.deleteAllParticipants();
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, participants: [] } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
+    setActiveParticipant(null);
+  }, [db?.participants]);
+
   const importParticipants = useCallback(async (list: Partial<Participant>[]) => {
     const res = await api.batchAddParticipants(list);
     await reloadState();
@@ -2109,6 +2127,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   }, []);
 
+  const deleteAllTopics = useCallback(async () => {
+    const allIds = (db?.topics || []).map((t) => t.id);
+    storageService.recordDeletedTopics(allIds);
+    await api.deleteAllTopics();
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, topics: [] } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
+  }, [db?.topics]);
+
   const importTopics = useCallback(async (list: { topic: string; category?: string; topicId?: string; stationId?: string; stationName?: string }[], defaultStationId?: string) => {
     const res = await api.batchAddTopics(list, defaultStationId);
     await reloadState();
@@ -2201,6 +2230,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return nextDb;
     });
   }, []);
+
+  const deleteAllImages = useCallback(async () => {
+    const allIds = (db?.images || []).map((img) => img.id);
+    storageService.recordDeletedImages(allIds);
+    await api.deleteAllImages();
+    setDb((prev) => {
+      const nextDb = prev ? { ...prev, images: [] } : prev;
+      if (nextDb) storageService.savePersistedDatabase(nextDb);
+      return nextDb;
+    });
+  }, [db?.images]);
 
   const resetImagesStatus = useCallback(async () => {
     await api.resetImagesStatus();
@@ -2322,6 +2362,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const resetAllData = useCallback(async () => {
     storageService.clearAll();
     await api.resetData();
+    setActiveParticipant(null);
+    setCurrentStationId(null);
     await reloadState();
   }, [reloadState]);
 
@@ -2394,6 +2436,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addParticipant,
         updateParticipant,
         deleteParticipant,
+        deleteAllParticipants,
         importParticipants,
         batchSetStation,
         addCustomField,
@@ -2402,6 +2445,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTopic,
         updateTopic,
         deleteTopic,
+        deleteAllTopics,
         importTopics,
         batchUpdateTopicStations,
         moveParticipantStation,
@@ -2413,6 +2457,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         uploadImages,
         batchUpdateImageStations,
         deleteImage,
+        deleteAllImages,
         resetImagesStatus,
         updateSettings,
         saveRound1Result,

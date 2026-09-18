@@ -193,7 +193,7 @@ export const Dashboard: React.FC = () => {
                 </span>
               </div>
               <h3 className="text-xl font-bold text-white font-['Outfit'] group-hover:text-purple-300 transition-colors">
-                Image to Speech
+                Pixel Pictionary
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Random high-resolution image prompt, 30s preparation countdown with chime, automatic 2m speech timer and buzzer.
@@ -220,7 +220,7 @@ export const Dashboard: React.FC = () => {
                 </span>
               </div>
               <h3 className="text-xl font-bold text-white font-['Outfit'] group-hover:text-purple-300 transition-colors">
-                Spin the Topic Wheel
+                Arcade Wheel
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Physics-based animated 20-topic spinning wheel, true random landing, topic auto-retirement, and speech timer.
@@ -247,7 +247,7 @@ export const Dashboard: React.FC = () => {
                 </span>
               </div>
               <h3 className="text-xl font-bold text-white font-['Outfit'] group-hover:text-purple-300 transition-colors">
-                Final Speaking Timer
+                The Mystery Cartridge
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Clean, high-visibility precision timer for finals, manual stop duration tracking, and automatic buzzer.

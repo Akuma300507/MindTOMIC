@@ -29,6 +29,8 @@ interface TimerProps {
   stationId?: string;
   canStart?: boolean;
   cannotStartReason?: string;
+  size?: 'normal' | 'large';
+  className?: string;
   onFinish?: (data: {
     status: 'completed' | 'completed_early' | 'time_up';
     prepDurationSeconds: number;
@@ -51,6 +53,8 @@ export const Timer: React.FC<TimerProps> = ({
   stationId,
   canStart = true,
   cannotStartReason,
+  size = 'normal',
+  className = '',
   onFinish,
   onPhaseChange,
 }) => {
@@ -480,9 +484,13 @@ export const Timer: React.FC<TimerProps> = ({
   };
 
   // Progress circle math
+  const isLarge = size === 'large';
   const progressPercent =
     totalSecondsForPhase > 0 ? (remainingSeconds / totalSecondsForPhase) * 100 : 0;
-  const radius = 120;
+  const radius = isLarge ? 175 : 120;
+  const viewBoxSize = isLarge ? 390 : 280;
+  const centerCoord = isLarge ? 195 : 140;
+  const strokeWidth = isLarge ? 16 : 12;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (progressPercent / 100) * circumference;
 
@@ -524,36 +532,52 @@ export const Timer: React.FC<TimerProps> = ({
   }
 
   return (
-    <div className="flex flex-col items-center justify-center p-6 bg-slate-900/90 border border-purple-900/40 rounded-3xl shadow-2xl relative overflow-hidden">
+    <div
+      className={`flex flex-col items-center justify-center ${
+        isLarge ? 'p-8 sm:p-12 min-h-[580px] lg:min-h-[640px]' : 'p-6'
+      } bg-slate-900/90 border border-purple-900/40 rounded-3xl shadow-2xl relative overflow-hidden ${className}`}
+    >
       {/* Background ambient glow */}
-      <div className="absolute inset-0 bg-gradient-to-b from-purple-950/20 via-transparent to-slate-950/50 pointer-events-none" />
+      <div
+        className={`absolute inset-0 bg-gradient-to-b ${
+          isLarge
+            ? 'from-purple-950/40 via-transparent to-slate-950/70'
+            : 'from-purple-950/20 via-transparent to-slate-950/50'
+        } pointer-events-none`}
+      />
 
       {/* Contestant identifier */}
       {participantName && (
-        <div className="mb-4 text-center z-10">
-          <span className="text-xs uppercase tracking-widest text-purple-400 font-bold">Speaking Now</span>
-          <h2 className="text-2xl sm:text-3xl font-black text-white font-['Outfit'] tracking-tight">
+        <div className={`mb-4 text-center z-10 ${isLarge ? 'scale-105' : ''}`}>
+          <span className={`${isLarge ? 'text-xs sm:text-sm tracking-[0.2em]' : 'text-xs tracking-widest'} uppercase text-purple-400 font-bold`}>
+            Speaking Now
+          </span>
+          <h2 className={`${isLarge ? 'text-3xl sm:text-4xl md:text-5xl mt-1' : 'text-2xl sm:text-3xl'} font-black text-white font-['Outfit'] tracking-tight`}>
             {participantName}
           </h2>
         </div>
       )}
 
       {/* Phase Badge & Warning Badge */}
-      <div className="mb-4 z-10 flex flex-wrap items-center justify-center gap-2">
+      <div className={`mb-4 z-10 flex flex-wrap items-center justify-center gap-2 ${isLarge ? 'scale-105' : ''}`}>
         <span
-          className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border transition-all duration-300 shadow-lg ${badgeColor}`}
+          className={`${
+            isLarge ? 'px-6 py-2 text-sm font-black' : 'px-4 py-1.5 text-xs font-black'
+          } rounded-full uppercase tracking-widest border transition-all duration-300 shadow-lg ${badgeColor}`}
         >
           {phaseLabel}
         </span>
         {warningBuzzerEnabled && (warningTimeSeconds ?? 0) > 0 && phase === 'speech' && (
           <span
-            className={`px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider border transition-all duration-300 flex items-center gap-1.5 ${
+            className={`${
+              isLarge ? 'px-4 py-1.5 text-xs' : 'px-3 py-1 text-[10px]'
+            } rounded-full font-mono font-bold uppercase tracking-wider border transition-all duration-300 flex items-center gap-1.5 ${
               remainingSeconds <= (warningTimeSeconds ?? 30) && remainingSeconds > 0
                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 animate-pulse'
                 : 'bg-slate-800/80 text-blue-300 border-blue-500/30'
             }`}
           >
-            <Bell className="w-3 h-3 text-blue-400" />
+            <Bell className={`${isLarge ? 'w-4 h-4' : 'w-3 h-3'} text-blue-400`} />
             <span>
               {remainingSeconds <= (warningTimeSeconds ?? 30) && remainingSeconds > 0
                 ? 'Warning Alert Active'
@@ -564,24 +588,30 @@ export const Timer: React.FC<TimerProps> = ({
       </div>
 
       {/* Circular Animated Countdown Dial */}
-      <div className="relative w-64 h-64 sm:w-72 sm:h-72 flex items-center justify-center z-10">
-        <svg className="w-full h-full transform -rotate-90" viewBox="0 0 280 280">
+      <div
+        className={`relative ${
+          isLarge
+            ? 'w-80 h-80 sm:w-96 sm:h-96 md:w-[420px] md:h-[420px] lg:w-[460px] lg:h-[460px] xl:w-[520px] xl:h-[520px] 2xl:w-[580px] 2xl:h-[580px]'
+            : 'w-64 h-64 sm:w-72 sm:h-72'
+        } flex items-center justify-center z-10`}
+      >
+        <svg className="w-full h-full transform -rotate-90" viewBox={`0 0 ${viewBoxSize} ${viewBoxSize}`}>
           {/* Background track */}
           <circle
-            cx="140"
-            cy="140"
+            cx={centerCoord}
+            cy={centerCoord}
             r={radius}
             className="stroke-slate-800/80"
-            strokeWidth="12"
+            strokeWidth={strokeWidth}
             fill="transparent"
           />
           {/* Animated active track */}
           <circle
-            cx="140"
-            cy="140"
+            cx={centerCoord}
+            cy={centerCoord}
             r={radius}
             className={`${ringColor} transition-all duration-300 ease-linear`}
-            strokeWidth="12"
+            strokeWidth={strokeWidth}
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
             strokeLinecap="round"
@@ -593,26 +623,52 @@ export const Timer: React.FC<TimerProps> = ({
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center select-none">
           {isOvertime ? (
             <div className="flex flex-col items-center animate-pulse">
-              <span className="text-5xl sm:text-6xl font-extrabold text-rose-400 font-mono tracking-tight drop-shadow-[0_4px_16px_rgba(244,63,94,0.7)]">
+              <span
+                className={`${
+                  isLarge ? 'text-7xl sm:text-8xl md:text-9xl xl:text-[9.5rem]' : 'text-5xl sm:text-6xl'
+                } font-extrabold text-rose-400 font-mono tracking-tight drop-shadow-[0_4px_24px_rgba(244,63,94,0.8)]`}
+              >
                 +{formatTime(overtimeSeconds)}
               </span>
-              <span className="text-xs font-bold text-rose-300 uppercase tracking-widest mt-1">
+              <span
+                className={`${
+                  isLarge ? 'text-sm sm:text-base font-bold tracking-[0.2em] mt-2' : 'text-xs font-bold tracking-widest mt-1'
+                } text-rose-300 uppercase`}
+              >
                 Overtime Active
               </span>
             </div>
           ) : phase === 'time_up' ? (
             <div className="animate-bounce">
-              <span className="text-4xl sm:text-5xl font-black text-rose-500 font-['Outfit'] tracking-tighter">
+              <span
+                className={`${
+                  isLarge ? 'text-6xl sm:text-7xl md:text-8xl xl:text-9xl' : 'text-4xl sm:text-5xl'
+                } font-black text-rose-500 font-['Outfit'] tracking-tighter`}
+              >
                 TIME UP!
               </span>
-              <p className="text-xs text-rose-300 font-bold uppercase tracking-wider mt-1">Buzzer Triggered</p>
+              <p
+                className={`${
+                  isLarge ? 'text-sm sm:text-base font-bold tracking-wider mt-2' : 'text-xs font-bold tracking-wider mt-1'
+                } text-rose-300 uppercase`}
+              >
+                Buzzer Triggered
+              </p>
             </div>
           ) : (
             <>
-              <span className="text-5xl sm:text-6xl font-extrabold text-white font-mono tracking-tight drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+              <span
+                className={`${
+                  isLarge ? 'text-7xl sm:text-8xl md:text-9xl xl:text-[9.5rem]' : 'text-5xl sm:text-6xl'
+                } font-extrabold text-white font-mono tracking-tight drop-shadow-[0_4px_24px_rgba(0,0,0,0.9)]`}
+              >
                 {formatTime(remainingSeconds)}
               </span>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest mt-1">
+              <span
+                className={`${
+                  isLarge ? 'text-xs sm:text-sm font-semibold tracking-[0.2em] mt-2' : 'text-xs font-semibold tracking-widest mt-1'
+                } text-slate-400 uppercase`}
+              >
                 {phase === 'prep' ? 'Prep Countdown' : phase === 'speech' ? 'Speech Remaining' : 'Ready'}
               </span>
             </>
@@ -622,22 +678,28 @@ export const Timer: React.FC<TimerProps> = ({
 
       {/* Actual Speech Duration summary if stopped or completed */}
       {(phase === 'stopped' || phase === 'time_up') && (
-        <div className="mt-4 px-4 py-2 rounded-xl bg-slate-950/80 border border-slate-800 text-center z-10">
-          <span className="text-xs text-slate-400">Actual Speech Duration: </span>
-          <span className="text-sm font-bold text-purple-300 font-mono">
+        <div
+          className={`mt-4 ${
+            isLarge ? 'px-6 py-3 text-sm' : 'px-4 py-2 text-xs'
+          } rounded-xl bg-slate-950/80 border border-slate-800 text-center z-10`}
+        >
+          <span className="text-slate-400">Actual Speech Duration: </span>
+          <span className={`${isLarge ? 'text-base font-extrabold' : 'text-sm font-bold'} text-purple-300 font-mono`}>
             {formatTime(actualSpeechElapsed)} ({actualSpeechElapsed} seconds)
           </span>
         </div>
       )}
 
       {/* Large Event Controller Action Buttons */}
-      <div className="mt-8 flex flex-wrap items-center justify-center gap-3 sm:gap-4 z-10 w-full max-w-lg">
+      <div className={`mt-8 flex flex-wrap items-center justify-center gap-3 sm:gap-4 z-10 w-full ${isLarge ? 'max-w-2xl' : 'max-w-lg'}`}>
         {/* START / PAUSE / RESUME */}
         {!isRunning ? (
           <button
             onClick={handleStart}
             disabled={phase === 'time_up' || phase === 'stopped' || (phase === 'idle' && !canStart)}
-            className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl font-extrabold text-sm uppercase tracking-wider shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all ${
+            className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 ${
+              isLarge ? 'py-4 px-8 text-base font-black rounded-2xl' : 'py-3.5 px-6 font-extrabold text-sm rounded-2xl'
+            } uppercase tracking-wider shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all ${
               phase === 'idle' && !canStart
                 ? 'bg-amber-950/80 text-amber-300 border border-amber-500/50 shadow-amber-950/60'
                 : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-950/60 hover:shadow-emerald-900/60'
@@ -646,12 +708,12 @@ export const Timer: React.FC<TimerProps> = ({
           >
             {phase === 'idle' && !canStart ? (
               <>
-                <Lock className="w-5 h-5 text-amber-400" />
+                <Lock className={`${isLarge ? 'w-6 h-6' : 'w-5 h-5'} text-amber-400`} />
                 <span>CHECK-IN REQUIRED</span>
               </>
             ) : (
               <>
-                <Play className="w-5 h-5 fill-current" />
+                <Play className={`${isLarge ? 'w-6 h-6' : 'w-5 h-5'} fill-current`} />
                 <span>{phase === 'idle' ? 'START' : 'RESUME'}</span>
               </>
             )}
@@ -659,9 +721,11 @@ export const Timer: React.FC<TimerProps> = ({
         ) : (
           <button
             onClick={handlePause}
-            className="flex-1 min-w-[130px] flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-amber-950/60 active:scale-95 transition-all"
+            className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 ${
+              isLarge ? 'py-4 px-8 text-base font-black rounded-2xl' : 'py-3.5 px-6 font-extrabold text-sm rounded-2xl'
+            } bg-amber-600 hover:bg-amber-500 text-white uppercase tracking-wider shadow-lg shadow-amber-950/60 active:scale-95 transition-all`}
           >
-            <Pause className="w-5 h-5 fill-current" />
+            <Pause className={`${isLarge ? 'w-6 h-6' : 'w-5 h-5'} fill-current`} />
             <span>PAUSE</span>
           </button>
         )}
@@ -670,20 +734,24 @@ export const Timer: React.FC<TimerProps> = ({
         <button
           onClick={handleStop}
           disabled={phase === 'idle' || phase === 'stopped' || phase === 'time_up'}
-          className="flex-1 min-w-[130px] flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-sm uppercase tracking-wider shadow-lg shadow-rose-950/60 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 ${
+            isLarge ? 'py-4 px-8 text-base font-black rounded-2xl' : 'py-3.5 px-6 font-extrabold text-sm rounded-2xl'
+          } bg-rose-600 hover:bg-rose-500 text-white uppercase tracking-wider shadow-lg shadow-rose-950/60 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all`}
           title="Manual stop records actual elapsed speech time"
         >
-          <Square className="w-5 h-5 fill-current" />
+          <Square className={`${isLarge ? 'w-6 h-6' : 'w-5 h-5'} fill-current`} />
           <span>STOP</span>
         </button>
 
         {/* RESET (Requires confirmation) */}
         <button
           onClick={() => setShowResetConfirm(true)}
-          className="py-3.5 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-sm tracking-wider border border-slate-700/80 active:scale-95 transition-all"
+          className={`${
+            isLarge ? 'py-4 px-6 rounded-2xl' : 'py-3.5 px-5 rounded-2xl'
+          } bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-sm tracking-wider border border-slate-700/80 active:scale-95 transition-all`}
           title="Reset timer (Shortcut: R)"
         >
-          <RotateCcw className="w-5 h-5" />
+          <RotateCcw className={`${isLarge ? 'w-6 h-6' : 'w-5 h-5'}`} />
         </button>
 
         {/* SKIP PREP / START SPEECH DIRECTLY */}

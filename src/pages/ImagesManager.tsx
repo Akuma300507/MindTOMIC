@@ -33,6 +33,7 @@ export const ImagesManager: React.FC = () => {
     uploadImages,
     updateImage,
     deleteImage,
+    deleteAllImages,
     resetImagesStatus,
   } = useApp();
 
@@ -40,6 +41,8 @@ export const ImagesManager: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'used'>('all');
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [addMode, setAddMode] = useState<'laptop' | 'url'>('laptop');
 
   // URL mode state
@@ -207,7 +210,7 @@ export const ImagesManager: React.FC = () => {
             Image Repository
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Universal image pool for Round 1. All stations share this pool synchronously per heat.
+            Universal image pool for Round 1 (Pixel Pictionary). All stations share this pool synchronously per heat.
           </p>
         </div>
 
@@ -223,6 +226,18 @@ export const ImagesManager: React.FC = () => {
             <RotateCcw className="w-4 h-4" />
             <span>Reset All Statuses</span>
           </button>
+
+          {images.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowDeleteAllModal(true)}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-xs font-semibold transition-colors"
+              title="Remove all images from the repository"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>Remove All Images</span>
+            </button>
+          )}
 
           {/* Primary Upload from Laptop Button */}
           <button
@@ -728,6 +743,49 @@ export const ImagesManager: React.FC = () => {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Images Confirmation Modal */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-white">Remove All Images?</h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to permanently delete all <strong className="text-white">{images.length}</strong> images from the repository? This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={() => setShowDeleteAllModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={async () => {
+                  try {
+                    setIsDeletingAll(true);
+                    await deleteAllImages();
+                    setShowDeleteAllModal(false);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to remove all images');
+                  } finally {
+                    setIsDeletingAll(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-950/50 transition-all disabled:opacity-50"
+              >
+                {isDeletingAll ? 'Removing...' : 'Yes, Remove All Images'}
+              </button>
+            </div>
           </div>
         </div>
       )}
