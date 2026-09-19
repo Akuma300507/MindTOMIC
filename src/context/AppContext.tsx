@@ -604,14 +604,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const setStationParticipant = useCallback(
     async (stationId: string, participantId: string | null) => {
-      const res = await api.setStationParticipant(stationId, participantId);
+      // Optimistically update station state in db immediately
+      const currentDb = dbRef.current;
+      const targetParticipant =
+        participantId && currentDb?.participants
+          ? currentDb.participants.find((p) => p.id === participantId) || null
+          : null;
+
       setDb((prev) => {
         if (!prev) return prev;
+        const currentStations = prev.stations || {};
+        const station = currentStations[stationId];
+        if (!station) return prev;
+
+        // In Round 1 with synchronized slots, resolve slot image if available
+        let optimisticImage = station.selectedImage;
+        let optimisticImageId = station.selectedImageId;
+        if (participantId && (station.currentRound === 1 || prev.liveSync?.currentRound === 1)) {
+          if (prev.settings?.round1?.synchronizedSlots !== false) {
+            const resultsCount = (prev.round1Results || []).filter((r) => {
+              const p = prev.participants?.find((item) => item.id === r.participantId);
+              return p?.stationId === stationId || p?.round1StationId === stationId;
+            }).length;
+            const slot =
+              typeof (targetParticipant as any)?.round1SlotIndex === 'number' &&
+              (targetParticipant as any).round1SlotIndex >= 0
+                ? (targetParticipant as any).round1SlotIndex
+                : resultsCount;
+            const syncImgId = prev.synchronizedSlots?.round1?.[slot];
+            if (syncImgId) {
+              const found = prev.images?.find((i) => i.id === syncImgId || i.imageId === syncImgId);
+              if (found) {
+                optimisticImage = found;
+                optimisticImageId = found.id;
+              }
+            }
+          }
+        }
+
+        const updatedStation: StationState = {
+          ...station,
+          activeParticipantId: participantId,
+          activeParticipant: targetParticipant,
+          selectedImage: optimisticImage,
+          selectedImageId: optimisticImageId,
+        };
+
+        const nextStations = { ...currentStations, [stationId]: updatedStation };
         return {
           ...prev,
-          stations: { ...(prev.stations || {}), [stationId]: res.station },
+          stations: nextStations,
+          liveSync: {
+            ...prev.liveSync,
+            activeParticipantId: participantId,
+            stationStates: nextStations,
+          },
         };
       });
+
+      try {
+        const res = await api.setStationParticipant(stationId, participantId);
+        setDb((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            stations: { ...(prev.stations || {}), [stationId]: res.station },
+          };
+        });
+      } catch (err) {
+        console.error('Failed to set station participant on server:', err);
+      }
     },
     []
   );
@@ -1724,29 +1786,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (targetStationId) {
           // Immediately stage on station and broadcast to projector
-          api.setStationParticipant(targetStationId, nextParticipant.id).then((res) => {
-            if (res?.station) {
-              setDb((prev) => {
-                if (!prev) return prev;
-                const updatedStations = { ...(prev.stations || {}), [targetStationId]: res.station };
-                return {
-                  ...prev,
-                  stations: updatedStations,
-                  liveSync: {
-                    ...prev.liveSync,
-                    activeParticipantId: nextParticipant.id,
-                    stationStates: updatedStations,
-                  },
-                };
-              });
-            }
-          }).catch((err) => {
+          setStationParticipant(targetStationId, nextParticipant.id).catch((err) => {
             console.error('Failed to stage next participant on station:', err);
           });
         }
       }
     },
-    [currentPage, currentStationId, allStations, activeParticipant]
+    [currentPage, currentStationId, allStations, activeParticipant, setStationParticipant]
   );
 
   // Custom Buzzer

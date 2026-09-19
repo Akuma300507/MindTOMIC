@@ -167,30 +167,64 @@ export const Round2: React.FC = () => {
     });
   }, [completedRound2Participants, contestantSearch]);
 
+  const lastStationIdRef = useRef<string | null>(currentStationId);
+  const lastStationActiveParticipantIdRef = useRef<string | null | undefined>(
+    currentStation?.activeParticipantId
+  );
+
+  const handleSelectContestant = useCallback(
+    (p: Participant) => {
+      lastStationActiveParticipantIdRef.current = p.id;
+      setActiveParticipant(p);
+      if (currentStationId && currentStationId !== 'all') {
+        setStationParticipant(currentStationId, p.id);
+      }
+    },
+    [currentStationId, setActiveParticipant, setStationParticipant]
+  );
+
   // Auto-select first station-eligible pending Round 2 contestant
   useEffect(() => {
-    // If current station has an assigned or actively staged participant, preserve that contestant
+    const stationChanged = lastStationIdRef.current !== currentStationId;
+    lastStationIdRef.current = currentStationId;
+
+    const stationActiveChanged =
+      currentStation?.activeParticipantId !== undefined &&
+      currentStation?.activeParticipantId !== lastStationActiveParticipantIdRef.current;
+    lastStationActiveParticipantIdRef.current = currentStation?.activeParticipantId;
+
+    // 1. If station has an assigned participant and either station changed or the station's assigned participant changed externally:
     if (currentStation?.activeParticipantId) {
       const staged = db?.participants?.find((p) => p.id === currentStation.activeParticipantId);
-      if (staged && activeParticipant?.id !== staged.id) {
-        setActiveParticipant(staged);
-        return;
+      if (staged) {
+        if (stationChanged || stationActiveChanged || !activeParticipant) {
+          setActiveParticipant(staged);
+          return;
+        }
       }
     }
 
+    // 2. If activeParticipant is already valid for Round 2, preserve it!
     if (activeParticipant) {
-      const isAlreadyValid = stationEligibleRound2Participants.some((p) => p.id === activeParticipant.id);
+      const isAlreadyValid =
+        stationEligibleRound2Participants.some((p) => p.id === activeParticipant.id) ||
+        (db?.participants || []).some((p) => p.id === activeParticipant.id);
       if (isAlreadyValid) return;
     }
 
+    // 3. Fallback to pending or completed
     if (pendingRound2Participants.length > 0) {
+      lastStationActiveParticipantIdRef.current = pendingRound2Participants[0].id;
       setActiveParticipant(pendingRound2Participants[0]);
     } else if (completedRound2Participants.length > 0) {
+      lastStationActiveParticipantIdRef.current = completedRound2Participants[0].id;
       setActiveParticipant(completedRound2Participants[0]);
     } else if ((db?.participants || []).length === 0) {
+      lastStationActiveParticipantIdRef.current = null;
       setActiveParticipant(null);
     }
   }, [
+    currentStationId,
     currentStation?.activeParticipantId,
     pendingRound2Participants,
     completedRound2Participants,
@@ -735,31 +769,31 @@ export const Round2: React.FC = () => {
             <select
               value={activeParticipant?.id || ''}
               onChange={(e) => {
+                const targetId = e.target.value;
+                if (!targetId || targetId === activeParticipant?.id) return;
                 const p =
-                  filteredPendingParticipants.find((item) => item.id === e.target.value) ||
-                  pendingRound2Participants.find((item) => item.id === e.target.value) ||
-                  stationEligibleRound2Participants.find((item) => item.id === e.target.value) ||
-                  db?.participants.find((item) => item.id === e.target.value);
+                  filteredPendingParticipants.find((item) => item.id === targetId) ||
+                  pendingRound2Participants.find((item) => item.id === targetId) ||
+                  stationEligibleRound2Participants.find((item) => item.id === targetId) ||
+                  db?.participants.find((item) => item.id === targetId);
                 if (p) {
-                  setActiveParticipant(p);
-                  if (currentStationId && currentStationId !== 'all') {
-                    setStationParticipant(currentStationId, p.id);
-                  }
+                  handleSelectContestant(p);
                 }
               }}
               className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
-              {activeParticipant && isCurrentParticipantCompleted && (
-                <>
-                  <option value={activeParticipant.id} className="bg-slate-900 text-emerald-300 font-bold">
-                    #{activeParticipant.participantNumber} — {activeParticipant.name} (Completed) ✓
-                  </option>
-                  <option disabled className="bg-slate-950 text-slate-500">
-                    ── Select Next Contestant ({filteredPendingParticipants.length} remaining) ──
-                  </option>
-                </>
+              {/* Ensure an option matching value={activeParticipant.id} always exists */}
+              {activeParticipant && !filteredPendingParticipants.some((p) => p.id === activeParticipant.id) && (
+                <option value={activeParticipant.id} className="bg-slate-900 text-purple-300 font-bold">
+                  #{activeParticipant.participantNumber} — {activeParticipant.name} {isCurrentParticipantCompleted ? '(Completed) ✓' : ''}
+                </option>
               )}
-              {filteredPendingParticipants.length === 0 && (!activeParticipant || !isCurrentParticipantCompleted) ? (
+              {filteredPendingParticipants.length > 0 && (!activeParticipant || isCurrentParticipantCompleted) && (
+                <option value="" disabled className="bg-slate-950 text-slate-500">
+                  ── Select Next Contestant ({filteredPendingParticipants.length} remaining) ──
+                </option>
+              )}
+              {filteredPendingParticipants.length === 0 && !activeParticipant && (
                 <option value="" disabled className="bg-slate-900 text-amber-400">
                   {contestantSearch.trim()
                     ? `No checked-in contestants match "${contestantSearch}"`
@@ -767,23 +801,15 @@ export const Round2: React.FC = () => {
                     ? `All eligible contestants completed (${completedRound2Participants.length})`
                     : `No checked-in eligible contestants in ${currentStation?.name || 'this station'}`}
                 </option>
-              ) : (
-                <>
-                  {(!activeParticipant || !isCurrentParticipantCompleted) && (
-                    <option value="" disabled className="bg-slate-900 text-slate-400">
-                      Select Contestant ({filteredPendingParticipants.length} remaining)
-                    </option>
-                  )}
-                  {filteredPendingParticipants.map((p) => {
-                    const isR1Qual = p.round1Qualified === 'qualified';
-                    return (
-                      <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                        #{p.participantNumber} — {p.name} {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
-                      </option>
-                    );
-                  })}
-                </>
               )}
+              {filteredPendingParticipants.map((p) => {
+                const isR1Qual = p.round1Qualified === 'qualified';
+                return (
+                  <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                    #{p.participantNumber} — {p.name} {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
+                  </option>
+                );
+              })}
             </select>
 
             <span
@@ -819,14 +845,14 @@ export const Round2: React.FC = () => {
             <select
               value={isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
               onChange={(e) => {
+                const targetId = e.target.value;
+                if (!targetId || targetId === activeParticipant?.id) return;
                 const p =
-                  filteredCompletedParticipants.find((item) => item.id === e.target.value) ||
-                  completedRound2Participants.find((item) => item.id === e.target.value);
+                  filteredCompletedParticipants.find((item) => item.id === targetId) ||
+                  completedRound2Participants.find((item) => item.id === targetId) ||
+                  db?.participants.find((item) => item.id === targetId);
                 if (p) {
-                  setActiveParticipant(p);
-                  if (currentStationId && currentStationId !== 'all') {
-                    setStationParticipant(currentStationId, p.id);
-                  }
+                  handleSelectContestant(p);
                 }
               }}
               className="bg-transparent text-emerald-300 font-bold font-['Outfit'] focus:outline-none max-w-[200px] truncate cursor-pointer"
@@ -871,12 +897,7 @@ export const Round2: React.FC = () => {
             pendingParticipants={pendingRound2Participants}
             completedParticipants={completedRound2Participants}
             activeParticipantId={activeParticipant?.id}
-            onSelectParticipant={(p) => {
-              setActiveParticipant(p);
-              if (currentStationId && currentStationId !== 'all') {
-                setStationParticipant(currentStationId, p.id);
-              }
-            }}
+            onSelectParticipant={handleSelectContestant}
             placeholder="Search #ID or name..."
           />
 
