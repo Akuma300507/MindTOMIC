@@ -78,8 +78,23 @@ export const storageService = {
     try {
       if (typeof localStorage === 'undefined' || !db) return;
       localStorage.setItem(STORAGE_KEYS.DB, JSON.stringify(db));
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[storage] Failed to persist database snapshot to localStorage:', err);
+      if (err?.name === 'QuotaExceededError' || err?.code === 22 || err?.code === 1014) {
+        try {
+          const lightweightDb = {
+            ...db,
+            images: (db.images || []).map((img) => ({
+              ...img,
+              url: img.url.startsWith('data:') ? '' : img.url,
+            })),
+          };
+          localStorage.setItem(STORAGE_KEYS.DB, JSON.stringify(lightweightDb));
+          console.info('[storage] Successfully saved lightweight database snapshot after quota limit');
+        } catch {
+          // ignore fallback error
+        }
+      }
     }
   },
 

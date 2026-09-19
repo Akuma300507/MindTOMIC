@@ -24,7 +24,8 @@ import { motion } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
 import { SpinRevealCardModal } from '../components/common/SpinRevealCardModal';
-import type { Topic, Round2Result } from '../types';
+import { ParticipantSearchInput } from '../components/common/ParticipantSearchInput';
+import { isParticipantRoundCompleted, type Topic, type Round2Result } from '../types';
 
 export const Round2: React.FC = () => {
   const {
@@ -124,19 +125,69 @@ export const Round2: React.FC = () => {
     return filtered.length > 0 ? filtered : eligibleRound2Participants;
   }, [eligibleRound2Participants, currentStationId]);
 
-  // Auto-select first station-eligible Round 2 contestant
+  // Completed participants in Round 2
+  const completedRound2Participants = useMemo(() => {
+    return stationEligibleRound2Participants.filter((p) => isParticipantRoundCompleted(p, 2, db));
+  }, [stationEligibleRound2Participants, db]);
+
+  // Pending (not completed) participants in Round 2
+  const pendingRound2Participants = useMemo(() => {
+    return stationEligibleRound2Participants.filter((p) => !isParticipantRoundCompleted(p, 2, db));
+  }, [stationEligibleRound2Participants, db]);
+
+  const isCurrentParticipantCompleted = Boolean(
+    activeParticipant && isParticipantRoundCompleted(activeParticipant, 2, db)
+  );
+
+  const [contestantSearch, setContestantSearch] = useState('');
+
+  // Filtered lists based on search query (by ID, #number, name, or phone)
+  const filteredPendingParticipants = useMemo(() => {
+    if (!contestantSearch.trim()) return pendingRound2Participants;
+    const q = contestantSearch.toLowerCase().trim().replace(/^#/, '');
+    return pendingRound2Participants.filter((p) => {
+      const matchName = (p.name || '').toLowerCase().includes(q);
+      const matchNum = String(p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
+      const matchId = (p.id || '').toLowerCase().includes(q);
+      const matchMobile = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
+      return matchName || matchNum || matchId || matchMobile;
+    });
+  }, [pendingRound2Participants, contestantSearch]);
+
+  const filteredCompletedParticipants = useMemo(() => {
+    if (!contestantSearch.trim()) return completedRound2Participants;
+    const q = contestantSearch.toLowerCase().trim().replace(/^#/, '');
+    return completedRound2Participants.filter((p) => {
+      const matchName = (p.name || '').toLowerCase().includes(q);
+      const matchNum = String(p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
+      const matchId = (p.id || '').toLowerCase().includes(q);
+      const matchMobile = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
+      return matchName || matchNum || matchId || matchMobile;
+    });
+  }, [completedRound2Participants, contestantSearch]);
+
+  // Auto-select first station-eligible pending Round 2 contestant
   useEffect(() => {
-    if (stationEligibleRound2Participants.length > 0) {
-      const isAlreadyEligible =
-        activeParticipant &&
-        stationEligibleRound2Participants.some((p) => p.id === activeParticipant.id);
-      if (!isAlreadyEligible) {
-        setActiveParticipant(stationEligibleRound2Participants[0]);
-      }
-    } else if (activeParticipant && (db?.participants || []).length === 0) {
-      setActiveParticipant(null as any);
+    if (activeParticipant) {
+      const isAlreadyValid = stationEligibleRound2Participants.some((p) => p.id === activeParticipant.id);
+      if (isAlreadyValid) return;
     }
-  }, [stationEligibleRound2Participants, activeParticipant, setActiveParticipant, db?.participants]);
+
+    if (pendingRound2Participants.length > 0) {
+      setActiveParticipant(pendingRound2Participants[0]);
+    } else if (completedRound2Participants.length > 0) {
+      setActiveParticipant(completedRound2Participants[0]);
+    } else if ((db?.participants || []).length === 0) {
+      setActiveParticipant(null);
+    }
+  }, [
+    pendingRound2Participants,
+    completedRound2Participants,
+    stationEligibleRound2Participants,
+    activeParticipant,
+    setActiveParticipant,
+    db?.participants,
+  ]);
 
   // Wheel state
   const [isSpinning, setIsSpinning] = useState(false);
@@ -432,6 +483,16 @@ export const Round2: React.FC = () => {
       const saved = await saveRound2Result(resultPayload);
       setLastSavedResult(saved);
 
+      // Auto-advance to the next pending contestant
+      const nextPendingList = pendingRound2Participants.filter((p) => p.id !== activeParticipant.id);
+      if (nextPendingList.length > 0) {
+        const nextParticipant = nextPendingList[0];
+        setActiveParticipant(nextParticipant);
+        if (currentStationId && currentStationId !== 'all') {
+          setStationParticipant(currentStationId, nextParticipant.id).catch(() => {});
+        }
+      }
+
       // Topic has now been used for speech; replace it on the wheel with the next unused topic
       const pool = (db?.topics || topicsPool || []).filter(Boolean);
       const currentWheel = (activeWheelTopics || []).filter(Boolean);
@@ -446,7 +507,19 @@ export const Round2: React.FC = () => {
         }
       }
     },
-    [activeParticipant, winningTopic, speechSeconds, saveRound2Result, db?.topics, topicsPool, activeWheelTopics, currentStationId]
+    [
+      activeParticipant,
+      winningTopic,
+      speechSeconds,
+      saveRound2Result,
+      db?.topics,
+      topicsPool,
+      activeWheelTopics,
+      currentStationId,
+      pendingRound2Participants,
+      setStationParticipant,
+      setActiveParticipant,
+    ]
   );
 
   if (currentEventRound < 2 || !round2PermissionGranted) {
@@ -631,15 +704,20 @@ export const Round2: React.FC = () => {
             </select>
           </div>
 
+          {/* Active / Pending Contestants Dropdown */}
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
             <span className="text-slate-400 flex items-center gap-1">
               <Award className="w-3.5 h-3.5 text-purple-400" />
               Contestant:
             </span>
             <select
-              value={activeParticipant?.id || ''}
+              value={!isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
               onChange={(e) => {
-                const p = db?.participants.find((item) => item.id === e.target.value);
+                const p =
+                  filteredPendingParticipants.find((item) => item.id === e.target.value) ||
+                  pendingRound2Participants.find((item) => item.id === e.target.value) ||
+                  stationEligibleRound2Participants.find((item) => item.id === e.target.value) ||
+                  db?.participants.find((item) => item.id === e.target.value);
                 if (p) {
                   setActiveParticipant(p);
                   if (currentStationId && currentStationId !== 'all') {
@@ -649,29 +727,42 @@ export const Round2: React.FC = () => {
               }}
               className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
-              {stationEligibleRound2Participants.length === 0 ? (
-                <option value="" disabled className="bg-slate-900 text-amber-400">
-                  No eligible contestants in {currentStation?.name || 'this station'}
+              {filteredPendingParticipants.length === 0 ? (
+                <option value="" disabled className="bg-slate-900 text-emerald-400">
+                  {contestantSearch.trim()
+                    ? `No contestants match "${contestantSearch}"`
+                    : completedRound2Participants.length > 0
+                    ? `All eligible contestants completed (${completedRound2Participants.length})`
+                    : `No eligible contestants in ${currentStation?.name || 'this station'}`}
                 </option>
               ) : (
-                stationEligibleRound2Participants.map((p, pIdx) => {
-                  const isR1Qual = p.round1Qualified === 'qualified';
-                  return (
-                    <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                      {p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
-                    </option>
-                  );
-                })
+                <>
+                  <option value="" disabled className="bg-slate-900 text-slate-400">
+                    Select Contestant ({filteredPendingParticipants.length} remaining)
+                  </option>
+                  {filteredPendingParticipants.map((p, pIdx) => {
+                    const isR1Qual = p.round1Qualified === 'qualified';
+                    return (
+                      <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                        #{p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
+                      </option>
+                    );
+                  })}
+                </>
               )}
             </select>
 
-            {stationEligibleRound2Participants.length > 0 && (
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
-                {stationEligibleRound2Participants.length} Available
-              </span>
-            )}
+            <span
+              className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                pendingRound2Participants.length > 0
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                  : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+              }`}
+            >
+              {pendingRound2Participants.length} Available
+            </span>
 
-            {activeParticipant && (
+            {activeParticipant && !isCurrentParticipantCompleted && (
               <span
                 className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-500/40 bg-purple-950/60 text-purple-300 text-[10px] font-mono font-bold"
                 title="Synchronized Heat Slot across all stations"
@@ -681,14 +772,77 @@ export const Round2: React.FC = () => {
             )}
           </div>
 
+          {/* Completed Contestants Dropdown */}
+          <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
+            <span className="text-slate-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              Completed:
+            </span>
+            <select
+              value={isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
+              onChange={(e) => {
+                const p =
+                  filteredCompletedParticipants.find((item) => item.id === e.target.value) ||
+                  completedRound2Participants.find((item) => item.id === e.target.value);
+                if (p) {
+                  setActiveParticipant(p);
+                  if (currentStationId && currentStationId !== 'all') {
+                    setStationParticipant(currentStationId, p.id);
+                  }
+                }
+              }}
+              className="bg-transparent text-emerald-300 font-bold font-['Outfit'] focus:outline-none max-w-[200px] truncate cursor-pointer"
+            >
+              <option value="" disabled className="bg-slate-900 text-slate-400">
+                {filteredCompletedParticipants.length === 0
+                  ? contestantSearch.trim()
+                    ? `No completed match "${contestantSearch}"`
+                    : 'None completed (0)'
+                  : `Completed (${completedRound2Participants.length})`}
+              </option>
+              {filteredCompletedParticipants.map((p) => (
+                <option key={p.id} value={p.id} className="bg-slate-900 text-emerald-300">
+                  #{p.participantNumber} — {p.name} ✓
+                </option>
+              ))}
+            </select>
+            <span
+              className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${
+                completedRound2Participants.length > 0
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+              title={`${completedRound2Participants.length} of ${stationEligibleRound2Participants.length} contestants completed Round 2`}
+            >
+              {completedRound2Participants.length} Done
+            </span>
+          </div>
+
+          {/* Quick Search Contestant Pill */}
+          <ParticipantSearchInput
+            searchQuery={contestantSearch}
+            onSearchChange={setContestantSearch}
+            pendingParticipants={pendingRound2Participants}
+            completedParticipants={completedRound2Participants}
+            activeParticipantId={activeParticipant?.id}
+            onSelectParticipant={(p) => {
+              setActiveParticipant(p);
+              if (currentStationId && currentStationId !== 'all') {
+                setStationParticipant(currentStationId, p.id);
+              }
+            }}
+            placeholder="Search #ID or name..."
+          />
+
           <button
             onClick={() => {
-              const list = stationEligibleRound2Participants.length > 0
-                ? stationEligibleRound2Participants
-                : (stationParticipants.length > 0 ? stationParticipants : undefined);
+              const list = pendingRound2Participants.length > 0
+                ? pendingRound2Participants
+                : (stationEligibleRound2Participants.length > 0 ? stationEligibleRound2Participants : undefined);
               selectNextParticipant(list);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 cursor-pointer"
+            disabled={pendingRound2Participants.length === 0 && stationEligibleRound2Participants.length === 0}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 disabled:opacity-40 cursor-pointer"
             title="Next Participant (Shortcut: N)"
           >
             <span>Next</span>

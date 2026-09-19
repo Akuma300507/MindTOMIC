@@ -3489,24 +3489,18 @@ const removeAllTopicsHandler = (req: Request, res: Response) => {
   (db.settings.stations || []).forEach((st) => {
     const s = db.stations && db.stations[st.id];
     if (s) {
-      delete s.selectedTopicId;
-      delete s.selectedTopic;
-      if (s.activeItem && s.activeItem.type === 'topic') {
-        delete s.activeItem;
-      }
+      s.selectedTopicId = null;
+      s.selectedTopic = null;
     }
   });
   if (db.stations) {
     Object.values(db.stations).forEach((s: any) => {
-      delete s.selectedTopicId;
-      delete s.selectedTopic;
-      if (s.activeItem && s.activeItem.type === 'topic') {
-        delete s.activeItem;
-      }
+      s.selectedTopicId = null;
+      s.selectedTopic = null;
     });
   }
-  if (db.slotAssignments) {
-    db.slotAssignments = db.slotAssignments.filter((sa: any) => sa.round !== 'round2');
+  if (db.synchronizedSlots) {
+    db.synchronizedSlots.round2 = {};
   }
   persistDB();
   logAction('All Topics Deleted', `Removed all ${count} topics from universal repository`);
@@ -3727,24 +3721,18 @@ const removeAllImagesHandler = (req: Request, res: Response) => {
   (db.settings.stations || []).forEach((st) => {
     const s = db.stations && db.stations[st.id];
     if (s) {
-      delete s.selectedImageId;
-      delete s.selectedImage;
-      if (s.activeItem && s.activeItem.type === 'image') {
-        delete s.activeItem;
-      }
+      s.selectedImageId = null;
+      s.selectedImage = null;
     }
   });
   if (db.stations) {
     Object.values(db.stations).forEach((s: any) => {
-      delete s.selectedImageId;
-      delete s.selectedImage;
-      if (s.activeItem && s.activeItem.type === 'image') {
-        delete s.activeItem;
-      }
+      s.selectedImageId = null;
+      s.selectedImage = null;
     });
   }
-  if (db.slotAssignments) {
-    db.slotAssignments = db.slotAssignments.filter((sa: any) => sa.round !== 'round1');
+  if (db.synchronizedSlots) {
+    db.synchronizedSlots.round1 = {};
   }
   db.participants.forEach((p) => {
     delete p.round1ImageId;

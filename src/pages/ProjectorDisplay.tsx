@@ -1085,7 +1085,7 @@ export const ProjectorDisplay: React.FC = () => {
                   ) : isWarning ? (
                     <span className="text-amber-300">{remainingSeconds}s remaining to conclude</span>
                   ) : (
-                    <span className="text-slate-400">{computedTimer.speechDurationSeconds}s total speech limit</span>
+                    <span className="text-slate-400">{computedTimer.durationSeconds}s total speech limit</span>
                   )}
                 </div>
               </div>

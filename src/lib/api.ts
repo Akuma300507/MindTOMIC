@@ -325,6 +325,7 @@ export const api = {
   // Participants
   async getParticipants(): Promise<Participant[]> {
     const res = await fetch('/api/participants');
+    if (!res.ok) throw new Error('Failed to fetch participants');
     return res.json();
   },
 
@@ -417,6 +418,7 @@ export const api = {
   // Custom Fields
   async getCustomFields(): Promise<CustomFieldDefinition[]> {
     const res = await fetch('/api/custom-fields');
+    if (!res.ok) throw new Error('Failed to fetch custom fields');
     return res.json();
   },
 
@@ -451,6 +453,7 @@ export const api = {
   // Topics
   async getTopics(): Promise<Topic[]> {
     const res = await fetch('/api/topics');
+    if (!res.ok) throw new Error('Failed to fetch topics');
     return res.json();
   },
 
@@ -516,6 +519,7 @@ export const api = {
   // Images
   async getImages(): Promise<EventImage[]> {
     const res = await fetch('/api/images');
+    if (!res.ok) throw new Error('Failed to fetch images');
     return res.json();
   },
 
@@ -594,6 +598,7 @@ export const api = {
   // Settings
   async getSettings(): Promise<EventSettings> {
     const res = await fetch('/api/settings');
+    if (!res.ok) throw new Error('Failed to fetch settings');
     return res.json();
   },
 
@@ -610,6 +615,7 @@ export const api = {
   // History
   async getHistory(): Promise<EventLog[]> {
     const res = await fetch('/api/history');
+    if (!res.ok) throw new Error('Failed to fetch history');
     return res.json();
   },
 
@@ -629,6 +635,7 @@ export const api = {
   // Results
   async getResults(): Promise<{ round1: any[]; round2: any[]; round3: any[] }> {
     const res = await fetch('/api/results');
+    if (!res.ok) throw new Error('Failed to fetch results');
     return res.json();
   },
 

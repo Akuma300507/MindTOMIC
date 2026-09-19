@@ -239,7 +239,7 @@ export const Timer: React.FC<TimerProps> = ({
     setIsRunning(true);
     setIsOvertime(false);
     setOvertimeSeconds(0);
-    speechStartTimeRef.current = Date.now();
+    speechStartTimeRef.current = getServerNow();
 
     if (!startTimeRef.current) {
       startTimeRef.current = new Date().toISOString();

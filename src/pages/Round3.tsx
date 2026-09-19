@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
-import type { Round3Result } from '../types';
+import { ParticipantSearchInput } from '../components/common/ParticipantSearchInput';
+import { isParticipantRoundCompleted, type Round3Result } from '../types';
 
 export const Round3: React.FC = () => {
   const {
@@ -60,19 +61,69 @@ export const Round3: React.FC = () => {
     return filtered.length > 0 ? filtered : eligibleRound3Participants;
   }, [eligibleRound3Participants, currentStationId]);
 
-  // Auto-select first station-eligible Round 3 finalist
+  // Completed finalists in Round 3
+  const completedRound3Participants = useMemo(() => {
+    return stationEligibleRound3Participants.filter((p) => isParticipantRoundCompleted(p, 3, db));
+  }, [stationEligibleRound3Participants, db]);
+
+  // Pending (not completed) finalists in Round 3
+  const pendingRound3Participants = useMemo(() => {
+    return stationEligibleRound3Participants.filter((p) => !isParticipantRoundCompleted(p, 3, db));
+  }, [stationEligibleRound3Participants, db]);
+
+  const isCurrentParticipantCompleted = Boolean(
+    activeParticipant && isParticipantRoundCompleted(activeParticipant, 3, db)
+  );
+
+  const [contestantSearch, setContestantSearch] = useState('');
+
+  // Filtered lists based on search query (by ID, #number, name, or phone)
+  const filteredPendingParticipants = useMemo(() => {
+    if (!contestantSearch.trim()) return pendingRound3Participants;
+    const q = contestantSearch.toLowerCase().trim().replace(/^#/, '');
+    return pendingRound3Participants.filter((p) => {
+      const matchName = (p.name || '').toLowerCase().includes(q);
+      const matchNum = String(p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
+      const matchId = (p.id || '').toLowerCase().includes(q);
+      const matchMobile = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
+      return matchName || matchNum || matchId || matchMobile;
+    });
+  }, [pendingRound3Participants, contestantSearch]);
+
+  const filteredCompletedParticipants = useMemo(() => {
+    if (!contestantSearch.trim()) return completedRound3Participants;
+    const q = contestantSearch.toLowerCase().trim().replace(/^#/, '');
+    return completedRound3Participants.filter((p) => {
+      const matchName = (p.name || '').toLowerCase().includes(q);
+      const matchNum = String(p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
+      const matchId = (p.id || '').toLowerCase().includes(q);
+      const matchMobile = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
+      return matchName || matchNum || matchId || matchMobile;
+    });
+  }, [completedRound3Participants, contestantSearch]);
+
+  // Auto-select first station-eligible pending Round 3 finalist
   useEffect(() => {
-    if (stationEligibleRound3Participants.length > 0) {
-      const isAlreadyEligible =
-        activeParticipant &&
-        stationEligibleRound3Participants.some((p) => p.id === activeParticipant.id);
-      if (!isAlreadyEligible) {
-        setActiveParticipant(stationEligibleRound3Participants[0]);
-      }
-    } else if (activeParticipant && (db?.participants || []).length === 0) {
-      setActiveParticipant(null as any);
+    if (activeParticipant) {
+      const isAlreadyValid = stationEligibleRound3Participants.some((p) => p.id === activeParticipant.id);
+      if (isAlreadyValid) return;
     }
-  }, [stationEligibleRound3Participants, activeParticipant, setActiveParticipant, db?.participants]);
+
+    if (pendingRound3Participants.length > 0) {
+      setActiveParticipant(pendingRound3Participants[0]);
+    } else if (completedRound3Participants.length > 0) {
+      setActiveParticipant(completedRound3Participants[0]);
+    } else if ((db?.participants || []).length === 0) {
+      setActiveParticipant(null);
+    }
+  }, [
+    pendingRound3Participants,
+    completedRound3Participants,
+    stationEligibleRound3Participants,
+    activeParticipant,
+    setActiveParticipant,
+    db?.participants,
+  ]);
 
   const [timerPhase, setTimerPhase] = useState<TimerPhase>('idle');
   const [lastSavedResult, setLastSavedResult] = useState<Round3Result | null>(null);
@@ -108,8 +159,26 @@ export const Round3: React.FC = () => {
 
       const saved = await saveRound3Result(resultPayload);
       setLastSavedResult(saved);
+
+      // Auto-advance to the next pending finalist
+      const nextPendingList = pendingRound3Participants.filter((p) => p.id !== activeParticipant.id);
+      if (nextPendingList.length > 0) {
+        const nextParticipant = nextPendingList[0];
+        setActiveParticipant(nextParticipant);
+        if (currentStationId && currentStationId !== 'all') {
+          setStationParticipant(currentStationId, nextParticipant.id).catch(() => {});
+        }
+      }
     },
-    [activeParticipant, speechSeconds, saveRound3Result]
+    [
+      activeParticipant,
+      speechSeconds,
+      saveRound3Result,
+      pendingRound3Participants,
+      currentStationId,
+      setStationParticipant,
+      setActiveParticipant,
+    ]
   );
 
   if (currentEventRound < 3 || !round3PermissionGranted) {
@@ -278,15 +347,20 @@ export const Round3: React.FC = () => {
             </select>
           </div>
 
+          {/* Active / Pending Finalists Dropdown */}
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
             <span className="text-slate-400 flex items-center gap-1">
               <Trophy className="w-3.5 h-3.5 text-emerald-400" />
               Finalist:
             </span>
             <select
-              value={activeParticipant?.id || ''}
+              value={!isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
               onChange={(e) => {
-                const p = db?.participants.find((item) => item.id === e.target.value);
+                const p =
+                  filteredPendingParticipants.find((item) => item.id === e.target.value) ||
+                  pendingRound3Participants.find((item) => item.id === e.target.value) ||
+                  stationEligibleRound3Participants.find((item) => item.id === e.target.value) ||
+                  db?.participants.find((item) => item.id === e.target.value);
                 if (p) {
                   setActiveParticipant(p);
                   if (currentStationId && currentStationId !== 'all') {
@@ -296,37 +370,113 @@ export const Round3: React.FC = () => {
               }}
               className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
-              {stationEligibleRound3Participants.length === 0 ? (
-                <option value="" disabled className="bg-slate-900 text-amber-400">
-                  No eligible finalists in {currentStation?.name || 'this station'}
+              {filteredPendingParticipants.length === 0 ? (
+                <option value="" disabled className="bg-slate-900 text-emerald-400">
+                  {contestantSearch.trim()
+                    ? `No finalists match "${contestantSearch}"`
+                    : completedRound3Participants.length > 0
+                    ? `All finalists completed (${completedRound3Participants.length})`
+                    : `No eligible finalists in ${currentStation?.name || 'this station'}`}
                 </option>
               ) : (
-                stationEligibleRound3Participants.map((p) => {
-                  const isR2Qual = p.round2Qualified === 'qualified';
-                  return (
-                    <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                      #{p.participantNumber} — {p.name} {isR2Qual ? '★ [R2 QUALIFIED]' : ''}
-                    </option>
-                  );
-                })
+                <>
+                  <option value="" disabled className="bg-slate-900 text-slate-400">
+                    Select Finalist ({filteredPendingParticipants.length} remaining)
+                  </option>
+                  {filteredPendingParticipants.map((p) => {
+                    const isR2Qual = p.round2Qualified === 'qualified';
+                    return (
+                      <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                        #{p.participantNumber} — {p.name} {isR2Qual ? '★ [R2 QUALIFIED]' : ''}
+                      </option>
+                    );
+                  })}
+                </>
               )}
             </select>
 
-            {stationEligibleRound3Participants.length > 0 && (
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
-                {stationEligibleRound3Participants.length} Finalists
-              </span>
-            )}
+            <span
+              className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                pendingRound3Participants.length > 0
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                  : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+              }`}
+            >
+              {pendingRound3Participants.length} Remaining
+            </span>
           </div>
+
+          {/* Completed Finalists Dropdown */}
+          <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
+            <span className="text-slate-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              Completed:
+            </span>
+            <select
+              value={isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
+              onChange={(e) => {
+                const p =
+                  filteredCompletedParticipants.find((item) => item.id === e.target.value) ||
+                  completedRound3Participants.find((item) => item.id === e.target.value);
+                if (p) {
+                  setActiveParticipant(p);
+                  if (currentStationId && currentStationId !== 'all') {
+                    setStationParticipant(currentStationId, p.id);
+                  }
+                }
+              }}
+              className="bg-transparent text-emerald-300 font-bold font-['Outfit'] focus:outline-none max-w-[200px] truncate cursor-pointer"
+            >
+              <option value="" disabled className="bg-slate-900 text-slate-400">
+                {filteredCompletedParticipants.length === 0
+                  ? contestantSearch.trim()
+                    ? `No completed match "${contestantSearch}"`
+                    : 'None completed (0)'
+                  : `Completed (${completedRound3Participants.length})`}
+              </option>
+              {filteredCompletedParticipants.map((p) => (
+                <option key={p.id} value={p.id} className="bg-slate-900 text-emerald-300">
+                  #{p.participantNumber} — {p.name} ✓
+                </option>
+              ))}
+            </select>
+            <span
+              className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${
+                completedRound3Participants.length > 0
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+              title={`${completedRound3Participants.length} of ${stationEligibleRound3Participants.length} finalists completed Round 3`}
+            >
+              {completedRound3Participants.length} Done
+            </span>
+          </div>
+
+          {/* Quick Search Finalist Pill */}
+          <ParticipantSearchInput
+            searchQuery={contestantSearch}
+            onSearchChange={setContestantSearch}
+            pendingParticipants={pendingRound3Participants}
+            completedParticipants={completedRound3Participants}
+            activeParticipantId={activeParticipant?.id}
+            onSelectParticipant={(p) => {
+              setActiveParticipant(p);
+              if (currentStationId && currentStationId !== 'all') {
+                setStationParticipant(currentStationId, p.id);
+              }
+            }}
+            placeholder="Search #ID or name..."
+          />
 
           <button
             onClick={() => {
-              const list = stationEligibleRound3Participants.length > 0
-                ? stationEligibleRound3Participants
-                : (stationParticipants.length > 0 ? stationParticipants : undefined);
+              const list = pendingRound3Participants.length > 0
+                ? pendingRound3Participants
+                : (stationEligibleRound3Participants.length > 0 ? stationEligibleRound3Participants : undefined);
               selectNextParticipant(list);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 cursor-pointer"
+            disabled={pendingRound3Participants.length === 0 && stationEligibleRound3Participants.length === 0}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/50 disabled:opacity-40 cursor-pointer"
             title="Next Participant (Shortcut: N)"
           >
             <span>Next</span>

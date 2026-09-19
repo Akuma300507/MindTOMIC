@@ -61,7 +61,11 @@ const AppContent: React.FC = () => {
 
         {/* Dynamic Page Stage Container */}
         <main className="flex-1 overflow-y-auto relative bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.15),rgba(255,255,255,0))]">
-          {currentPage === 'dashboard' && <Dashboard />}
+          {currentPage === 'dashboard' && (
+            <ErrorBoundary fallbackTitle="Dashboard Display Error">
+              <Dashboard />
+            </ErrorBoundary>
+          )}
           {currentPage === 'master' && (
             <ErrorBoundary fallbackTitle="Master Monitor Dashboard Error">
               <Master />
@@ -72,8 +76,16 @@ const AppContent: React.FC = () => {
               <Participants />
             </ErrorBoundary>
           )}
-          {currentPage === 'topics' && <TopicsManager />}
-          {currentPage === 'images' && <ImagesManager />}
+          {currentPage === 'topics' && (
+            <ErrorBoundary fallbackTitle="Topics Manager Error">
+              <TopicsManager />
+            </ErrorBoundary>
+          )}
+          {currentPage === 'images' && (
+            <ErrorBoundary fallbackTitle="Images Manager Error">
+              <ImagesManager />
+            </ErrorBoundary>
+          )}
           {currentPage === 'round1' && (
             <ErrorBoundary fallbackTitle="Round 1 Pixel Pictionary Error">
               <Round1 />
@@ -89,12 +101,36 @@ const AppContent: React.FC = () => {
               <Round3 />
             </ErrorBoundary>
           )}
-          {currentPage === 'buzzer' && <BuzzerControl />}
-          {currentPage === 'warning-buzzer' && <WarningBuzzer />}
-          {currentPage === 'results' && <Results />}
-          {currentPage === 'settings' && <Settings />}
-          {currentPage === 'excel' && <ExcelPage />}
-          {currentPage === 'history' && <EventHistory />}
+          {currentPage === 'buzzer' && (
+            <ErrorBoundary fallbackTitle="Buzzer Control Error">
+              <BuzzerControl />
+            </ErrorBoundary>
+          )}
+          {currentPage === 'warning-buzzer' && (
+            <ErrorBoundary fallbackTitle="Warning Buzzer Error">
+              <WarningBuzzer />
+            </ErrorBoundary>
+          )}
+          {currentPage === 'results' && (
+            <ErrorBoundary fallbackTitle="Results & Ranks Error">
+              <Results />
+            </ErrorBoundary>
+          )}
+          {currentPage === 'settings' && (
+            <ErrorBoundary fallbackTitle="Settings Error">
+              <Settings />
+            </ErrorBoundary>
+          )}
+          {currentPage === 'excel' && (
+            <ErrorBoundary fallbackTitle="Excel Management Error">
+              <ExcelPage />
+            </ErrorBoundary>
+          )}
+          {currentPage === 'history' && (
+            <ErrorBoundary fallbackTitle="Event History Error">
+              <EventHistory />
+            </ErrorBoundary>
+          )}
         </main>
       </div>
 

@@ -20,7 +20,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
-import { isParticipantCheckedIn, type EventImage, type Participant, type Round1Result } from '../types';
+import { ParticipantSearchInput } from '../components/common/ParticipantSearchInput';
+import { isParticipantCheckedIn, isParticipantRoundCompleted, type EventImage, type Participant, type Round1Result } from '../types';
 
 export const Round1: React.FC = () => {
   const {
@@ -89,10 +90,25 @@ export const Round1: React.FC = () => {
     return db.participants.filter((p) => p.stationId === currentStationId);
   }, [db?.participants, currentStationId]);
 
+  // Completed participants for active station in Round 1
+  const completedStationParticipants = useMemo(() => {
+    return stationParticipants.filter((p) => isParticipantRoundCompleted(p, 1, db));
+  }, [stationParticipants, db]);
+
+  // Pending (not completed) participants for active station in Round 1
+  const pendingStationParticipants = useMemo(() => {
+    return stationParticipants.filter((p) => !isParticipantRoundCompleted(p, 1, db));
+  }, [stationParticipants, db]);
+
   // Strictly only participants who have checked in to the location appear in the Round 1 drop-down!
   const checkedInStationParticipants = useMemo(() => {
     return stationParticipants.filter((p) => isParticipantCheckedIn(p));
   }, [stationParticipants]);
+
+  // Checked-in and pending participants
+  const checkedInPendingStationParticipants = useMemo(() => {
+    return pendingStationParticipants.filter((p) => isParticipantCheckedIn(p));
+  }, [pendingStationParticipants]);
 
   const arrivedCount = checkedInStationParticipants.length;
   const awaitingCount = stationParticipants.length - arrivedCount;
@@ -100,6 +116,37 @@ export const Round1: React.FC = () => {
   const isCurrentParticipantCheckedIn = Boolean(
     activeParticipant && isParticipantCheckedIn(activeParticipant)
   );
+
+  const isCurrentParticipantCompleted = Boolean(
+    activeParticipant && isParticipantRoundCompleted(activeParticipant, 1, db)
+  );
+
+  const [contestantSearch, setContestantSearch] = useState('');
+
+  // Filtered lists based on search query (by ID, #number, name, or phone)
+  const filteredPendingParticipants = useMemo(() => {
+    if (!contestantSearch.trim()) return pendingStationParticipants;
+    const q = contestantSearch.toLowerCase().trim().replace(/^#/, '');
+    return pendingStationParticipants.filter((p) => {
+      const matchName = (p.name || '').toLowerCase().includes(q);
+      const matchNum = String(p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
+      const matchId = (p.id || '').toLowerCase().includes(q);
+      const matchMobile = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
+      return matchName || matchNum || matchId || matchMobile;
+    });
+  }, [pendingStationParticipants, contestantSearch]);
+
+  const filteredCompletedParticipants = useMemo(() => {
+    if (!contestantSearch.trim()) return completedStationParticipants;
+    const q = contestantSearch.toLowerCase().trim().replace(/^#/, '');
+    return completedStationParticipants.filter((p) => {
+      const matchName = (p.name || '').toLowerCase().includes(q);
+      const matchNum = String(p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
+      const matchId = (p.id || '').toLowerCase().includes(q);
+      const matchMobile = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
+      return matchName || matchNum || matchId || matchMobile;
+    });
+  }, [completedStationParticipants, contestantSearch]);
 
   const round1Progress = useMemo(() => {
     if (!currentStationId || currentStationId === 'all') return null;
@@ -126,22 +173,34 @@ export const Round1: React.FC = () => {
     [allStations, currentStationId, checkInParticipant]
   );
 
-  // Keep activeParticipant synced strictly to current station's checked-in participant pool
+  // Keep activeParticipant synced strictly to current station's participant pool, prioritizing pending contestants
   useEffect(() => {
-    if (checkedInStationParticipants.length > 0) {
-      const isAlreadyValid =
-        activeParticipant &&
-        isParticipantCheckedIn(activeParticipant) &&
-        checkedInStationParticipants.some((p) => p.id === activeParticipant.id);
-      if (!isAlreadyValid) {
-        setActiveParticipant(checkedInStationParticipants[0]);
-      }
-    } else {
-      if (activeParticipant && !isParticipantCheckedIn(activeParticipant)) {
-        setActiveParticipant(null as any);
-      }
+    if (activeParticipant) {
+      const existsInStation = stationParticipants.some((p) => p.id === activeParticipant.id);
+      if (existsInStation) return;
     }
-  }, [currentStationId, checkedInStationParticipants, activeParticipant, setActiveParticipant]);
+
+    const nextCandidates =
+      checkedInPendingStationParticipants.length > 0
+        ? checkedInPendingStationParticipants
+        : pendingStationParticipants.length > 0
+        ? pendingStationParticipants
+        : completedStationParticipants;
+
+    if (nextCandidates.length > 0) {
+      setActiveParticipant(nextCandidates[0]);
+    } else {
+      setActiveParticipant(null);
+    }
+  }, [
+    currentStationId,
+    stationParticipants,
+    checkedInPendingStationParticipants,
+    pendingStationParticipants,
+    completedStationParticipants,
+    activeParticipant,
+    setActiveParticipant,
+  ]);
 
   // Sync with currentStation assignedImage if already set
   useEffect(() => {
@@ -238,8 +297,28 @@ export const Round1: React.FC = () => {
 
       const saved = await saveRound1Result(resultPayload);
       setLastSavedResult(saved);
+
+      // Auto-advance to the next pending contestant
+      const nextPendingList = pendingStationParticipants.filter((p) => p.id !== activeParticipant.id);
+      if (nextPendingList.length > 0) {
+        const nextParticipant =
+          nextPendingList.find((p) => isParticipantCheckedIn(p)) || nextPendingList[0];
+        setActiveParticipant(nextParticipant);
+        if (currentStationId && currentStationId !== 'all') {
+          setStationParticipant(currentStationId, nextParticipant.id).catch(() => {});
+        }
+      }
     },
-    [activeParticipant, selectedImage, speechSeconds, saveRound1Result]
+    [
+      activeParticipant,
+      selectedImage,
+      speechSeconds,
+      saveRound1Result,
+      pendingStationParticipants,
+      currentStationId,
+      setStationParticipant,
+      setActiveParticipant,
+    ]
   );
 
   return (
@@ -325,14 +404,16 @@ export const Round1: React.FC = () => {
             </select>
           </div>
 
+          {/* Active / Pending Contestants Dropdown */}
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
             <span className="text-slate-400">Contestant:</span>
             <select
-              value={activeParticipant?.id || ''}
+              value={!isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
               onChange={(e) => {
                 const p =
+                  filteredPendingParticipants.find((item) => item.id === e.target.value) ||
+                  pendingStationParticipants.find((item) => item.id === e.target.value) ||
                   stationParticipants.find((item) => item.id === e.target.value) ||
-                  checkedInStationParticipants.find((item) => item.id === e.target.value) ||
                   db?.participants.find((item) => item.id === e.target.value);
                 if (p) {
                   setActiveParticipant(p);
@@ -341,34 +422,43 @@ export const Round1: React.FC = () => {
                   }
                 }
               }}
-              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[220px] truncate cursor-pointer"
+              className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
-              {stationParticipants.length === 0 ? (
-                <option value="" disabled className="bg-slate-900 text-amber-400">
-                  No contestants in {currentStation?.name || 'this station'}
+              {filteredPendingParticipants.length === 0 ? (
+                <option value="" disabled className="bg-slate-900 text-emerald-400">
+                  {contestantSearch.trim()
+                    ? `No contestants match "${contestantSearch}"`
+                    : completedStationParticipants.length > 0
+                    ? `All contestants completed (${completedStationParticipants.length})`
+                    : `No contestants in ${currentStation?.name || 'this station'}`}
                 </option>
               ) : (
-                stationParticipants.map((p, pIdx) => {
-                  const isChecked = isParticipantCheckedIn(p);
-                  return (
-                    <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                      #{p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isChecked ? '✓' : ''}
-                    </option>
-                  );
-                })
+                <>
+                  <option value="" disabled className="bg-slate-900 text-slate-400">
+                    Select Contestant ({filteredPendingParticipants.length} remaining)
+                  </option>
+                  {filteredPendingParticipants.map((p, pIdx) => {
+                    const isChecked = isParticipantCheckedIn(p);
+                    return (
+                      <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                        #{p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isChecked ? '✓' : ''}
+                      </option>
+                    );
+                  })}
+                </>
               )}
             </select>
             <span
               className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${
-                arrivedCount > 0
-                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
-                  : 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                pendingStationParticipants.length > 0
+                  ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
+                  : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
               }`}
-              title={`${arrivedCount} of ${stationParticipants.length} contestants arrived`}
+              title={`${pendingStationParticipants.length} remaining contestants`}
             >
-              {arrivedCount}/{stationParticipants.length}
+              {pendingStationParticipants.length} Remaining
             </span>
-            {activeParticipant && (
+            {activeParticipant && !isCurrentParticipantCompleted && (
               <span
                 className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-500/40 bg-purple-950/60 text-purple-300 text-[10px] font-mono font-bold"
                 title="Synchronized Heat Slot across all stations"
@@ -377,6 +467,68 @@ export const Round1: React.FC = () => {
               </span>
             )}
           </div>
+
+          {/* Completed Contestants Dropdown */}
+          <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
+            <span className="text-slate-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              Completed:
+            </span>
+            <select
+              value={isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
+              onChange={(e) => {
+                const p =
+                  filteredCompletedParticipants.find((item) => item.id === e.target.value) ||
+                  completedStationParticipants.find((item) => item.id === e.target.value);
+                if (p) {
+                  setActiveParticipant(p);
+                  if (currentStationId && currentStationId !== 'all') {
+                    setStationParticipant(currentStationId, p.id);
+                  }
+                }
+              }}
+              className="bg-transparent text-emerald-300 font-bold font-['Outfit'] focus:outline-none max-w-[200px] truncate cursor-pointer"
+            >
+              <option value="" disabled className="bg-slate-900 text-slate-400">
+                {filteredCompletedParticipants.length === 0
+                  ? contestantSearch.trim()
+                    ? `No completed match "${contestantSearch}"`
+                    : 'None completed (0)'
+                  : `Completed (${completedStationParticipants.length})`}
+              </option>
+              {filteredCompletedParticipants.map((p) => (
+                <option key={p.id} value={p.id} className="bg-slate-900 text-emerald-300">
+                  #{p.participantNumber} — {p.name} ✓
+                </option>
+              ))}
+            </select>
+            <span
+              className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${
+                completedStationParticipants.length > 0
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+              title={`${completedStationParticipants.length} of ${stationParticipants.length} contestants completed Round 1`}
+            >
+              {completedStationParticipants.length} Done
+            </span>
+          </div>
+
+          {/* Quick Search Contestant Pill */}
+          <ParticipantSearchInput
+            searchQuery={contestantSearch}
+            onSearchChange={setContestantSearch}
+            pendingParticipants={pendingStationParticipants}
+            completedParticipants={completedStationParticipants}
+            activeParticipantId={activeParticipant?.id}
+            onSelectParticipant={(p) => {
+              setActiveParticipant(p);
+              if (currentStationId && currentStationId !== 'all') {
+                setStationParticipant(currentStationId, p.id);
+              }
+            }}
+            placeholder="Search #ID or name..."
+          />
 
           {/* Quick Participant Check-In Pill */}
           {activeParticipant && (
@@ -423,7 +575,11 @@ export const Round1: React.FC = () => {
 
           <button
             onClick={() => {
-              if (checkedInStationParticipants.length > 1) {
+              if (checkedInPendingStationParticipants.length > 1) {
+                selectNextParticipant(checkedInPendingStationParticipants);
+              } else if (pendingStationParticipants.length > 0) {
+                selectNextParticipant(pendingStationParticipants);
+              } else if (checkedInStationParticipants.length > 1) {
                 selectNextParticipant(checkedInStationParticipants);
               } else if (stationParticipants.length > 0) {
                 selectNextParticipant(stationParticipants);
