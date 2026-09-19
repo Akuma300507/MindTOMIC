@@ -1612,6 +1612,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [playBuzzerWithDebounce, currentStationId, deviceRole, projectorDeviceId, currentPage]);
 
+  // Background station timer progression watcher:
+  // Automatically transitions stations from prep to speech and triggers time_up even when operator is on other pages (e.g. Participants)
+  useEffect(() => {
+    const checkStationTimers = () => {
+      const currentDb = dbRef.current;
+      if (!currentDb?.stations) return;
+      const now = getServerNow();
+
+      Object.values(currentDb.stations).forEach((st) => {
+        if (!st.isTimerRunning || st.timerStatus !== 'running') return;
+
+        // Auto-transition from prep to speech when prep ends
+        if (st.timerMode === 'prep' && st.timerEndsAt && now >= st.timerEndsAt) {
+          sendStationTimerAction(st.id, {
+            action: 'transition_to_speech',
+            phase: 'speech',
+          }).catch((err) => console.error('Failed auto transition to speech:', err));
+        }
+
+        // Auto-trigger time_up buzzer when speech timer reaches 0
+        if (st.timerMode === 'speech' && !st.buzzerPlayed && st.timerEndsAt && now >= st.timerEndsAt) {
+          sendStationTimerAction(st.id, {
+            action: 'time_up',
+            phase: 'speech',
+            remainingSeconds: 0,
+          }).catch((err) => console.error('Failed auto time_up:', err));
+        }
+      });
+    };
+
+    const interval = setInterval(checkStationTimers, 400);
+    return () => clearInterval(interval);
+  }, [sendStationTimerAction]);
+
   // Fullscreen helper
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {

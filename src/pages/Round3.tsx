@@ -35,17 +35,18 @@ export const Round3: React.FC = () => {
     getStationRoundProgress,
   } = useApp();
 
-  // Round 2 to Round 3 qualification workflow:
-  // Contestants who are qualified in Round 2 advance to Round 3.
-  // If no one is marked qualified yet, allow station participants so round can still be operated.
+  // Round 2 qualification workflow:
+  // Contestants who are qualified in Round 2 AND checked in advance to Round 3 (Championship Finals).
+  // If no one is marked qualified yet, allow checked-in station participants so round can still be operated.
   const round2Qualifiers = useMemo(() => {
-    return (db?.participants || []).filter((p) => p.round2Qualified === 'qualified');
+    return (db?.participants || []).filter((p) => p.round2Qualified === 'qualified' && isParticipantCheckedIn(p));
   }, [db?.participants]);
 
   const stationParticipants = useMemo(() => {
     if (!db?.participants) return [];
-    if (!currentStationId || currentStationId === 'all') return db.participants;
-    return db.participants.filter((p) => p.stationId === currentStationId);
+    const pool = db.participants.filter((p) => isParticipantCheckedIn(p));
+    if (!currentStationId || currentStationId === 'all') return pool;
+    return pool.filter((p) => p.stationId === currentStationId);
   }, [db?.participants, currentStationId]);
 
   const eligibleRound3Participants = useMemo(() => {
@@ -159,16 +160,8 @@ export const Round3: React.FC = () => {
 
       const saved = await saveRound3Result(resultPayload);
       setLastSavedResult(saved);
-
-      // Auto-advance to the next pending finalist
-      const nextPendingList = pendingRound3Participants.filter((p) => p.id !== activeParticipant.id);
-      if (nextPendingList.length > 0) {
-        const nextParticipant = nextPendingList[0];
-        setActiveParticipant(nextParticipant);
-        if (currentStationId && currentStationId !== 'all') {
-          setStationParticipant(currentStationId, nextParticipant.id).catch(() => {});
-        }
-      }
+      // Retain the current finalist on screen after stopping the timer.
+      // Do NOT auto-advance; the operator will explicitly pick the next finalist when ready.
     },
     [
       activeParticipant,
@@ -354,7 +347,7 @@ export const Round3: React.FC = () => {
               Finalist:
             </span>
             <select
-              value={!isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
+              value={activeParticipant?.id || ''}
               onChange={(e) => {
                 const p =
                   filteredPendingParticipants.find((item) => item.id === e.target.value) ||
@@ -370,19 +363,31 @@ export const Round3: React.FC = () => {
               }}
               className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
-              {filteredPendingParticipants.length === 0 ? (
-                <option value="" disabled className="bg-slate-900 text-emerald-400">
+              {activeParticipant && isCurrentParticipantCompleted && (
+                <>
+                  <option value={activeParticipant.id} className="bg-slate-900 text-emerald-300 font-bold">
+                    #{activeParticipant.participantNumber} — {activeParticipant.name} (Completed) ✓
+                  </option>
+                  <option disabled className="bg-slate-950 text-slate-500">
+                    ── Select Next Finalist ({filteredPendingParticipants.length} remaining) ──
+                  </option>
+                </>
+              )}
+              {filteredPendingParticipants.length === 0 && (!activeParticipant || !isCurrentParticipantCompleted) ? (
+                <option value="" disabled className="bg-slate-900 text-amber-400">
                   {contestantSearch.trim()
-                    ? `No finalists match "${contestantSearch}"`
+                    ? `No checked-in finalists match "${contestantSearch}"`
                     : completedRound3Participants.length > 0
-                    ? `All finalists completed (${completedRound3Participants.length})`
-                    : `No eligible finalists in ${currentStation?.name || 'this station'}`}
+                    ? `All eligible finalists completed (${completedRound3Participants.length})`
+                    : `No checked-in eligible finalists in ${currentStation?.name || 'this station'}`}
                 </option>
               ) : (
                 <>
-                  <option value="" disabled className="bg-slate-900 text-slate-400">
-                    Select Finalist ({filteredPendingParticipants.length} remaining)
-                  </option>
+                  {(!activeParticipant || !isCurrentParticipantCompleted) && (
+                    <option value="" disabled className="bg-slate-900 text-slate-400">
+                      Select Finalist ({filteredPendingParticipants.length} remaining)
+                    </option>
+                  )}
                   {filteredPendingParticipants.map((p) => {
                     const isR2Qual = p.round2Qualified === 'qualified';
                     return (

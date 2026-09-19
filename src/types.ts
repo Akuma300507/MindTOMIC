@@ -44,7 +44,9 @@ export interface Participant {
   qualificationReason?: string;
   round1ImageId?: string; // Noted Image ID for Participant in Round 1
   round2TopicId?: string; // Noted Topic ID for Participant in Round 2
-  slotIndex?: number; // Zero-based heat/slot index across stations
+  slotIndex?: number; // Zero-based heat/slot index across stations (legacy fallback)
+  round1SlotIndex?: number; // Zero-based heat/slot index for Round 1
+  round2SlotIndex?: number; // Zero-based heat/slot index for Round 2
   customData: Record<string, any>;
   createdAt: string;
   updatedAt: string;
@@ -53,7 +55,7 @@ export interface Participant {
 export function isParticipantCheckedIn(p?: Participant | null): boolean {
   if (!p) return false;
   if (p.checkedIn === false) return false;
-  if (p.status === 'absent' || p.status === 'eliminated' || p.status === 'disqualified') return false;
+  if (p.status === 'absent') return false;
   return Boolean(p.checkedIn === true || p.status === 'checked_in' || p.checkedInAt);
 }
 
@@ -144,6 +146,7 @@ export interface Round1Result {
   startTime: string;
   endTime: string;
   status: RoundStatus;
+  slotIndex?: number;
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;
@@ -165,6 +168,7 @@ export interface Round2Result {
   startTime: string;
   endTime: string;
   status: RoundStatus;
+  slotIndex?: number;
   qualification?: QualificationStatus;
   qualificationReason?: string;
   notes?: string;

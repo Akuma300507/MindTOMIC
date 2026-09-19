@@ -123,18 +123,18 @@ export const Round1: React.FC = () => {
 
   const [contestantSearch, setContestantSearch] = useState('');
 
-  // Filtered lists based on search query (by ID, #number, name, or phone)
+  // Filtered lists based on search query (by ID, #number, name, or phone) - STRICTLY CHECKED IN ONLY
   const filteredPendingParticipants = useMemo(() => {
-    if (!contestantSearch.trim()) return pendingStationParticipants;
+    if (!contestantSearch.trim()) return checkedInPendingStationParticipants;
     const q = contestantSearch.toLowerCase().trim().replace(/^#/, '');
-    return pendingStationParticipants.filter((p) => {
+    return checkedInPendingStationParticipants.filter((p) => {
       const matchName = (p.name || '').toLowerCase().includes(q);
       const matchNum = String(p.participantNumber || (p as any).chestNumber || '').toLowerCase().includes(q);
       const matchId = (p.id || '').toLowerCase().includes(q);
       const matchMobile = (p.mobile || p.phone || '')?.toLowerCase().includes(q);
       return matchName || matchNum || matchId || matchMobile;
     });
-  }, [pendingStationParticipants, contestantSearch]);
+  }, [checkedInPendingStationParticipants, contestantSearch]);
 
   const filteredCompletedParticipants = useMemo(() => {
     if (!contestantSearch.trim()) return completedStationParticipants;
@@ -175,6 +175,15 @@ export const Round1: React.FC = () => {
 
   // Keep activeParticipant synced strictly to current station's participant pool, prioritizing pending contestants
   useEffect(() => {
+    // If current station has an assigned or actively staged participant, preserve that contestant
+    if (currentStation?.activeParticipantId) {
+      const staged = db?.participants?.find((p) => p.id === currentStation.activeParticipantId);
+      if (staged && activeParticipant?.id !== staged.id) {
+        setActiveParticipant(staged);
+        return;
+      }
+    }
+
     if (activeParticipant) {
       const existsInStation = stationParticipants.some((p) => p.id === activeParticipant.id);
       if (existsInStation) return;
@@ -183,8 +192,6 @@ export const Round1: React.FC = () => {
     const nextCandidates =
       checkedInPendingStationParticipants.length > 0
         ? checkedInPendingStationParticipants
-        : pendingStationParticipants.length > 0
-        ? pendingStationParticipants
         : completedStationParticipants;
 
     if (nextCandidates.length > 0) {
@@ -194,12 +201,14 @@ export const Round1: React.FC = () => {
     }
   }, [
     currentStationId,
+    currentStation?.activeParticipantId,
     stationParticipants,
     checkedInPendingStationParticipants,
     pendingStationParticipants,
     completedStationParticipants,
     activeParticipant,
     setActiveParticipant,
+    db?.participants,
   ]);
 
   // Sync with currentStation assignedImage if already set
@@ -209,15 +218,20 @@ export const Round1: React.FC = () => {
     }
   }, [currentStation?.selectedImage]);
 
-  // Heat slot index within this station's roster
+  // Heat slot index within this station:
+  // Dynamically determined by turn order (number of completed Round 1 contestants at this station),
+  // or the contestant's locked round1SlotIndex if already assigned/completed.
   const slotIndex = useMemo(() => {
     if (!activeParticipant) return 0;
-    if (typeof activeParticipant.slotIndex === 'number' && activeParticipant.slotIndex >= 0) {
-      return activeParticipant.slotIndex;
+    if (typeof activeParticipant.round1SlotIndex === 'number' && activeParticipant.round1SlotIndex >= 0) {
+      return activeParticipant.round1SlotIndex;
     }
-    const idx = stationParticipants.findIndex((p) => p.id === activeParticipant.id);
-    return idx >= 0 ? idx : 0;
-  }, [stationParticipants, activeParticipant]);
+    const r1Result = db?.round1Results?.find((r) => r.participantId === activeParticipant.id);
+    if (typeof r1Result?.slotIndex === 'number' && r1Result.slotIndex >= 0) {
+      return r1Result.slotIndex;
+    }
+    return completedStationParticipants.length;
+  }, [activeParticipant, db?.round1Results, completedStationParticipants.length]);
 
   // Available images based on reuse policy or synchronized slots
   const availableImages = useMemo(() => {
@@ -227,6 +241,20 @@ export const Round1: React.FC = () => {
     const filtered = stationImages.filter((img) => img.status === 'available');
     return filtered.length > 0 ? filtered : stationImages;
   }, [stationImages, db?.settings?.round1?.allowImageReuse, db?.settings?.round1?.synchronizedSlots]);
+
+  // Synchronized slot image auto-loader:
+  // If synchronized slots are enabled and an image has already been chosen/pre-generated for this heat slot,
+  // load and assign that exact image automatically so all stations at this heat stay aligned.
+  useEffect(() => {
+    const isSync = db?.settings?.round1?.synchronizedSlots !== false;
+    if (isSync && db?.synchronizedSlots?.round1 && typeof db.synchronizedSlots.round1[slotIndex] === 'string') {
+      const slotImageId = db.synchronizedSlots.round1[slotIndex];
+      const matched = stationImages.find((img) => img.id === slotImageId || img.imageId === slotImageId);
+      if (matched && (!selectedImage || selectedImage.id !== matched.id)) {
+        setSelectedImage(matched);
+      }
+    }
+  }, [db?.settings?.round1?.synchronizedSlots, db?.synchronizedSlots?.round1, slotIndex, stationImages, selectedImage]);
 
   // Atomic Random image selector
   const handleRandomImage = useCallback(async () => {
@@ -293,31 +321,20 @@ export const Round1: React.FC = () => {
         startTime: data.startTime,
         endTime: data.endTime,
         status: data.status,
+        slotIndex: slotIndex,
       };
 
       const saved = await saveRound1Result(resultPayload);
       setLastSavedResult(saved);
-
-      // Auto-advance to the next pending contestant
-      const nextPendingList = pendingStationParticipants.filter((p) => p.id !== activeParticipant.id);
-      if (nextPendingList.length > 0) {
-        const nextParticipant =
-          nextPendingList.find((p) => isParticipantCheckedIn(p)) || nextPendingList[0];
-        setActiveParticipant(nextParticipant);
-        if (currentStationId && currentStationId !== 'all') {
-          setStationParticipant(currentStationId, nextParticipant.id).catch(() => {});
-        }
-      }
+      // Retain the current participant and image on screen after stopping the timer.
+      // Do NOT auto-advance; the operator will explicitly pick the next contestant when ready.
     },
     [
       activeParticipant,
       selectedImage,
       speechSeconds,
+      slotIndex,
       saveRound1Result,
-      pendingStationParticipants,
-      currentStationId,
-      setStationParticipant,
-      setActiveParticipant,
     ]
   );
 
@@ -408,7 +425,7 @@ export const Round1: React.FC = () => {
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
             <span className="text-slate-400">Contestant:</span>
             <select
-              value={!isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
+              value={activeParticipant?.id || ''}
               onChange={(e) => {
                 const p =
                   filteredPendingParticipants.find((item) => item.id === e.target.value) ||
@@ -424,24 +441,38 @@ export const Round1: React.FC = () => {
               }}
               className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
-              {filteredPendingParticipants.length === 0 ? (
-                <option value="" disabled className="bg-slate-900 text-emerald-400">
+              {activeParticipant && isCurrentParticipantCompleted && (
+                <>
+                  <option value={activeParticipant.id} className="bg-slate-900 text-emerald-300 font-bold">
+                    #{activeParticipant.participantNumber} — {activeParticipant.name} (Completed) ✓
+                  </option>
+                  <option disabled className="bg-slate-950 text-slate-500">
+                    ── Select Next Contestant ({filteredPendingParticipants.length} remaining) ──
+                  </option>
+                </>
+              )}
+              {filteredPendingParticipants.length === 0 && (!activeParticipant || !isCurrentParticipantCompleted) ? (
+                <option value="" disabled className="bg-slate-900 text-amber-400">
                   {contestantSearch.trim()
-                    ? `No contestants match "${contestantSearch}"`
+                    ? `No checked-in contestants match "${contestantSearch}"`
                     : completedStationParticipants.length > 0
-                    ? `All contestants completed (${completedStationParticipants.length})`
-                    : `No contestants in ${currentStation?.name || 'this station'}`}
+                    ? `All checked-in contestants completed (${completedStationParticipants.length})`
+                    : checkedInStationParticipants.length === 0
+                    ? `No checked-in contestants in ${currentStation?.name || 'this station'}`
+                    : `No pending contestants in ${currentStation?.name || 'this station'}`}
                 </option>
               ) : (
                 <>
-                  <option value="" disabled className="bg-slate-900 text-slate-400">
-                    Select Contestant ({filteredPendingParticipants.length} remaining)
-                  </option>
-                  {filteredPendingParticipants.map((p, pIdx) => {
+                  {(!activeParticipant || !isCurrentParticipantCompleted) && (
+                    <option value="" disabled className="bg-slate-900 text-slate-400">
+                      Select Contestant ({filteredPendingParticipants.length} remaining)
+                    </option>
+                  )}
+                  {filteredPendingParticipants.map((p) => {
                     const isChecked = isParticipantCheckedIn(p);
                     return (
                       <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                        #{p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isChecked ? '✓' : ''}
+                        #{p.participantNumber} — {p.name} {isChecked ? '✓' : ''}
                       </option>
                     );
                   })}
@@ -450,20 +481,24 @@ export const Round1: React.FC = () => {
             </select>
             <span
               className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${
-                pendingStationParticipants.length > 0
+                checkedInPendingStationParticipants.length > 0
                   ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
                   : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
               }`}
-              title={`${pendingStationParticipants.length} remaining contestants`}
+              title={`${checkedInPendingStationParticipants.length} remaining checked-in contestants`}
             >
-              {pendingStationParticipants.length} Remaining
+              {checkedInPendingStationParticipants.length} Remaining
             </span>
-            {activeParticipant && !isCurrentParticipantCompleted && (
+            {activeParticipant && (
               <span
-                className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-500/40 bg-purple-950/60 text-purple-300 text-[10px] font-mono font-bold"
-                title="Synchronized Heat Slot across all stations"
+                className={`hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-mono font-bold ${
+                  isCurrentParticipantCompleted
+                    ? 'border-emerald-500/40 bg-emerald-950/60 text-emerald-300'
+                    : 'border-purple-500/40 bg-purple-950/60 text-purple-300'
+                }`}
+                title={isCurrentParticipantCompleted ? `Heat #${slotIndex + 1} Completed` : 'Synchronized Heat Slot across all stations'}
               >
-                Heat #{slotIndex + 1}
+                {isCurrentParticipantCompleted ? `✓ Done (Heat #${slotIndex + 1})` : `Heat #${slotIndex + 1}`}
               </span>
             )}
           </div>
@@ -496,11 +531,19 @@ export const Round1: React.FC = () => {
                     : 'None completed (0)'
                   : `Completed (${completedStationParticipants.length})`}
               </option>
-              {filteredCompletedParticipants.map((p) => (
-                <option key={p.id} value={p.id} className="bg-slate-900 text-emerald-300">
-                  #{p.participantNumber} — {p.name} ✓
-                </option>
-              ))}
+              {filteredCompletedParticipants.map((p) => {
+                const compResult = db?.round1Results?.find((r) => r.participantId === p.id);
+                const compHeat = typeof p.round1SlotIndex === 'number'
+                  ? p.round1SlotIndex + 1
+                  : typeof compResult?.slotIndex === 'number'
+                  ? compResult.slotIndex + 1
+                  : null;
+                return (
+                  <option key={p.id} value={p.id} className="bg-slate-900 text-emerald-300">
+                    #{p.participantNumber} — {p.name} {compHeat ? `(Heat #${compHeat})` : ''} ✓
+                  </option>
+                );
+              })}
             </select>
             <span
               className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${
@@ -575,12 +618,10 @@ export const Round1: React.FC = () => {
 
           <button
             onClick={() => {
-              if (checkedInPendingStationParticipants.length > 1) {
+              if (checkedInPendingStationParticipants.length > 0) {
                 selectNextParticipant(checkedInPendingStationParticipants);
               } else if (pendingStationParticipants.length > 0) {
                 selectNextParticipant(pendingStationParticipants);
-              } else if (checkedInStationParticipants.length > 1) {
-                selectNextParticipant(checkedInStationParticipants);
               } else if (stationParticipants.length > 0) {
                 selectNextParticipant(stationParticipants);
               } else {

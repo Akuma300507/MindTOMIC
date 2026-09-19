@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -14,6 +14,7 @@ import {
 import { soundEngine } from '../../lib/audio';
 import { useApp } from '../../context/AppContext';
 import { getServerNow } from '../../lib/timeSync';
+import { computeStationTimer } from '../../lib/timerUtils';
 
 export type TimerPhase = 'idle' | 'prep' | 'speech' | 'stopped' | 'time_up';
 
@@ -75,6 +76,10 @@ export const Timer: React.FC<TimerProps> = ({
   } = useApp();
 
   const activeStationId = stationId || currentStationId;
+  const activeStation =
+    (activeStationId && activeStationId !== 'all' ? db?.stations?.[activeStationId] : null) || db?.liveSync;
+  const roundNum = roundName === 'Round 1' ? 1 : roundName === 'Round 2' ? 2 : 3;
+  const isStationMatchingRound = !activeStation?.currentRound || activeStation.currentRound === roundNum;
 
   const playCurrentPrepBuzzer = useCallback(() => {
     const prepSound = db?.settings?.buzzer?.prepSound || 'dual_alert';
@@ -90,29 +95,88 @@ export const Timer: React.FC<TimerProps> = ({
     soundEngine.playWarningBuzzer(warnSound, warnVol, customUrl);
   }, [db?.settings?.buzzer?.warningSound, db?.settings?.buzzer?.warningVolume, db?.settings?.buzzer?.warningCustomAudioUrl]);
 
-  const [phase, setPhase] = useState<TimerPhase>('idle');
-  const [isRunning, setIsRunning] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState(
-    hasPrepPhase ? prepDurationSeconds : speechDurationSeconds
-  );
-  const [totalSecondsForPhase, setTotalSecondsForPhase] = useState(
-    hasPrepPhase ? prepDurationSeconds : speechDurationSeconds
-  );
+  // Initial state calculation directly from active station state if running/paused
+  const getInitialTimerState = () => {
+    if (activeStation && isStationMatchingRound) {
+      const isRunning = Boolean(activeStation.isTimerRunning || activeStation.timerStatus === 'running');
+      const isPaused = activeStation.timerStatus === 'paused';
+      const isTimeUpOrOvertime = Boolean(activeStation.isOvertime || activeStation.timerMode === 'time_up');
+
+      if (isRunning || isPaused || isTimeUpOrOvertime) {
+        const computed = computeStationTimer(activeStation, getServerNow());
+        const effectivePhase: TimerPhase =
+          computed.phase === 'time_up' ? 'speech' : (computed.phase as TimerPhase);
+
+        return {
+          phase: effectivePhase,
+          isRunning: computed.isRunning,
+          remainingSeconds: computed.remainingSeconds,
+          totalSecondsForPhase: computed.durationSeconds,
+          isOvertime: computed.isOvertime,
+          overtimeSeconds: computed.overtimeSeconds,
+          pausedRemaining: computed.remainingSeconds,
+        };
+      }
+    }
+
+    const defaultSecs = hasPrepPhase ? prepDurationSeconds : speechDurationSeconds;
+    return {
+      phase: 'idle' as TimerPhase,
+      isRunning: false,
+      remainingSeconds: defaultSecs,
+      totalSecondsForPhase: defaultSecs,
+      isOvertime: false,
+      overtimeSeconds: 0,
+      pausedRemaining: defaultSecs,
+    };
+  };
+
+  const initialTimerState = useMemo(() => getInitialTimerState(), []);
+
+  const [phase, setPhase] = useState<TimerPhase>(initialTimerState.phase);
+  const [isRunning, setIsRunning] = useState<boolean>(initialTimerState.isRunning);
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(initialTimerState.remainingSeconds);
+  const [totalSecondsForPhase, setTotalSecondsForPhase] = useState<number>(initialTimerState.totalSecondsForPhase);
   const [actualSpeechElapsed, setActualSpeechElapsed] = useState(0);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  const [isOvertime, setIsOvertime] = useState(false);
-  const [overtimeSeconds, setOvertimeSeconds] = useState(0);
+  const [isOvertime, setIsOvertime] = useState<boolean>(initialTimerState.isOvertime);
+  const [overtimeSeconds, setOvertimeSeconds] = useState<number>(initialTimerState.overtimeSeconds);
 
   // Time tracking refs to avoid drift
-  const startTimeRef = useRef<string>('');
-  const speechStartTimeRef = useRef<number | null>(null);
-  const phaseEndTimestampRef = useRef<number | null>(null);
-  const overtimeStartTimestampRef = useRef<number | null>(null);
-  const pausedTimeRemainingRef = useRef<number>(remainingSeconds);
+  const startTimeRef = useRef<string>(
+    activeStation?.timerStartTime ? new Date(activeStation.timerStartTime).toISOString() : ''
+  );
+  const speechStartTimeRef = useRef<number | null>(
+    activeStation?.timerStartTime || null
+  );
+  const phaseEndTimestampRef = useRef<number | null>(
+    activeStation?.timerEndsAt || null
+  );
+  const overtimeStartTimestampRef = useRef<number | null>(
+    initialTimerState.isOvertime
+      ? (activeStation?.timerEndsAt || getServerNow() - initialTimerState.overtimeSeconds * 1000)
+      : null
+  );
+  const pausedTimeRemainingRef = useRef<number>(initialTimerState.pausedRemaining);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastTickedSecondRef = useRef<number | null>(null);
-  const warningBuzzerPlayedRef = useRef<boolean>(false);
+  const warningBuzzerPlayedRef = useRef<boolean>(
+    Boolean(
+      activeStation?.buzzerPlayed ||
+      (initialTimerState.phase === 'speech' && initialTimerState.remainingSeconds <= warningTimeSeconds)
+    )
+  );
+
+  // Track last handled station state so local actions don't get re-triggered by their own SSE echo
+  const lastHandledStationStateRef = useRef<{
+    startTime?: number | null;
+    status?: string;
+    mode?: string;
+    endsAt?: number | null;
+    isTimerRunning?: boolean;
+    activeStationId?: string;
+  }>({});
 
   // Synchronize phase with parent
   useEffect(() => {
@@ -137,27 +201,30 @@ export const Timer: React.FC<TimerProps> = ({
   }, [clearIntervalSafe, setOnTimerStartPause, setOnTimerStop, setOnTimerReset]);
 
   // Helper for overtime ticker (counts UP after limit is reached)
-  const startOvertimeTicker = useCallback(() => {
-    clearIntervalSafe();
-    const overStart = getServerNow();
-    overtimeStartTimestampRef.current = overStart;
+  const startOvertimeTicker = useCallback(
+    (customOverStartMs?: number) => {
+      clearIntervalSafe();
+      const overStart = customOverStartMs ?? overtimeStartTimestampRef.current ?? getServerNow();
+      overtimeStartTimestampRef.current = overStart;
 
-    timerIntervalRef.current = setInterval(() => {
-      if (!overtimeStartTimestampRef.current) return;
-      const elapsed = Math.floor((getServerNow() - overtimeStartTimestampRef.current) / 1000);
-      setOvertimeSeconds(elapsed);
-    }, 250);
-  }, [clearIntervalSafe]);
+      timerIntervalRef.current = setInterval(() => {
+        if (!overtimeStartTimestampRef.current) return;
+        const elapsed = Math.floor((getServerNow() - overtimeStartTimestampRef.current) / 1000);
+        setOvertimeSeconds(elapsed);
+      }, 250);
+    },
+    [clearIntervalSafe]
+  );
 
   // Ref to hold handleTransitionToSpeech to break circular dependency
   const transitionToSpeechRef = useRef<() => void>(() => {});
 
   // Helper for starting countdown ticker
   const startTicker = useCallback(
-    (targetDurationSeconds: number, tickerPhase: 'prep' | 'speech') => {
+    (targetDurationSeconds: number, tickerPhase: 'prep' | 'speech', customEndMs?: number) => {
       clearIntervalSafe();
       const now = getServerNow();
-      phaseEndTimestampRef.current = now + targetDurationSeconds * 1000;
+      phaseEndTimestampRef.current = customEndMs ?? (now + targetDurationSeconds * 1000);
       lastTickedSecondRef.current = null;
 
       timerIntervalRef.current = setInterval(() => {
@@ -208,6 +275,7 @@ export const Timer: React.FC<TimerProps> = ({
             setIsOvertime(true);
             setIsRunning(true);
             setRemainingSeconds(0);
+            const timeUpEndsAt = phaseEndTimestampRef.current || getServerNow();
             if (activeStationId && activeStationId !== 'all') {
               // sendStationTimerAction handles local zero-delay station-scoped buzzer and scoped server broadcast
               sendStationTimerAction(activeStationId, { action: 'time_up', phase: 'speech', remainingSeconds: 0 }).catch(() => {});
@@ -217,12 +285,26 @@ export const Timer: React.FC<TimerProps> = ({
               }
               sendTimerAction({ action: 'time_up', round: roundName, phase: 'speech' });
             }
-            startOvertimeTicker();
+            startOvertimeTicker(timeUpEndsAt);
           }
         }
       }, 100);
     },
-    [clearIntervalSafe, buzzerEnabled, triggerBuzzer, triggerWarningBuzzer, playCurrentPrepBuzzer, playCurrentWarningBuzzer, warningBuzzerEnabled, warningTimeSeconds, roundName, sendTimerAction, sendStationTimerAction, activeStationId, startOvertimeTicker]
+    [
+      clearIntervalSafe,
+      buzzerEnabled,
+      triggerBuzzer,
+      triggerWarningBuzzer,
+      playCurrentPrepBuzzer,
+      playCurrentWarningBuzzer,
+      warningBuzzerEnabled,
+      warningTimeSeconds,
+      roundName,
+      sendTimerAction,
+      sendStationTimerAction,
+      activeStationId,
+      startOvertimeTicker,
+    ]
   );
 
   // Transition to speech phase
@@ -233,16 +315,28 @@ export const Timer: React.FC<TimerProps> = ({
     playCurrentPrepBuzzer();
     warningBuzzerPlayedRef.current = false;
 
+    const now = getServerNow();
+    speechStartTimeRef.current = now;
+    const endsAt = now + speechDurationSeconds * 1000;
+
+    lastHandledStationStateRef.current = {
+      startTime: now,
+      status: 'running',
+      mode: 'speech',
+      endsAt,
+      isTimerRunning: true,
+      activeStationId,
+    };
+
     setPhase('speech');
     setTotalSecondsForPhase(speechDurationSeconds);
     setRemainingSeconds(speechDurationSeconds);
     setIsRunning(true);
     setIsOvertime(false);
     setOvertimeSeconds(0);
-    speechStartTimeRef.current = getServerNow();
 
     if (!startTimeRef.current) {
-      startTimeRef.current = new Date().toISOString();
+      startTimeRef.current = new Date(now).toISOString();
     }
 
     if (activeStationId && activeStationId !== 'all') {
@@ -262,8 +356,18 @@ export const Timer: React.FC<TimerProps> = ({
       });
     }
 
-    startTicker(speechDurationSeconds, 'speech');
-  }, [clearIntervalSafe, speechDurationSeconds, activeStationId, sendStationTimerAction, sendTimerAction, roundName, startTicker, playCurrentPrepBuzzer, unlockSound]);
+    startTicker(speechDurationSeconds, 'speech', endsAt);
+  }, [
+    clearIntervalSafe,
+    speechDurationSeconds,
+    activeStationId,
+    sendStationTimerAction,
+    sendTimerAction,
+    roundName,
+    startTicker,
+    playCurrentPrepBuzzer,
+    unlockSound,
+  ]);
 
   useEffect(() => {
     transitionToSpeechRef.current = handleTransitionToSpeech;
@@ -283,6 +387,15 @@ export const Timer: React.FC<TimerProps> = ({
       const startedAt = getServerNow();
       startTimeRef.current = new Date(startedAt).toISOString();
       if (hasPrepPhase) {
+        const endsAt = startedAt + prepDurationSeconds * 1000;
+        lastHandledStationStateRef.current = {
+          startTime: startedAt,
+          status: 'running',
+          mode: 'prep',
+          endsAt,
+          isTimerRunning: true,
+          activeStationId,
+        };
         setPhase('prep');
         setTotalSecondsForPhase(prepDurationSeconds);
         setRemainingSeconds(prepDurationSeconds);
@@ -294,6 +407,7 @@ export const Timer: React.FC<TimerProps> = ({
             totalSeconds: prepDurationSeconds,
             remainingSeconds: prepDurationSeconds,
             startedAt,
+            endsAt,
           }).catch(() => {});
         } else {
           sendTimerAction({
@@ -303,10 +417,20 @@ export const Timer: React.FC<TimerProps> = ({
             remainingSeconds: prepDurationSeconds,
             round: roundName,
             startedAt,
+            endsAt,
           });
         }
-        startTicker(prepDurationSeconds, 'prep');
+        startTicker(prepDurationSeconds, 'prep', endsAt);
       } else {
+        const endsAt = startedAt + speechDurationSeconds * 1000;
+        lastHandledStationStateRef.current = {
+          startTime: startedAt,
+          status: 'running',
+          mode: 'speech',
+          endsAt,
+          isTimerRunning: true,
+          activeStationId,
+        };
         setPhase('speech');
         speechStartTimeRef.current = startedAt;
         setTotalSecondsForPhase(speechDurationSeconds);
@@ -319,6 +443,7 @@ export const Timer: React.FC<TimerProps> = ({
             totalSeconds: speechDurationSeconds,
             remainingSeconds: speechDurationSeconds,
             startedAt,
+            endsAt,
           }).catch(() => {});
         } else {
           sendTimerAction({
@@ -328,35 +453,63 @@ export const Timer: React.FC<TimerProps> = ({
             remainingSeconds: speechDurationSeconds,
             round: roundName,
             startedAt,
+            endsAt,
           });
         }
-        startTicker(speechDurationSeconds, 'speech');
+        startTicker(speechDurationSeconds, 'speech', endsAt);
       }
     } else if (phase === 'prep' || phase === 'speech') {
       // Resume from pause
       const startedAt = getServerNow();
+      const rem = pausedTimeRemainingRef.current;
+      const endsAt = startedAt + rem * 1000;
+      lastHandledStationStateRef.current = {
+        startTime: startedAt,
+        status: 'running',
+        mode: phase,
+        endsAt,
+        isTimerRunning: true,
+        activeStationId,
+      };
       setIsRunning(true);
       if (activeStationId && activeStationId !== 'all') {
         sendStationTimerAction(activeStationId, {
           action: 'start',
           phase,
           totalSeconds: totalSecondsForPhase,
-          remainingSeconds: pausedTimeRemainingRef.current,
+          remainingSeconds: rem,
           startedAt,
+          endsAt,
         }).catch(() => {});
       } else {
         sendTimerAction({
           action: 'start',
           phase,
           totalSeconds: totalSecondsForPhase,
-          remainingSeconds: pausedTimeRemainingRef.current,
+          remainingSeconds: rem,
           round: roundName,
           startedAt,
+          endsAt,
         });
       }
-      startTicker(pausedTimeRemainingRef.current, phase as 'prep' | 'speech');
+      startTicker(rem, phase as 'prep' | 'speech', endsAt);
     }
-  }, [canStart, cannotStartReason, hasPrepPhase, isRunning, phase, prepDurationSeconds, speechDurationSeconds, startTicker, unlockSound, sendTimerAction, sendStationTimerAction, activeStationId, roundName, totalSecondsForPhase]);
+  }, [
+    canStart,
+    cannotStartReason,
+    hasPrepPhase,
+    isRunning,
+    phase,
+    prepDurationSeconds,
+    speechDurationSeconds,
+    startTicker,
+    unlockSound,
+    sendTimerAction,
+    sendStationTimerAction,
+    activeStationId,
+    roundName,
+    totalSecondsForPhase,
+  ]);
 
   // PAUSE action
   const handlePause = useCallback(() => {
@@ -364,6 +517,12 @@ export const Timer: React.FC<TimerProps> = ({
     clearIntervalSafe();
     setIsRunning(false);
     pausedTimeRemainingRef.current = remainingSeconds;
+    lastHandledStationStateRef.current = {
+      status: 'paused',
+      mode: phase,
+      isTimerRunning: false,
+      activeStationId,
+    };
     if (activeStationId && activeStationId !== 'all') {
       sendStationTimerAction(activeStationId, {
         action: 'pause',
@@ -401,7 +560,12 @@ export const Timer: React.FC<TimerProps> = ({
     clearIntervalSafe();
     setIsRunning(false);
     setPhase('stopped');
-    // Deliberately no buzzer sound on manual stop
+    lastHandledStationStateRef.current = {
+      status: 'stopped',
+      mode: 'stopped',
+      isTimerRunning: false,
+      activeStationId,
+    };
 
     if (activeStationId && activeStationId !== 'all') {
       sendStationTimerAction(activeStationId, {
@@ -436,7 +600,21 @@ export const Timer: React.FC<TimerProps> = ({
       startTime: startTimeRef.current || new Date().toISOString(),
       endTime,
     });
-  }, [phase, clearIntervalSafe, speechDurationSeconds, remainingSeconds, isOvertime, overtimeSeconds, onFinish, hasPrepPhase, prepDurationSeconds, sendTimerAction, sendStationTimerAction, activeStationId, roundName]);
+  }, [
+    phase,
+    clearIntervalSafe,
+    speechDurationSeconds,
+    remainingSeconds,
+    isOvertime,
+    overtimeSeconds,
+    onFinish,
+    hasPrepPhase,
+    prepDurationSeconds,
+    sendTimerAction,
+    sendStationTimerAction,
+    activeStationId,
+    roundName,
+  ]);
 
   // RESET action
   const executeReset = useCallback(() => {
@@ -453,6 +631,13 @@ export const Timer: React.FC<TimerProps> = ({
     setActualSpeechElapsed(0);
     speechStartTimeRef.current = null;
     setShowResetConfirm(false);
+    lastHandledStationStateRef.current = {
+      status: 'idle',
+      mode: 'idle',
+      isTimerRunning: false,
+      startTime: null,
+      activeStationId,
+    };
     if (activeStationId && activeStationId !== 'all') {
       sendStationTimerAction(activeStationId, {
         action: 'reset',
@@ -467,7 +652,125 @@ export const Timer: React.FC<TimerProps> = ({
         round: roundName,
       });
     }
-  }, [clearIntervalSafe, hasPrepPhase, prepDurationSeconds, speechDurationSeconds, sendTimerAction, sendStationTimerAction, activeStationId, roundName]);
+  }, [
+    clearIntervalSafe,
+    hasPrepPhase,
+    prepDurationSeconds,
+    speechDurationSeconds,
+    sendTimerAction,
+    sendStationTimerAction,
+    activeStationId,
+    roundName,
+  ]);
+
+  // When active participant changes and timer is not currently running, cleanly reset timer to fresh idle state
+  const prevParticipantNameRef = useRef<string | undefined>(participantName);
+  useEffect(() => {
+    if (participantName && prevParticipantNameRef.current && participantName !== prevParticipantNameRef.current) {
+      if (!isRunning) {
+        executeReset();
+      }
+    }
+    prevParticipantNameRef.current = participantName;
+  }, [participantName, isRunning, executeReset]);
+
+  // Rehydrate & synchronize with station state whenever station updates or component mounts
+  useEffect(() => {
+    if (!activeStation || !isStationMatchingRound) return;
+
+    const stationStatus = activeStation.timerStatus || (activeStation.isTimerRunning ? 'running' : 'idle');
+    const stationMode = activeStation.timerMode || 'idle';
+    const stationIsRunning = Boolean(activeStation.isTimerRunning || stationStatus === 'running');
+    const stationStartTime = activeStation.timerStartTime || activeStation.timerStartedAt;
+    const stationEndsAt = activeStation.timerEndsAt;
+
+    const last = lastHandledStationStateRef.current;
+    const isStationChanged = last.activeStationId !== activeStationId;
+    const hasExternalChange =
+      isStationChanged ||
+      last.status === undefined ||
+      stationStatus !== last.status ||
+      stationMode !== last.mode ||
+      Boolean(stationIsRunning) !== Boolean(last.isTimerRunning) ||
+      (stationStartTime && stationStartTime !== last.startTime);
+
+    if (!hasExternalChange) return;
+
+    lastHandledStationStateRef.current = {
+      startTime: stationStartTime,
+      status: stationStatus,
+      mode: stationMode,
+      endsAt: stationEndsAt,
+      isTimerRunning: stationIsRunning,
+      activeStationId,
+    };
+
+    if (stationIsRunning) {
+      const computed = computeStationTimer(activeStation, getServerNow());
+      const effectivePhase: TimerPhase =
+        computed.phase === 'time_up' ? 'speech' : (computed.phase as TimerPhase);
+
+      setPhase(effectivePhase);
+      setIsRunning(true);
+      setRemainingSeconds(computed.remainingSeconds);
+      setTotalSecondsForPhase(computed.durationSeconds);
+      setIsOvertime(computed.isOvertime);
+      setOvertimeSeconds(computed.overtimeSeconds);
+
+      if (computed.phase === 'speech' && computed.remainingSeconds <= warningTimeSeconds) {
+        warningBuzzerPlayedRef.current = true;
+      }
+
+      if (stationStartTime) {
+        startTimeRef.current = new Date(stationStartTime).toISOString();
+        if (effectivePhase === 'speech') {
+          speechStartTimeRef.current = stationStartTime;
+        }
+      }
+
+      if (computed.isOvertime) {
+        startOvertimeTicker(stationEndsAt || (getServerNow() - computed.overtimeSeconds * 1000));
+      } else if (effectivePhase === 'prep' || effectivePhase === 'speech') {
+        startTicker(
+          computed.remainingSeconds,
+          effectivePhase,
+          stationEndsAt || (getServerNow() + computed.remainingSeconds * 1000)
+        );
+      }
+    } else if (stationStatus === 'paused') {
+      const computed = computeStationTimer(activeStation, getServerNow());
+      clearIntervalSafe();
+      setIsRunning(false);
+      setPhase(computed.phase as TimerPhase);
+      setRemainingSeconds(computed.remainingSeconds);
+      setTotalSecondsForPhase(computed.durationSeconds);
+      pausedTimeRemainingRef.current = computed.remainingSeconds;
+    } else if (stationStatus === 'stopped') {
+      clearIntervalSafe();
+      setIsRunning(false);
+      setPhase('stopped');
+    } else if (stationStatus === 'idle') {
+      clearIntervalSafe();
+      setIsRunning(false);
+      setPhase('idle');
+      setIsOvertime(false);
+      setOvertimeSeconds(0);
+      const defSecs = hasPrepPhase ? prepDurationSeconds : speechDurationSeconds;
+      setRemainingSeconds(defSecs);
+      setTotalSecondsForPhase(defSecs);
+    }
+  }, [
+    activeStation,
+    activeStationId,
+    isStationMatchingRound,
+    hasPrepPhase,
+    prepDurationSeconds,
+    speechDurationSeconds,
+    warningTimeSeconds,
+    startTicker,
+    startOvertimeTicker,
+    clearIntervalSafe,
+  ]);
 
   // Keyboard shortcut binding
   useEffect(() => {

@@ -390,9 +390,11 @@ export const ProjectorDisplay: React.FC = () => {
 
   // STRICT STATION ISOLATION: Default active topics for this station
   const stationDefaultWheelTopics = useMemo(() => {
-    if (!db?.topics) return [];
-    const count = db?.settings?.round2?.activeWheelTopicCount || 20;
+    if (!db?.topics || db.topics.length === 0) return [];
+    const count = db?.settings?.round2?.activeWheelTopicCount ?? 20;
+    const reuseAllowed = db?.settings?.round2?.topicReuseAllowed ?? false;
 
+    let stationPool: Topic[] = [];
     if (selectedStationId) {
       const station = db.stations?.[selectedStationId];
       const stationName = station?.name;
@@ -401,21 +403,50 @@ export const ProjectorDisplay: React.FC = () => {
         (t) => t.stationId === selectedStationId || (stationName && t.stationId === stationName)
       );
       if (dedicated.length > 0) {
-        const available = dedicated.filter((t) => t.status === 'available');
-        return (available.length > 0 ? available : dedicated).slice(0, count);
+        stationPool = dedicated;
+      } else {
+        // Universal topics (excluding other stations' topics)
+        const otherStationTopics = db.topics.filter(
+          (t) => t.stationId && t.stationId !== 'all' && t.stationId !== selectedStationId && t.stationId !== stationName
+        );
+        stationPool = db.topics.filter((t) => !otherStationTopics.includes(t));
       }
-      // Universal topics (excluding other stations' topics)
-      const otherStationTopics = db.topics.filter(
-        (t) => t.stationId && t.stationId !== 'all' && t.stationId !== selectedStationId && t.stationId !== stationName
-      );
-      const universal = db.topics.filter((t) => !otherStationTopics.includes(t));
-      const available = universal.filter((t) => t.status === 'available');
-      return (available.length > 0 ? available : universal).slice(0, count);
+    } else {
+      stationPool = db.topics;
     }
 
-    const available = db.topics.filter((t) => t.status === 'available');
-    return (available.length > 0 ? available : db.topics).slice(0, count);
-  }, [db?.topics, db?.settings?.round2?.activeWheelTopicCount, selectedStationId, db?.stations]);
+    if (stationPool.length === 0) {
+      stationPool = db.topics;
+    }
+
+    const available = reuseAllowed
+      ? [...stationPool]
+      : stationPool.filter((t) => t && t.status === 'available');
+
+    const result: Topic[] = [...available];
+
+    // 1. If not enough available, pad with other topics from stationPool
+    if (result.length < count) {
+      for (const t of stationPool) {
+        if (result.length >= count) break;
+        if (!result.some((r) => r.id === t.id)) {
+          result.push(t);
+        }
+      }
+    }
+
+    // 2. If still less than count, pad from general db.topics pool
+    if (result.length < count) {
+      for (const t of db.topics) {
+        if (result.length >= count) break;
+        if (!result.some((r) => r.id === t.id)) {
+          result.push(t);
+        }
+      }
+    }
+
+    return result.filter(Boolean).slice(0, count);
+  }, [db?.topics, db?.settings?.round2?.activeWheelTopicCount, db?.settings?.round2?.topicReuseAllowed, selectedStationId, db?.stations]);
 
   // The topics currently rendered on the projector wheel
   const activeTopics = useMemo(() => {

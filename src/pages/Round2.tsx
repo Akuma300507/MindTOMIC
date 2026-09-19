@@ -100,16 +100,17 @@ export const Round2: React.FC = () => {
   }, [wheelFontSize, updateSettings, db?.settings?.round2]);
 
   // Round 1 qualification workflow:
-  // Contestants who are qualified in Round 1 advance to Round 2.
-  // If no one is marked qualified yet, allow station participants so round can still be operated.
+  // Contestants who are qualified in Round 1 AND checked in advance to Round 2.
+  // If no one is marked qualified yet, allow checked-in station participants so round can still be operated.
   const round1Qualifiers = useMemo(() => {
-    return (db?.participants || []).filter((p) => p.round1Qualified === 'qualified');
+    return (db?.participants || []).filter((p) => p.round1Qualified === 'qualified' && isParticipantCheckedIn(p));
   }, [db?.participants]);
 
   const stationParticipants = useMemo(() => {
     if (!db?.participants) return [];
-    if (!currentStationId || currentStationId === 'all') return db.participants;
-    return db.participants.filter((p) => p.stationId === currentStationId);
+    const pool = db.participants.filter((p) => isParticipantCheckedIn(p));
+    if (!currentStationId || currentStationId === 'all') return pool;
+    return pool.filter((p) => p.stationId === currentStationId);
   }, [db?.participants, currentStationId]);
 
   const eligibleRound2Participants = useMemo(() => {
@@ -168,6 +169,15 @@ export const Round2: React.FC = () => {
 
   // Auto-select first station-eligible pending Round 2 contestant
   useEffect(() => {
+    // If current station has an assigned or actively staged participant, preserve that contestant
+    if (currentStation?.activeParticipantId) {
+      const staged = db?.participants?.find((p) => p.id === currentStation.activeParticipantId);
+      if (staged && activeParticipant?.id !== staged.id) {
+        setActiveParticipant(staged);
+        return;
+      }
+    }
+
     if (activeParticipant) {
       const isAlreadyValid = stationEligibleRound2Participants.some((p) => p.id === activeParticipant.id);
       if (isAlreadyValid) return;
@@ -181,6 +191,7 @@ export const Round2: React.FC = () => {
       setActiveParticipant(null);
     }
   }, [
+    currentStation?.activeParticipantId,
     pendingRound2Participants,
     completedRound2Participants,
     stationEligibleRound2Participants,
@@ -220,15 +231,20 @@ export const Round2: React.FC = () => {
   const warningTimeSeconds = db?.settings?.round2?.warningTimeSeconds ?? 30;
   const reuseAllowed = db?.settings?.round2?.topicReuseAllowed ?? false;
 
-  // Heat slot index within this station's eligible Round 2 roster
+  // Heat slot index within this station for Round 2:
+  // Dynamically determined by turn order (number of completed Round 2 contestants at this station),
+  // or the contestant's locked round2SlotIndex if already assigned/completed.
   const slotIndex = useMemo(() => {
     if (!activeParticipant) return 0;
-    if (typeof activeParticipant.slotIndex === 'number' && activeParticipant.slotIndex >= 0) {
-      return activeParticipant.slotIndex;
+    if (typeof activeParticipant.round2SlotIndex === 'number' && activeParticipant.round2SlotIndex >= 0) {
+      return activeParticipant.round2SlotIndex;
     }
-    const idx = stationEligibleRound2Participants.findIndex((p) => p.id === activeParticipant.id);
-    return idx >= 0 ? idx : 0;
-  }, [stationEligibleRound2Participants, activeParticipant]);
+    const r2Result = db?.round2Results?.find((r) => r.participantId === activeParticipant.id);
+    if (typeof r2Result?.slotIndex === 'number' && r2Result.slotIndex >= 0) {
+      return r2Result.slotIndex;
+    }
+    return completedRound2Participants.length;
+  }, [activeParticipant, db?.round2Results, completedRound2Participants.length]);
 
   // Sync winningTopic if currentStation already has a selectedTopic
   useEffect(() => {
@@ -260,24 +276,37 @@ export const Round2: React.FC = () => {
       ? [...topicsPool]
       : topicsPool.filter((t) => t && t.status === 'available');
 
-    if (available.length === 0) {
-      return [...topicsPool].filter(Boolean).slice(0, wheelCount);
+    const result: Topic[] = [...available];
+
+    if (result.length < wheelCount) {
+      for (const t of topicsPool) {
+        if (result.length >= wheelCount) break;
+        if (!result.some((a) => a.id === t.id)) {
+          result.push(t);
+        }
+      }
     }
 
-    if (available.length < wheelCount && topicsPool.length >= wheelCount) {
-      const needed = wheelCount - available.length;
-      const extras = topicsPool.filter((t) => t && !available.some((a) => a.id === t.id)).slice(0, needed);
-      return [...available, ...extras].filter(Boolean);
+    if (result.length < wheelCount && allTopicsPool && allTopicsPool.length > 0) {
+      for (const t of allTopicsPool) {
+        if (result.length >= wheelCount) break;
+        if (!result.some((a) => a.id === t.id)) {
+          result.push(t);
+        }
+      }
     }
 
-    return available.filter(Boolean).slice(0, wheelCount);
-  }, [topicsPool, wheelCount, reuseAllowed]);
+    return result.filter(Boolean).slice(0, wheelCount);
+  }, [topicsPool, allTopicsPool, wheelCount, reuseAllowed]);
 
-  // Actual topics rendered on the wheel: locked takes priority during/after spin
+  // Actual topics rendered on the wheel: locked takes priority during/after spin, then station state
   const activeWheelTopics = useMemo(() => {
-    const list = (lockedWheelTopics && lockedWheelTopics.length > 0) ? lockedWheelTopics : dynamicWheelTopics;
-    return (list || []).filter(Boolean);
-  }, [lockedWheelTopics, dynamicWheelTopics]);
+    if (lockedWheelTopics && lockedWheelTopics.length > 0) return lockedWheelTopics.filter(Boolean);
+    if (currentStation?.activeWheelTopics && currentStation.activeWheelTopics.length > 0) {
+      return currentStation.activeWheelTopics.filter(Boolean);
+    }
+    return (dynamicWheelTopics || []).filter(Boolean);
+  }, [lockedWheelTopics, currentStation?.activeWheelTopics, dynamicWheelTopics]);
 
   // Color palette for slices
   const sliceColors = useMemo(
@@ -478,20 +507,13 @@ export const Round2: React.FC = () => {
         startTime: data.startTime,
         endTime: data.endTime,
         status: data.status,
+        slotIndex: slotIndex,
       };
 
       const saved = await saveRound2Result(resultPayload);
       setLastSavedResult(saved);
-
-      // Auto-advance to the next pending contestant
-      const nextPendingList = pendingRound2Participants.filter((p) => p.id !== activeParticipant.id);
-      if (nextPendingList.length > 0) {
-        const nextParticipant = nextPendingList[0];
-        setActiveParticipant(nextParticipant);
-        if (currentStationId && currentStationId !== 'all') {
-          setStationParticipant(currentStationId, nextParticipant.id).catch(() => {});
-        }
-      }
+      // Retain the current participant and winning topic on screen after stopping the timer.
+      // Do NOT auto-advance; the operator will explicitly pick the next contestant when ready.
 
       // Topic has now been used for speech; replace it on the wheel with the next unused topic
       const pool = (db?.topics || topicsPool || []).filter(Boolean);
@@ -711,7 +733,7 @@ export const Round2: React.FC = () => {
               Contestant:
             </span>
             <select
-              value={!isCurrentParticipantCompleted ? activeParticipant?.id || '' : ''}
+              value={activeParticipant?.id || ''}
               onChange={(e) => {
                 const p =
                   filteredPendingParticipants.find((item) => item.id === e.target.value) ||
@@ -727,24 +749,36 @@ export const Round2: React.FC = () => {
               }}
               className="bg-transparent text-white font-bold font-['Outfit'] focus:outline-none max-w-[210px] truncate cursor-pointer"
             >
-              {filteredPendingParticipants.length === 0 ? (
-                <option value="" disabled className="bg-slate-900 text-emerald-400">
+              {activeParticipant && isCurrentParticipantCompleted && (
+                <>
+                  <option value={activeParticipant.id} className="bg-slate-900 text-emerald-300 font-bold">
+                    #{activeParticipant.participantNumber} — {activeParticipant.name} (Completed) ✓
+                  </option>
+                  <option disabled className="bg-slate-950 text-slate-500">
+                    ── Select Next Contestant ({filteredPendingParticipants.length} remaining) ──
+                  </option>
+                </>
+              )}
+              {filteredPendingParticipants.length === 0 && (!activeParticipant || !isCurrentParticipantCompleted) ? (
+                <option value="" disabled className="bg-slate-900 text-amber-400">
                   {contestantSearch.trim()
-                    ? `No contestants match "${contestantSearch}"`
+                    ? `No checked-in contestants match "${contestantSearch}"`
                     : completedRound2Participants.length > 0
                     ? `All eligible contestants completed (${completedRound2Participants.length})`
-                    : `No eligible contestants in ${currentStation?.name || 'this station'}`}
+                    : `No checked-in eligible contestants in ${currentStation?.name || 'this station'}`}
                 </option>
               ) : (
                 <>
-                  <option value="" disabled className="bg-slate-900 text-slate-400">
-                    Select Contestant ({filteredPendingParticipants.length} remaining)
-                  </option>
-                  {filteredPendingParticipants.map((p, pIdx) => {
+                  {(!activeParticipant || !isCurrentParticipantCompleted) && (
+                    <option value="" disabled className="bg-slate-900 text-slate-400">
+                      Select Contestant ({filteredPendingParticipants.length} remaining)
+                    </option>
+                  )}
+                  {filteredPendingParticipants.map((p) => {
                     const isR1Qual = p.round1Qualified === 'qualified';
                     return (
                       <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                        #{p.participantNumber} — {p.name} (Heat #{pIdx + 1}) {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
+                        #{p.participantNumber} — {p.name} {isR1Qual ? '★ [R1 QUALIFIED]' : ''}
                       </option>
                     );
                   })}
@@ -762,12 +796,16 @@ export const Round2: React.FC = () => {
               {pendingRound2Participants.length} Available
             </span>
 
-            {activeParticipant && !isCurrentParticipantCompleted && (
+            {activeParticipant && (
               <span
-                className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-500/40 bg-purple-950/60 text-purple-300 text-[10px] font-mono font-bold"
-                title="Synchronized Heat Slot across all stations"
+                className={`hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-mono font-bold ${
+                  isCurrentParticipantCompleted
+                    ? 'border-emerald-500/40 bg-emerald-950/60 text-emerald-300'
+                    : 'border-purple-500/40 bg-purple-950/60 text-purple-300'
+                }`}
+                title={isCurrentParticipantCompleted ? `Heat #${slotIndex + 1} Completed` : 'Synchronized Heat Slot across all stations'}
               >
-                Heat #{slotIndex + 1}
+                {isCurrentParticipantCompleted ? `✓ Done (Heat #${slotIndex + 1})` : `Heat #${slotIndex + 1}`}
               </span>
             )}
           </div>
@@ -800,11 +838,19 @@ export const Round2: React.FC = () => {
                     : 'None completed (0)'
                   : `Completed (${completedRound2Participants.length})`}
               </option>
-              {filteredCompletedParticipants.map((p) => (
-                <option key={p.id} value={p.id} className="bg-slate-900 text-emerald-300">
-                  #{p.participantNumber} — {p.name} ✓
-                </option>
-              ))}
+              {filteredCompletedParticipants.map((p) => {
+                const compResult = db?.round2Results?.find((r) => r.participantId === p.id);
+                const compHeat = typeof p.round2SlotIndex === 'number'
+                  ? p.round2SlotIndex + 1
+                  : typeof compResult?.slotIndex === 'number'
+                  ? compResult.slotIndex + 1
+                  : null;
+                return (
+                  <option key={p.id} value={p.id} className="bg-slate-900 text-emerald-300">
+                    #{p.participantNumber} — {p.name} {compHeat ? `(Heat #${compHeat})` : ''} ✓
+                  </option>
+                );
+              })}
             </select>
             <span
               className={`hidden sm:inline-block px-2 py-0.5 rounded-full border text-[10px] font-bold font-mono ${

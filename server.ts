@@ -139,7 +139,7 @@ const defaultHistory: EventLog[] = [];
 function isParticipantCheckedIn(p?: Participant | null): boolean {
   if (!p) return false;
   if (p.checkedIn === false) return false;
-  if (p.status === 'absent' || p.status === 'eliminated' || p.status === 'disqualified') return false;
+  if (p.status === 'absent') return false;
   return Boolean(p.checkedIn === true || p.status === 'checked_in' || p.checkedInAt);
 }
 
@@ -1466,6 +1466,38 @@ app.post('/api/round2/spin-topic', (req: Request, res: Response) => {
 
 // ================= STATION API ROUTES =================
 
+// Helper to get initial wheel topics matching configured slice count
+function getInitialStationWheelTopics(stationId: string, stationName?: string): Topic[] {
+  if (!db || !db.topics || db.topics.length === 0) return [];
+  const wheelCount = db.settings?.round2?.activeWheelTopicCount || 20;
+  const reuseAllowed = db.settings?.round2?.topicReuseAllowed || false;
+
+  const stationTopics = db.topics.filter(
+    (t) => !t.stationId || t.stationId === 'all' || t.stationId === stationId || (stationName && t.stationId === stationName)
+  );
+  const pool = stationTopics.length > 0 ? stationTopics : db.topics;
+  const available = reuseAllowed ? [...pool] : pool.filter((t) => t.status === 'available');
+
+  const list: Topic[] = [...available];
+  if (list.length < wheelCount) {
+    for (const t of pool) {
+      if (list.length >= wheelCount) break;
+      if (!list.some((item) => item.id === t.id)) {
+        list.push(t);
+      }
+    }
+  }
+  if (list.length < wheelCount) {
+    for (const t of db.topics) {
+      if (list.length >= wheelCount) break;
+      if (!list.some((item) => item.id === t.id)) {
+        list.push(t);
+      }
+    }
+  }
+  return list.slice(0, wheelCount);
+}
+
 // Helper to get or create station
 function getStation(id: string): StationState {
   if (!db.stations) db.stations = {};
@@ -1499,6 +1531,15 @@ function getStation(id: string): StationState {
       }
     }
   }
+
+  // Pre-populate Round 2 wheel topics if station is in Round 2
+  if (
+    db.stations[id].currentRound === 2 &&
+    (!db.stations[id].activeWheelTopics || db.stations[id].activeWheelTopics.length === 0)
+  ) {
+    db.stations[id].activeWheelTopics = getInitialStationWheelTopics(id, db.stations[id].name);
+  }
+
   return db.stations[id];
 }
 
@@ -1873,6 +1914,9 @@ app.post('/api/event/stage-permission', (req: Request, res: Response) => {
       station.selectedTopicId = null;
       station.selectedTopic = null;
       station.wheelSpin = null;
+      if (roundNum === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length === 0)) {
+        station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
+      }
       station.timerMode = 'idle';
       station.timerTotalSeconds = roundDuration;
       station.timerRemainingSeconds = roundDuration;
@@ -1981,6 +2025,9 @@ app.post('/api/event/set-round', (req: Request, res: Response) => {
       station.selectedTopicId = null;
       station.selectedTopic = null;
       station.wheelSpin = null;
+      if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length === 0)) {
+        station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
+      }
       station.timerMode = 'idle';
       station.timerTotalSeconds = roundDuration;
       station.timerRemainingSeconds = roundDuration;
@@ -2054,6 +2101,9 @@ app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
   station.selectedTopicId = null;
   station.selectedTopic = null;
   station.wheelSpin = null;
+  if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length === 0)) {
+    station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
+  }
 
   const roundDuration =
     station.currentRound === 1
@@ -2112,9 +2162,26 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
     db.liveSync.activeParticipantId = targetParticipantId;
   }
 
-  // Reset current station item if contestant changes
-  station.selectedImageId = null;
-  station.selectedImage = null;
+  // Sync or reset current station item when contestant changes
+  let initialImage: EventImage | null = null;
+  const currentGlobalRound = (db.liveSync?.currentRound || station.currentRound || 1) as 1 | 2 | 3;
+  if (assignedParticipant && currentGlobalRound === 1 && db.settings.round1.synchronizedSlots !== false) {
+    const stResultsCount = db.round1Results.filter((r) => {
+      const p = db.participants.find((item) => item.id === r.participantId);
+      return p?.stationId === station.id || p?.round1StationId === station.id;
+    }).length;
+    const targetSlot = typeof (assignedParticipant as any).round1SlotIndex === 'number' && (assignedParticipant as any).round1SlotIndex >= 0
+      ? (assignedParticipant as any).round1SlotIndex
+      : stResultsCount;
+    const syncImageId = db.synchronizedSlots?.round1?.[targetSlot];
+    if (syncImageId) {
+      const foundImg = db.images.find((i) => i.id === syncImageId || i.imageId === syncImageId);
+      if (foundImg) initialImage = foundImg;
+    }
+  }
+
+  station.selectedImageId = initialImage?.id || null;
+  station.selectedImage = initialImage;
   station.selectedTopicId = null;
   station.selectedTopic = null;
   station.wheelSpin = null;
@@ -2233,13 +2300,12 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
 
   const targetParticipant = station.activeParticipant || (participantId ? db.participants.find((p) => p.id === participantId) : null);
 
-  // Determine slot index
+  // Determine slot index dynamically based on turn order
   let slotIndex = typeof reqSlotIndex === 'number' && reqSlotIndex >= 0 ? reqSlotIndex : -1;
   if (slotIndex === -1 && targetParticipant) {
-    const stParticipants = db.participants.filter(
-      (p) => p.stationId === station.id || p.round1StationId === station.id
-    );
-    slotIndex = stParticipants.findIndex((p) => p.id === targetParticipant.id);
+    if (typeof (targetParticipant as any).round1SlotIndex === 'number' && (targetParticipant as any).round1SlotIndex >= 0) {
+      slotIndex = (targetParticipant as any).round1SlotIndex;
+    }
   }
   if (slotIndex === -1) {
     slotIndex = db.round1Results.filter((r) => {
@@ -2294,6 +2360,7 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
     const p = db.participants.find((item) => item.id === station.activeParticipantId);
     if (p) {
       p.round1ImageId = chosen.imageId || chosen.name || chosen.id;
+      p.round1SlotIndex = slotIndex;
       p.slotIndex = slotIndex;
     }
   }
@@ -2358,13 +2425,12 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
 
   const targetParticipant = station.activeParticipant || (participantId ? db.participants.find((p) => p.id === participantId) : null);
 
-  // Determine slot index
+  // Determine slot index dynamically based on turn order
   let slotIndex = typeof reqSlotIndex === 'number' && reqSlotIndex >= 0 ? reqSlotIndex : -1;
   if (slotIndex === -1 && targetParticipant) {
-    const stParticipants = db.participants.filter(
-      (p) => p.stationId === station.id || p.round2StationId === station.id
-    );
-    slotIndex = stParticipants.findIndex((p) => p.id === targetParticipant.id);
+    if (typeof (targetParticipant as any).round2SlotIndex === 'number' && (targetParticipant as any).round2SlotIndex >= 0) {
+      slotIndex = (targetParticipant as any).round2SlotIndex;
+    }
   }
   if (slotIndex === -1) {
     slotIndex = db.round2Results.filter((r) => {
@@ -2441,6 +2507,7 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     const p = db.participants.find((item) => item.id === station.activeParticipantId);
     if (p) {
       p.round2TopicId = chosen.topicId || chosen.id;
+      p.round2SlotIndex = slotIndex;
       p.slotIndex = slotIndex;
     }
   }
@@ -3872,6 +3939,10 @@ app.post('/api/results/round1', (req: Request, res: Response) => {
     if (!result.mobile) result.mobile = p.mobile || p.phone || p.customData?.phone || '';
     p.round1Status = result.status;
     p.round1ImageId = result.imageId || result.imageName;
+    if (typeof result.slotIndex === 'number' && result.slotIndex >= 0) {
+      p.round1SlotIndex = result.slotIndex;
+      p.slotIndex = result.slotIndex;
+    }
     if (result.qualification) {
       p.round1Qualified = result.qualification;
       if (result.qualification === 'disqualified') p.status = 'eliminated';
@@ -3908,6 +3979,10 @@ app.post('/api/results/round2', (req: Request, res: Response) => {
     if (!result.mobile) result.mobile = p.mobile || p.phone || p.customData?.phone || '';
     p.round2Status = result.status;
     p.round2TopicId = result.topicId;
+    if (typeof result.slotIndex === 'number' && result.slotIndex >= 0) {
+      p.round2SlotIndex = result.slotIndex;
+      p.slotIndex = result.slotIndex;
+    }
     if (result.qualification) {
       p.round2Qualified = result.qualification;
       if (result.qualification === 'disqualified') p.status = 'eliminated';

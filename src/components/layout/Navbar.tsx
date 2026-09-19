@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Maximize2,
   Minimize2,
@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MindToMicLogo } from '../common/MindToMicLogo';
+import { computeStationTimer } from '../../lib/timerUtils';
+import { getServerNow } from '../../lib/timeSync';
 
 export const Navbar: React.FC = () => {
   const {
@@ -60,6 +62,23 @@ export const Navbar: React.FC = () => {
     (activeStation?.controllerDeviceId && activeStation.controllerDeviceId === deviceId)
   );
 
+  // Real-time zero-drift timer clock for active station
+  const [nowMs, setNowMs] = useState<number>(() => getServerNow());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowMs(getServerNow());
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
+
+  const currentStationState =
+    (currentStationId && currentStationId !== 'all' ? db?.stations?.[currentStationId] : null) || db?.liveSync;
+
+  const stationTimer = useMemo(() => {
+    if (!currentStationState) return null;
+    return computeStationTimer(currentStationState, nowMs);
+  }, [currentStationState, nowMs]);
+
   return (
     <>
       <header className="h-16 bg-slate-900/90 backdrop-blur-md border-b border-purple-900/30 px-3 md:px-6 flex items-center justify-between z-40 sticky top-0">
@@ -85,31 +104,89 @@ export const Navbar: React.FC = () => {
           </button>
         </div>
 
-        {/* Station Selector & Claim Status */}
-        <div className="flex items-center gap-2 bg-slate-950/80 border border-purple-900/40 px-2.5 py-1 rounded-xl text-xs">
-          <Radio className={`w-3.5 h-3.5 ${isControlling ? 'text-emerald-400' : 'text-purple-400'}`} />
-          <span className="text-slate-400 font-medium hidden md:inline">Station:</span>
-          <select
-            id="station-selector-dropdown"
-            value={currentStationId || ''}
-            onChange={(e) => handleStationChange(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-xs font-bold text-white rounded-lg px-2 py-1 focus:outline-none focus:border-purple-500"
-          >
-            {allStations.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} (R{s.currentRound})
-              </option>
-            ))}
-          </select>
-          <span
-            className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider hidden sm:inline ${
-              isControlling
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                : 'bg-slate-800 text-slate-400'
-            }`}
-          >
-            {isControlling ? 'Locked' : 'Available'}
-          </span>
+        {/* Center: Station Selector & Live Timer Badge */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Station Selector & Claim Status */}
+          <div className="flex items-center gap-2 bg-slate-950/80 border border-purple-900/40 px-2.5 py-1 rounded-xl text-xs">
+            <Radio className={`w-3.5 h-3.5 ${isControlling ? 'text-emerald-400' : 'text-purple-400'}`} />
+            <span className="text-slate-400 font-medium hidden md:inline">Station:</span>
+            <select
+              id="station-selector-dropdown"
+              value={currentStationId || ''}
+              onChange={(e) => handleStationChange(e.target.value)}
+              className="bg-slate-900 border border-slate-700 text-xs font-bold text-white rounded-lg px-2 py-1 focus:outline-none focus:border-purple-500"
+            >
+              {allStations.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} (R{s.currentRound})
+                </option>
+              ))}
+            </select>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider hidden sm:inline ${
+                isControlling
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              {isControlling ? 'Locked' : 'Available'}
+            </span>
+          </div>
+
+          {/* Active Station Live Timer Pill - Persists across all pages with 1-click return */}
+          {stationTimer && (stationTimer.isRunning || currentStationState?.timerStatus === 'paused') && (
+            <button
+              id="navbar-live-timer-pill"
+              onClick={() => {
+                const r = currentStationState?.currentRound || 1;
+                if (r === 1) setCurrentPage('round1');
+                else if (r === 2) setCurrentPage('round2');
+                else if (r === 3) setCurrentPage('round3');
+              }}
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer ${
+                stationTimer.isOvertime
+                  ? 'bg-rose-950/90 border-rose-500/60 text-rose-300 hover:bg-rose-900 animate-pulse shadow-rose-950/50'
+                  : stationTimer.isRunning
+                  ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900 shadow-emerald-950/50'
+                  : 'bg-amber-950/80 border-amber-500/50 text-amber-300 hover:bg-amber-900 shadow-amber-950/50'
+              }`}
+              title={`Active ${stationTimer.phase} timer on ${activeStation?.name || 'this station'}. Click to jump to Round ${currentStationState?.currentRound || 1} screen.`}
+            >
+              <span className="relative flex h-2 w-2">
+                {stationTimer.isRunning && (
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      stationTimer.isOvertime ? 'bg-rose-400' : 'bg-emerald-400'
+                    }`}
+                  />
+                )}
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    stationTimer.isOvertime
+                      ? 'bg-rose-500'
+                      : stationTimer.isRunning
+                      ? 'bg-emerald-500'
+                      : 'bg-amber-500'
+                  }`}
+                />
+              </span>
+              <span className="font-mono tracking-wider font-extrabold text-white text-xs">
+                {stationTimer.isOvertime ? stationTimer.formattedOvertime : stationTimer.formattedCountdown}
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider hidden sm:inline opacity-90">
+                {stationTimer.isOvertime
+                  ? 'Overtime'
+                  : stationTimer.phase === 'prep'
+                  ? 'Prep'
+                  : stationTimer.isRunning
+                  ? 'Speaking'
+                  : 'Paused'}
+              </span>
+              <span className="hidden md:inline text-[9px] bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700/50 text-slate-300">
+                R{currentStationState?.currentRound || 1} &rarr;
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Action Controls */}
