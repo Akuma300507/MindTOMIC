@@ -656,7 +656,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           stations: nextStations,
           liveSync: {
             ...prev.liveSync,
-            activeParticipantId: participantId,
             stationStates: nextStations,
           },
         };
@@ -677,38 +676,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     []
   );
-
-  // Synchronize active participant across station (Operator station role only)
-  useEffect(() => {
-    // Projector must NEVER auto-sync active participant to station
-    if (currentPage === 'projector') {
-      return;
-    }
-
-    if (!currentStationId || currentStationId === 'all') {
-      return;
-    }
-
-    const currentSt = db?.stations?.[currentStationId];
-
-    if (activeParticipant) {
-      // Only call API if station does NOT already have this participant staged
-      if (currentSt?.activeParticipantId !== activeParticipant.id) {
-        setStationParticipant(currentStationId, activeParticipant.id).catch(() => {});
-      }
-    } else if (!activeParticipant) {
-      // If there is no active contestant, ensure station state is cleared ONLY if currently staged
-      if (currentSt?.activeParticipantId || currentSt?.activeParticipant) {
-        setStationParticipant(currentStationId, null).catch(() => {});
-      }
-    }
-  }, [
-    activeParticipant?.id,
-    currentStationId,
-    currentPage,
-    db?.stations?.[currentStationId || '']?.activeParticipantId,
-    setStationParticipant,
-  ]);
 
   // Active Competition Stage derived from liveSync
   const currentEventRound: 1 | 2 | 3 = (db?.liveSync?.currentRound || 1) as 1 | 2 | 3;

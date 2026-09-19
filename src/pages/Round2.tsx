@@ -183,56 +183,20 @@ export const Round2: React.FC = () => {
     [currentStationId, setActiveParticipant, setStationParticipant]
   );
 
-  // Auto-select first station-eligible pending Round 2 contestant
+  // Keep activeParticipant synced strictly to current station's staged contestant
   useEffect(() => {
-    const stationChanged = lastStationIdRef.current !== currentStationId;
-    lastStationIdRef.current = currentStationId;
-
-    const stationActiveChanged =
-      currentStation?.activeParticipantId !== undefined &&
-      currentStation?.activeParticipantId !== lastStationActiveParticipantIdRef.current;
-    lastStationActiveParticipantIdRef.current = currentStation?.activeParticipantId;
-
-    // 1. If station has an assigned participant and either station changed or the station's assigned participant changed externally:
     if (currentStation?.activeParticipantId) {
       const staged = db?.participants?.find((p) => p.id === currentStation.activeParticipantId);
       if (staged) {
-        if (stationChanged || stationActiveChanged || !activeParticipant) {
-          setActiveParticipant(staged);
-          return;
-        }
+        lastStationActiveParticipantIdRef.current = staged.id;
+        setActiveParticipant(staged);
+        return;
       }
-    }
-
-    // 2. If activeParticipant is already valid for Round 2, preserve it!
-    if (activeParticipant) {
-      const isAlreadyValid =
-        stationEligibleRound2Participants.some((p) => p.id === activeParticipant.id) ||
-        (db?.participants || []).some((p) => p.id === activeParticipant.id);
-      if (isAlreadyValid) return;
-    }
-
-    // 3. Fallback to pending or completed
-    if (pendingRound2Participants.length > 0) {
-      lastStationActiveParticipantIdRef.current = pendingRound2Participants[0].id;
-      setActiveParticipant(pendingRound2Participants[0]);
-    } else if (completedRound2Participants.length > 0) {
-      lastStationActiveParticipantIdRef.current = completedRound2Participants[0].id;
-      setActiveParticipant(completedRound2Participants[0]);
-    } else if ((db?.participants || []).length === 0) {
+    } else {
       lastStationActiveParticipantIdRef.current = null;
       setActiveParticipant(null);
     }
-  }, [
-    currentStationId,
-    currentStation?.activeParticipantId,
-    pendingRound2Participants,
-    completedRound2Participants,
-    stationEligibleRound2Participants,
-    activeParticipant,
-    setActiveParticipant,
-    db?.participants,
-  ]);
+  }, [currentStation?.activeParticipantId, db?.participants, setActiveParticipant]);
 
   // Wheel state
   const [isSpinning, setIsSpinning] = useState(false);
@@ -770,7 +734,13 @@ export const Round2: React.FC = () => {
               value={activeParticipant?.id || ''}
               onChange={(e) => {
                 const targetId = e.target.value;
-                if (!targetId || targetId === activeParticipant?.id) return;
+                if (!targetId) return;
+                if (targetId === activeParticipant?.id) {
+                  if (currentStationId && currentStationId !== 'all' && currentStation?.activeParticipantId !== targetId) {
+                    setStationParticipant(currentStationId, targetId);
+                  }
+                  return;
+                }
                 const p =
                   filteredPendingParticipants.find((item) => item.id === targetId) ||
                   pendingRound2Participants.find((item) => item.id === targetId) ||

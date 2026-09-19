@@ -189,60 +189,20 @@ export const Round1: React.FC = () => {
     [currentStationId, setActiveParticipant, setStationParticipant]
   );
 
-  // Keep activeParticipant synced strictly to current station's participant pool, prioritizing pending contestants
+  // Keep activeParticipant synced strictly to current station's staged contestant
   useEffect(() => {
-    const stationChanged = lastStationIdRef.current !== currentStationId;
-    lastStationIdRef.current = currentStationId;
-
-    const stationActiveChanged =
-      currentStation?.activeParticipantId !== undefined &&
-      currentStation?.activeParticipantId !== lastStationActiveParticipantIdRef.current;
-    lastStationActiveParticipantIdRef.current = currentStation?.activeParticipantId;
-
-    // 1. If station has an assigned participant and either station changed or the station's assigned participant changed externally:
     if (currentStation?.activeParticipantId) {
       const staged = db?.participants?.find((p) => p.id === currentStation.activeParticipantId);
       if (staged) {
-        if (stationChanged || stationActiveChanged || !activeParticipant) {
-          setActiveParticipant(staged);
-          return;
-        }
+        lastStationActiveParticipantIdRef.current = staged.id;
+        setActiveParticipant(staged);
+        return;
       }
-    }
-
-    // 2. If activeParticipant is already valid for this station, preserve it!
-    if (activeParticipant) {
-      const existsInStation =
-        !currentStationId ||
-        currentStationId === 'all' ||
-        stationParticipants.some((p) => p.id === activeParticipant.id) ||
-        (db?.participants || []).some((p) => p.id === activeParticipant.id);
-      if (existsInStation) return;
-    }
-
-    // 3. Fallback: auto-select first available pending or completed candidate
-    const nextCandidates =
-      checkedInPendingStationParticipants.length > 0
-        ? checkedInPendingStationParticipants
-        : completedStationParticipants;
-
-    if (nextCandidates.length > 0) {
-      lastStationActiveParticipantIdRef.current = nextCandidates[0].id;
-      setActiveParticipant(nextCandidates[0]);
     } else {
       lastStationActiveParticipantIdRef.current = null;
       setActiveParticipant(null);
     }
-  }, [
-    currentStationId,
-    currentStation?.activeParticipantId,
-    stationParticipants,
-    checkedInPendingStationParticipants,
-    completedStationParticipants,
-    activeParticipant,
-    setActiveParticipant,
-    db?.participants,
-  ]);
+  }, [currentStation?.activeParticipantId, db?.participants, setActiveParticipant]);
 
   // Sync with currentStation assignedImage if already set
   useEffect(() => {
@@ -461,7 +421,13 @@ export const Round1: React.FC = () => {
               value={activeParticipant?.id || ''}
               onChange={(e) => {
                 const targetId = e.target.value;
-                if (!targetId || targetId === activeParticipant?.id) return;
+                if (!targetId) return;
+                if (targetId === activeParticipant?.id) {
+                  if (currentStationId && currentStationId !== 'all' && currentStation?.activeParticipantId !== targetId) {
+                    setStationParticipant(currentStationId, targetId);
+                  }
+                  return;
+                }
                 const p =
                   filteredPendingParticipants.find((item) => item.id === targetId) ||
                   pendingStationParticipants.find((item) => item.id === targetId) ||

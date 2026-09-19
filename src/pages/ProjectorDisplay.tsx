@@ -148,53 +148,27 @@ export const ProjectorDisplay: React.FC = () => {
   const currentStationState = db?.stations ? db.stations[selectedStationId] : null;
 
   // Find active participant for this station
+  // Find active participant for this station - strictly grounded in station state
   const activeParticipant = useMemo(() => {
-    let candidate: Participant | null = null;
-    if (currentStationState?.activeParticipantId && db?.participants) {
-      candidate = db.participants.find((p) => p.id === currentStationState.activeParticipantId) || null;
-    } else if (currentStationState?.activeParticipant) {
-      candidate =
+    if (!currentStationState) return null;
+    if (currentStationState.activeParticipantId && db?.participants) {
+      return (
+        db.participants.find((p) => p.id === currentStationState.activeParticipantId) ||
+        currentStationState.activeParticipant ||
+        null
+      );
+    }
+    if (currentStationState.activeParticipant) {
+      return (
         db?.participants?.find((p) => p.id === currentStationState.activeParticipant?.id) ||
-        currentStationState.activeParticipant;
+        currentStationState.activeParticipant
+      );
     }
-
-    // Direct Station Fallback:
-    // If the station has no explicitly staged participant in station state yet,
-    // find the participant allocated to this station so the projector view shows them!
-    if (!candidate && db?.participants && selectedStationId) {
-      candidate =
-        db.participants.find(
-          (p) =>
-            (p.stationId === selectedStationId ||
-              p.checkedInStationId === selectedStationId ||
-              (!p.stationId && (selectedStationId === 'station-a' || selectedStationId === allStations[0]?.id))) &&
-            isParticipantCheckedIn(p)
-        ) ||
-        db.participants.find(
-          (p) =>
-            p.stationId === selectedStationId ||
-            p.checkedInStationId === selectedStationId ||
-            (!p.stationId && (selectedStationId === 'station-a' || selectedStationId === allStations[0]?.id))
-        ) ||
-        null;
-    }
-
-    // If still not staged on station state, check app's active participant if matching station
-    if (!candidate && appActiveParticipant) {
-      if (!appActiveParticipant.stationId || appActiveParticipant.stationId === selectedStationId) {
-        candidate = appActiveParticipant;
-      }
-    }
-
-    return candidate;
+    return null;
   }, [
     currentStationState?.activeParticipantId,
-    currentStationState?.activeParticipant?.id,
     currentStationState?.activeParticipant,
     db?.participants,
-    selectedStationId,
-    allStations,
-    appActiveParticipant,
   ]);
 
   const eventName = db?.settings?.event?.name || 'MIND TO MIC';
@@ -308,11 +282,13 @@ export const ProjectorDisplay: React.FC = () => {
     }
   }, [selectedStationId, rotateStationImage]);
 
-  // Reset winning topic when station changes, or when active participant changes
+  // Reset winning topic when station changes, or when current round changes or topic is explicitly cleared
   useEffect(() => {
-    setProjectorWinningTopic(null);
-    setProjectorWheelTopics([]);
-  }, [selectedStationId, activeParticipant?.id, currentRound, currentStationState?.selectedTopicId]);
+    if (!currentStationState?.selectedTopicId) {
+      setProjectorWinningTopic(null);
+      setProjectorWheelTopics([]);
+    }
+  }, [selectedStationId, activeParticipant?.id, currentRound]);
 
   // Clean up animation on unmount
   useEffect(() => {

@@ -2144,7 +2144,7 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
 
   const targetParticipantId = assignedParticipant ? assignedParticipant.id : null;
 
-  // Idempotency: If already assigned to this participant, skip resetting prompts and avoid broadcast storm
+  // Idempotency: If already assigned to this participant, preserve current prompts and avoid broadcast storm
   if (station.activeParticipantId === targetParticipantId) {
     if (assignedParticipant) {
       station.activeParticipant = { ...assignedParticipant };
@@ -2157,35 +2157,95 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
   station.activeParticipantId = targetParticipantId;
   station.activeParticipant = assignedParticipant ? { ...assignedParticipant } : null;
 
-  // Sync with global liveSync active participant if matching station
-  if (db.liveSync) {
-    db.liveSync.activeParticipantId = targetParticipantId;
-  }
+  if (!assignedParticipant) {
+    // Participant was cleared
+    station.selectedImageId = null;
+    station.selectedImage = null;
+    station.selectedTopicId = null;
+    station.selectedTopic = null;
+    station.wheelSpin = null;
+    station.status = 'WAITING';
+    station.isTimerRunning = false;
+    station.timerStartedAt = null;
+    station.timerEndsAt = null;
+  } else {
+    // Participant was assigned - resolve appropriate prompts based on current round
+    const currentStationRound = (station.currentRound || db.liveSync?.currentRound || 1) as 1 | 2 | 3;
 
-  // Sync or reset current station item when contestant changes
-  let initialImage: EventImage | null = null;
-  const currentGlobalRound = (db.liveSync?.currentRound || station.currentRound || 1) as 1 | 2 | 3;
-  if (assignedParticipant && currentGlobalRound === 1 && db.settings.round1.synchronizedSlots !== false) {
-    const stResultsCount = db.round1Results.filter((r) => {
-      const p = db.participants.find((item) => item.id === r.participantId);
-      return p?.stationId === station.id || p?.round1StationId === station.id;
-    }).length;
-    const targetSlot = typeof (assignedParticipant as any).round1SlotIndex === 'number' && (assignedParticipant as any).round1SlotIndex >= 0
-      ? (assignedParticipant as any).round1SlotIndex
-      : stResultsCount;
-    const syncImageId = db.synchronizedSlots?.round1?.[targetSlot];
-    if (syncImageId) {
-      const foundImg = db.images.find((i) => i.id === syncImageId || i.imageId === syncImageId);
-      if (foundImg) initialImage = foundImg;
+    if (currentStationRound === 1) {
+      let resolvedImage: EventImage | null = null;
+
+      // 1. Check if participant already has an image recorded
+      const partImgId = (assignedParticipant as any).round1ImageId;
+      if (partImgId) {
+        resolvedImage = db.images.find(
+          (i) => i.id === partImgId || i.imageId === partImgId || i.name === partImgId
+        ) || null;
+      }
+
+      // 2. Check if participant has a finished result in round1Results
+      if (!resolvedImage) {
+        const r1Res = db.round1Results.find((r) => r.participantId === assignedParticipant?.id);
+        if (r1Res) {
+          resolvedImage = db.images.find(
+            (i) => i.id === r1Res.imageId || i.imageId === r1Res.imageId || i.name === r1Res.imageName
+          ) || null;
+        }
+      }
+
+      // 3. If synchronized slots is enabled, resolve or assign the slot image deterministically
+      if (!resolvedImage && db.settings.round1.synchronizedSlots !== false) {
+        const stResultsCount = db.round1Results.filter((r) => {
+          const p = db.participants.find((item) => item.id === r.participantId);
+          return p?.stationId === station.id || p?.round1StationId === station.id;
+        }).length;
+        const targetSlot =
+          typeof (assignedParticipant as any).round1SlotIndex === 'number' &&
+          (assignedParticipant as any).round1SlotIndex >= 0
+            ? (assignedParticipant as any).round1SlotIndex
+            : stResultsCount;
+
+        const slotRes = getOrAssignSlotItem('round1', targetSlot, station.id);
+        if (slotRes.item) {
+          resolvedImage = slotRes.item as EventImage;
+          (assignedParticipant as any).round1SlotIndex = targetSlot;
+          (assignedParticipant as any).slotIndex = targetSlot;
+          (assignedParticipant as any).round1ImageId =
+            resolvedImage.imageId || resolvedImage.name || resolvedImage.id;
+        }
+      }
+
+      // Fall back to preserving existing station image if none assigned yet
+      station.selectedImage = resolvedImage || station.selectedImage || null;
+      station.selectedImageId = station.selectedImage?.id || null;
+      station.selectedTopicId = null;
+      station.selectedTopic = null;
+      station.wheelSpin = null;
+      station.status = 'WAITING';
+    } else if (currentStationRound === 2) {
+      let resolvedTopic: Topic | null = null;
+      const r2Res = db.round2Results.find((r) => r.participantId === assignedParticipant?.id);
+      if (r2Res) {
+        resolvedTopic = db.topics.find(
+          (t) => t.id === r2Res.topicId || t.topic === r2Res.topicTitle
+        ) || null;
+      }
+
+      station.selectedTopic = resolvedTopic;
+      station.selectedTopicId = resolvedTopic?.id || null;
+      station.selectedImageId = null;
+      station.selectedImage = null;
+      station.wheelSpin = null;
+      station.status = 'WAITING';
+    } else {
+      station.selectedImageId = null;
+      station.selectedImage = null;
+      station.selectedTopicId = null;
+      station.selectedTopic = null;
+      station.wheelSpin = null;
+      station.status = 'WAITING';
     }
   }
-
-  station.selectedImageId = initialImage?.id || null;
-  station.selectedImage = initialImage;
-  station.selectedTopicId = null;
-  station.selectedTopic = null;
-  station.wheelSpin = null;
-  station.status = 'WAITING';
 
   persistDB();
   broadcastStationUpdate(station.id, 'station_updated', station);
