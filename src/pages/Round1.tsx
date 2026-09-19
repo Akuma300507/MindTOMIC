@@ -208,8 +208,10 @@ export const Round1: React.FC = () => {
   useEffect(() => {
     if (currentStation?.selectedImage) {
       setSelectedImage(currentStation.selectedImage);
+    } else if (!currentStation?.activeParticipantId) {
+      setSelectedImage(null);
     }
-  }, [currentStation?.selectedImage]);
+  }, [currentStation?.selectedImage, currentStation?.activeParticipantId]);
 
   // Heat slot index within this station:
   // Dynamically determined by turn order (number of completed Round 1 contestants at this station),
@@ -240,14 +242,14 @@ export const Round1: React.FC = () => {
   // load and assign that exact image automatically so all stations at this heat stay aligned.
   useEffect(() => {
     const isSync = db?.settings?.round1?.synchronizedSlots !== false;
-    if (isSync && db?.synchronizedSlots?.round1 && typeof db.synchronizedSlots.round1[slotIndex] === 'string') {
+    if (isSync && activeParticipant && db?.synchronizedSlots?.round1 && typeof db.synchronizedSlots.round1[slotIndex] === 'string') {
       const slotImageId = db.synchronizedSlots.round1[slotIndex];
-      const matched = stationImages.find((img) => img.id === slotImageId || img.imageId === slotImageId);
+      const matched = (db?.images || []).find((img) => img.id === slotImageId || img.imageId === slotImageId);
       if (matched && (!selectedImage || selectedImage.id !== matched.id)) {
         setSelectedImage(matched);
       }
     }
-  }, [db?.settings?.round1?.synchronizedSlots, db?.synchronizedSlots?.round1, slotIndex, stationImages, selectedImage]);
+  }, [db?.settings?.round1?.synchronizedSlots, db?.synchronizedSlots?.round1, db?.images, slotIndex, activeParticipant, selectedImage]);
 
   // Atomic Random image selector
   const handleRandomImage = useCallback(async () => {
@@ -259,13 +261,6 @@ export const Round1: React.FC = () => {
       setPoolNotice(err.message || 'No unused images remaining. Reset pool or enable reuse in settings.');
     }
   }, [assignStationImage, currentStationId, slotIndex]);
-
-  // Select initial image if none selected
-  useEffect(() => {
-    if (!selectedImage && availableImages.length > 0) {
-      setSelectedImage(availableImages[0]);
-    }
-  }, [availableImages, selectedImage]);
 
   // Image rotation state for projector and operator
   const [imageRotation, setImageRotation] = useState<number>(0);
@@ -934,9 +929,16 @@ export const Round1: React.FC = () => {
               {stationImages.map((img) => (
                 <div
                   key={img.id}
-                  onClick={() => {
+                  onClick={async () => {
                     setSelectedImage(img);
                     setShowImagePicker(false);
+                    if (currentStationId && currentStationId !== 'all') {
+                      try {
+                        await assignStationImage(currentStationId, slotIndex, img.id);
+                      } catch (err) {
+                        console.error('Failed to sync gallery image to station:', err);
+                      }
+                    }
                   }}
                   className="cursor-pointer rounded-xl overflow-hidden border border-slate-800 hover:border-purple-500 transition-all hover:scale-102 bg-slate-950 relative group"
                 >
@@ -1178,7 +1180,7 @@ export const Round1: React.FC = () => {
                             if (!isChecked) {
                               await handleCheckIn(p.id, true);
                             }
-                            setActiveParticipant(p);
+                            handleSelectContestant(p);
                             setShowCheckInModal(false);
                           }}
                           disabled={loading}

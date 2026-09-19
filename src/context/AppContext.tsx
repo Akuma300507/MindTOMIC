@@ -125,7 +125,7 @@ interface AppContextType {
     location?: string;
   }) => Promise<void>;
   pingStation: (stationId: string, senderName?: string, message?: string) => Promise<void>;
-  assignStationImage: (stationId: string, slotIndex?: number) => Promise<EventImage>;
+  assignStationImage: (stationId: string, slotIndex?: number, imageId?: string) => Promise<EventImage>;
   rotateStationImage: (stationId: string, rotation?: number) => Promise<void>;
   spinStationTopic: (stationId: string, wheelTopicIds?: string[], slotIndex?: number) => Promise<{ topic: Topic; targetIndex?: number; wheelTopics?: Topic[]; startedAt: number; durationMs: number; station?: StationState; slotIndex?: number }>;
   completeStationSpin: (stationId: string) => Promise<void>;
@@ -618,8 +618,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!station) return prev;
 
         // In Round 1 with synchronized slots, resolve slot image if available
-        let optimisticImage = station.selectedImage;
-        let optimisticImageId = station.selectedImageId;
+        let optimisticImage = station.activeParticipantId === participantId ? station.selectedImage : null;
+        let optimisticImageId = station.activeParticipantId === participantId ? station.selectedImageId : null;
         if (participantId && (station.currentRound === 1 || prev.liveSync?.currentRound === 1)) {
           if (prev.settings?.round1?.synchronizedSlots !== false) {
             const resultsCount = (prev.round1Results || []).filter((r) => {
@@ -973,13 +973,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const assignStationImage = useCallback(
-    async (stationId: string, slotIndex?: number) => {
+    async (stationId: string, slotIndex?: number, imageId?: string) => {
       const station = db?.stations?.[stationId];
       const res = await api.assignStationImage(
         stationId,
         station?.activeParticipantId || undefined,
         station?.activeParticipant?.name || undefined,
-        slotIndex
+        slotIndex,
+        imageId
       );
       setDb((prev) => {
         if (!prev) return prev;
@@ -1388,6 +1389,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         } catch (err) {
           console.error(err);
+        }
+      });
+
+      eventSource.addEventListener('slots_updated', (e) => {
+        try {
+          const synchronizedSlots = JSON.parse(e.data);
+          setDb((prev) => {
+            if (!prev) return prev;
+            const nextDb = { ...prev, synchronizedSlots };
+            storageService.savePersistedDatabase(nextDb);
+            return nextDb;
+          });
+        } catch (err) {
+          console.error('Failed to handle slots_updated SSE:', err);
         }
       });
 

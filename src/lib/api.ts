@@ -211,11 +211,11 @@ export const api = {
     return res.json();
   },
 
-  async assignStationImage(id: string, participantId?: string, participantName?: string, slotIndex?: number): Promise<{ success: boolean; image: EventImage; station: StationState; slotIndex?: number }> {
+  async assignStationImage(id: string, participantId?: string, participantName?: string, slotIndex?: number, imageId?: string): Promise<{ success: boolean; image: EventImage; station: StationState; slotIndex?: number }> {
     const res = await fetch(`/api/stations/${id}/assign-image`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participantId, participantName, slotIndex }),
+      body: JSON.stringify({ participantId, participantName, slotIndex, imageId }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

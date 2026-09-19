@@ -2174,37 +2174,32 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
 
     if (currentStationRound === 1) {
       let resolvedImage: EventImage | null = null;
+      const isSynchronized = db.settings.round1.synchronizedSlots !== false;
 
-      // 1. Check if participant already has an image recorded
-      const partImgId = (assignedParticipant as any).round1ImageId;
-      if (partImgId) {
+      // 1. Check if participant already has a finished result in round1Results
+      const r1Res = db.round1Results.find((r) => r.participantId === assignedParticipant?.id);
+      if (r1Res) {
         resolvedImage = db.images.find(
-          (i) => i.id === partImgId || i.imageId === partImgId || i.name === partImgId
+          (i) => i.id === r1Res.imageId || i.imageId === r1Res.imageId || i.name === r1Res.imageName
         ) || null;
       }
 
-      // 2. Check if participant has a finished result in round1Results
-      if (!resolvedImage) {
-        const r1Res = db.round1Results.find((r) => r.participantId === assignedParticipant?.id);
-        if (r1Res) {
-          resolvedImage = db.images.find(
-            (i) => i.id === r1Res.imageId || i.imageId === r1Res.imageId || i.name === r1Res.imageName
-          ) || null;
-        }
-      }
+      // Determine slot index dynamically based on completed results count or locked slot index
+      const stResultsCount = db.round1Results.filter((r) => {
+        const p = db.participants.find((item) => item.id === r.participantId);
+        return p?.stationId === station.id || p?.round1StationId === station.id;
+      }).length;
+      const targetSlot =
+        typeof (assignedParticipant as any).round1SlotIndex === 'number' &&
+        (assignedParticipant as any).round1SlotIndex >= 0
+          ? (assignedParticipant as any).round1SlotIndex
+          : typeof r1Res?.slotIndex === 'number' && r1Res.slotIndex >= 0
+          ? r1Res.slotIndex
+          : stResultsCount;
 
-      // 3. If synchronized slots is enabled, resolve or assign the slot image deterministically
-      if (!resolvedImage && db.settings.round1.synchronizedSlots !== false) {
-        const stResultsCount = db.round1Results.filter((r) => {
-          const p = db.participants.find((item) => item.id === r.participantId);
-          return p?.stationId === station.id || p?.round1StationId === station.id;
-        }).length;
-        const targetSlot =
-          typeof (assignedParticipant as any).round1SlotIndex === 'number' &&
-          (assignedParticipant as any).round1SlotIndex >= 0
-            ? (assignedParticipant as any).round1SlotIndex
-            : stResultsCount;
-
+      if (isSynchronized) {
+        // Under synchronized slots mode, the slot's synchronized image MUST take absolute precedence
+        // so that every station at heat slot targetSlot renders the identical image!
         const slotRes = getOrAssignSlotItem('round1', targetSlot, station.id);
         if (slotRes.item) {
           resolvedImage = slotRes.item as EventImage;
@@ -2212,6 +2207,16 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
           (assignedParticipant as any).slotIndex = targetSlot;
           (assignedParticipant as any).round1ImageId =
             resolvedImage.imageId || resolvedImage.name || resolvedImage.id;
+        }
+      } else {
+        // Fallback for independent slots: participant's recorded image if present
+        if (!resolvedImage) {
+          const partImgId = (assignedParticipant as any).round1ImageId;
+          if (partImgId) {
+            resolvedImage = db.images.find(
+              (i) => i.id === partImgId || i.imageId === partImgId || i.name === partImgId
+            ) || null;
+          }
         }
       }
 
@@ -2309,6 +2314,33 @@ function getOrAssignSlotItem(
     const chosen = pool[Math.floor(Math.random() * pool.length)];
     db.synchronizedSlots.round1[slotIndex] = chosen.id;
     persistDB();
+    broadcastSSE('slots_updated', db.synchronizedSlots);
+
+    // Synchronize any other stations currently waiting at this same heat slot in Round 1
+    if (db.stations) {
+      Object.values(db.stations).forEach((st) => {
+        if (st.currentRound === 1 && st.activeParticipant) {
+          const stResultsCount = db.round1Results.filter((r) => {
+            const p = db.participants.find((item) => item.id === r.participantId);
+            return p?.stationId === st.id || p?.round1StationId === st.id;
+          }).length;
+          const stSlot =
+            typeof (st.activeParticipant as any).round1SlotIndex === 'number' &&
+            (st.activeParticipant as any).round1SlotIndex >= 0
+              ? (st.activeParticipant as any).round1SlotIndex
+              : stResultsCount;
+
+          if (stSlot === slotIndex && (!st.selectedImage || st.selectedImage.id !== chosen.id)) {
+            st.selectedImage = chosen;
+            st.selectedImageId = chosen.id;
+            (st.activeParticipant as any).round1SlotIndex = slotIndex;
+            (st.activeParticipant as any).round1ImageId = chosen.imageId || chosen.name || chosen.id;
+            broadcastStationUpdate(st.id, 'station_updated', st);
+          }
+        }
+      });
+    }
+
     return { item: chosen, isNew: true };
   } else {
     // Round 2 Topics
@@ -2338,6 +2370,33 @@ function getOrAssignSlotItem(
 
     db.synchronizedSlots.round2[slotIndex] = chosen.id;
     persistDB();
+    broadcastSSE('slots_updated', db.synchronizedSlots);
+
+    // Synchronize any other stations currently waiting at this same heat slot in Round 2
+    if (db.stations) {
+      Object.values(db.stations).forEach((st) => {
+        if (st.currentRound === 2 && st.activeParticipant) {
+          const stResultsCount = db.round2Results.filter((r) => {
+            const p = db.participants.find((item) => item.id === r.participantId);
+            return p?.stationId === st.id || p?.round2StationId === st.id;
+          }).length;
+          const stSlot =
+            typeof (st.activeParticipant as any).round2SlotIndex === 'number' &&
+            (st.activeParticipant as any).round2SlotIndex >= 0
+              ? (st.activeParticipant as any).round2SlotIndex
+              : stResultsCount;
+
+          if (stSlot === slotIndex && (!st.selectedTopic || st.selectedTopic.id !== chosen.id)) {
+            st.selectedTopic = chosen;
+            st.selectedTopicId = chosen.id;
+            (st.activeParticipant as any).round2SlotIndex = slotIndex;
+            (st.activeParticipant as any).round2TopicId = chosen.id;
+            broadcastStationUpdate(st.id, 'station_updated', st);
+          }
+        }
+      });
+    }
+
     return { item: chosen, isNew: true };
   }
 }
@@ -2351,7 +2410,7 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
       error: `Cannot assign images: The event is currently in Round ${currentGlobalRound}, not Round 1.`,
     });
   }
-  const { participantId, participantName, slotIndex: reqSlotIndex } = req.body;
+  const { participantId, participantName, slotIndex: reqSlotIndex, imageId } = req.body;
 
   if (participantId) {
     station.activeParticipantId = participantId;
@@ -2378,7 +2437,19 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
   const isSynchronized = db.settings.round1.synchronizedSlots !== false;
   let chosen: EventImage | null = null;
 
-  if (isSynchronized) {
+  if (imageId) {
+    const found = db.images.find((img) => img.id === imageId || img.imageId === imageId);
+    if (found) {
+      chosen = found;
+      if (isSynchronized) {
+        db.synchronizedSlots.round1[slotIndex] = chosen.id;
+        persistDB();
+        broadcastSSE('slots_updated', db.synchronizedSlots);
+      }
+    }
+  }
+
+  if (!chosen && isSynchronized) {
     const slotRes = getOrAssignSlotItem('round1', slotIndex, station.id);
     chosen = slotRes.item as EventImage | null;
   }
@@ -2735,12 +2806,41 @@ app.post('/api/slots/reset', (req: Request, res: Response) => {
   if (!db.synchronizedSlots) db.synchronizedSlots = { round1: {}, round2: {} };
   if (!round || round === 'all' || round === 'round1') {
     db.synchronizedSlots.round1 = {};
+    db.participants.forEach((p) => {
+      delete p.round1ImageId;
+      delete p.round1SlotIndex;
+      delete p.slotIndex;
+    });
+    if (db.stations) {
+      Object.values(db.stations).forEach((s) => {
+        if (s.currentRound === 1) {
+          s.selectedImage = null;
+          s.selectedImageId = null;
+        }
+      });
+    }
   }
   if (!round || round === 'all' || round === 'round2') {
     db.synchronizedSlots.round2 = {};
+    db.participants.forEach((p) => {
+      delete (p as any).round2TopicId;
+      delete (p as any).round2SlotIndex;
+    });
+    if (db.stations) {
+      Object.values(db.stations).forEach((s) => {
+        if (s.currentRound === 2) {
+          s.selectedTopic = null;
+          s.selectedTopicId = null;
+        }
+      });
+    }
   }
   persistDB();
   broadcastSSE('slots_updated', db.synchronizedSlots);
+  if (db.stations) {
+    broadcastSSE('stations_updated', Object.values(db.stations));
+  }
+  broadcastSSE('participants_updated', db.participants);
   logAction('Slots Reset', `Synchronized heat slots were reset (Round: ${round || 'all'})`);
   res.json({ success: true, synchronizedSlots: db.synchronizedSlots });
 });
@@ -2762,6 +2862,34 @@ app.post('/api/slots/pregenerate', (req: Request, res: Response) => {
         }
       }
     }
+
+    // Sync stations currently in Round 1
+    if (db.stations) {
+      Object.values(db.stations).forEach((st) => {
+        if (st.currentRound === 1 && st.activeParticipant) {
+          const stResultsCount = db.round1Results.filter((r) => {
+            const p = db.participants.find((item) => item.id === r.participantId);
+            return p?.stationId === st.id || p?.round1StationId === st.id;
+          }).length;
+          const stSlot =
+            typeof (st.activeParticipant as any).round1SlotIndex === 'number' &&
+            (st.activeParticipant as any).round1SlotIndex >= 0
+              ? (st.activeParticipant as any).round1SlotIndex
+              : stResultsCount;
+
+          const slotImgId = db.synchronizedSlots.round1[stSlot];
+          if (slotImgId && (!st.selectedImage || st.selectedImage.id !== slotImgId)) {
+            const found = db.images.find((img) => img.id === slotImgId || img.imageId === slotImgId);
+            if (found) {
+              st.selectedImage = found;
+              st.selectedImageId = found.id;
+              (st.activeParticipant as any).round1SlotIndex = stSlot;
+              (st.activeParticipant as any).round1ImageId = found.imageId || found.name || found.id;
+            }
+          }
+        }
+      });
+    }
   }
 
   if (round === 'all' || round === 'round2') {
@@ -2777,10 +2905,41 @@ app.post('/api/slots/pregenerate', (req: Request, res: Response) => {
         }
       }
     }
+
+    // Sync stations currently in Round 2
+    if (db.stations) {
+      Object.values(db.stations).forEach((st) => {
+        if (st.currentRound === 2 && st.activeParticipant) {
+          const stResultsCount = db.round2Results.filter((r) => {
+            const p = db.participants.find((item) => item.id === r.participantId);
+            return p?.stationId === st.id || p?.round2StationId === st.id;
+          }).length;
+          const stSlot =
+            typeof (st.activeParticipant as any).round2SlotIndex === 'number' &&
+            (st.activeParticipant as any).round2SlotIndex >= 0
+              ? (st.activeParticipant as any).round2SlotIndex
+              : stResultsCount;
+
+          const slotTopicId = db.synchronizedSlots.round2[stSlot];
+          if (slotTopicId && (!st.selectedTopic || st.selectedTopic.id !== slotTopicId)) {
+            const found = db.topics.find((top) => top.id === slotTopicId || top.topicId === slotTopicId);
+            if (found) {
+              st.selectedTopic = found;
+              st.selectedTopicId = found.id;
+              (st.activeParticipant as any).round2SlotIndex = stSlot;
+              (st.activeParticipant as any).round2TopicId = found.id;
+            }
+          }
+        }
+      });
+    }
   }
 
   persistDB();
   broadcastSSE('slots_updated', db.synchronizedSlots);
+  if (db.stations) {
+    broadcastSSE('stations_updated', Object.values(db.stations));
+  }
   logAction('Slots Pre-Generated', `Pre-generated ${count} synchronized heat slots for ${round || 'all rounds'}`);
   res.json({ success: true, synchronizedSlots: db.synchronizedSlots });
 });
@@ -2995,6 +3154,11 @@ app.post('/api/event/reset-all-statuses', (req: Request, res: Response) => {
     p.round2Qualified = 'pending';
     p.round3Qualified = 'pending';
     delete p.qualificationReason;
+    delete p.round1ImageId;
+    delete p.round1SlotIndex;
+    delete p.slotIndex;
+    delete (p as any).round2TopicId;
+    delete (p as any).round2SlotIndex;
   });
 
   // 3. Reset all images to available
@@ -3080,6 +3244,11 @@ app.post('/api/event/start-new', (req: Request, res: Response) => {
     p.round1Status = 'pending';
     p.round2Status = 'pending';
     p.round3Status = 'pending';
+    delete p.round1ImageId;
+    delete p.round1SlotIndex;
+    delete p.slotIndex;
+    delete (p as any).round2TopicId;
+    delete (p as any).round2SlotIndex;
   });
 
   // Reset images
