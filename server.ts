@@ -2174,7 +2174,6 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
 
     if (currentStationRound === 1) {
       let resolvedImage: EventImage | null = null;
-      const isSynchronized = db.settings.round1.synchronizedSlots !== false;
 
       // 1. Check if participant already has a finished result in round1Results
       const r1Res = db.round1Results.find((r) => r.participantId === assignedParticipant?.id);
@@ -2184,45 +2183,18 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
         ) || null;
       }
 
-      // Determine slot index dynamically based on completed results count or locked slot index
-      const stResultsCount = db.round1Results.filter((r) => {
-        const p = db.participants.find((item) => item.id === r.participantId);
-        return p?.stationId === station.id || p?.round1StationId === station.id;
-      }).length;
-      const targetSlot =
-        typeof (assignedParticipant as any).round1SlotIndex === 'number' &&
-        (assignedParticipant as any).round1SlotIndex >= 0
-          ? (assignedParticipant as any).round1SlotIndex
-          : typeof r1Res?.slotIndex === 'number' && r1Res.slotIndex >= 0
-          ? r1Res.slotIndex
-          : stResultsCount;
-
-      if (isSynchronized) {
-        // Under synchronized slots mode, the slot's synchronized image MUST take absolute precedence
-        // so that every station at heat slot targetSlot renders the identical image!
-        const slotRes = getOrAssignSlotItem('round1', targetSlot, station.id);
-        if (slotRes.item) {
-          resolvedImage = slotRes.item as EventImage;
-          (assignedParticipant as any).round1SlotIndex = targetSlot;
-          (assignedParticipant as any).slotIndex = targetSlot;
-          (assignedParticipant as any).round1ImageId =
-            resolvedImage.imageId || resolvedImage.name || resolvedImage.id;
-        }
-      } else {
-        // Fallback for independent slots: participant's recorded image if present
-        if (!resolvedImage) {
-          const partImgId = (assignedParticipant as any).round1ImageId;
-          if (partImgId) {
-            resolvedImage = db.images.find(
-              (i) => i.id === partImgId || i.imageId === partImgId || i.name === partImgId
-            ) || null;
-          }
-        }
+      // 2. Check if participant already had an image assigned during this session
+      if (!resolvedImage && (assignedParticipant as any)?.round1ImageId) {
+        const partImgId = (assignedParticipant as any).round1ImageId;
+        resolvedImage = db.images.find(
+          (i) => i.id === partImgId || i.imageId === partImgId || i.name === partImgId
+        ) || null;
       }
 
-      // Fall back to preserving existing station image if none assigned yet
-      station.selectedImage = resolvedImage || station.selectedImage || null;
-      station.selectedImageId = station.selectedImage?.id || null;
+      // NO automatic image generation on participant selection!
+      // An image must only appear when the operator explicitly clicks "Random Image" or selects from gallery.
+      station.selectedImage = resolvedImage;
+      station.selectedImageId = resolvedImage ? resolvedImage.id : null;
       station.selectedTopicId = null;
       station.selectedTopic = null;
       station.wheelSpin = null;
@@ -2316,30 +2288,10 @@ function getOrAssignSlotItem(
     persistDB();
     broadcastSSE('slots_updated', db.synchronizedSlots);
 
-    // Synchronize any other stations currently waiting at this same heat slot in Round 1
-    if (db.stations) {
-      Object.values(db.stations).forEach((st) => {
-        if (st.currentRound === 1 && st.activeParticipant) {
-          const stResultsCount = db.round1Results.filter((r) => {
-            const p = db.participants.find((item) => item.id === r.participantId);
-            return p?.stationId === st.id || p?.round1StationId === st.id;
-          }).length;
-          const stSlot =
-            typeof (st.activeParticipant as any).round1SlotIndex === 'number' &&
-            (st.activeParticipant as any).round1SlotIndex >= 0
-              ? (st.activeParticipant as any).round1SlotIndex
-              : stResultsCount;
-
-          if (stSlot === slotIndex && (!st.selectedImage || st.selectedImage.id !== chosen.id)) {
-            st.selectedImage = chosen;
-            st.selectedImageId = chosen.id;
-            (st.activeParticipant as any).round1SlotIndex = slotIndex;
-            (st.activeParticipant as any).round1ImageId = chosen.imageId || chosen.name || chosen.id;
-            broadcastStationUpdate(st.id, 'station_updated', st);
-          }
-        }
-      });
-    }
+    // NOTE: We intentionally do NOT broadcast this image to other stations here.
+    // Each station's operator must explicitly request an image via the assign-image endpoint.
+    // When they do, getOrAssignSlotItem will return this same pre-chosen slot image (the
+    // early-return above), ensuring synchronization without pushing images prematurely.
 
     return { item: chosen, isNew: true };
   } else {
@@ -2426,6 +2378,13 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
       slotIndex = (targetParticipant as any).round1SlotIndex;
     }
   }
+  if (slotIndex === -1 && targetParticipant) {
+    const stParticipants = db.participants.filter(
+      (p) => p.stationId === station.id || p.round1StationId === station.id
+    );
+    const pIdx = stParticipants.findIndex((p) => p.id === targetParticipant.id);
+    if (pIdx >= 0) slotIndex = pIdx;
+  }
   if (slotIndex === -1) {
     slotIndex = db.round1Results.filter((r) => {
       const p = db.participants.find((item) => item.id === r.participantId);
@@ -2451,27 +2410,57 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
 
   if (!chosen && isSynchronized) {
     const slotRes = getOrAssignSlotItem('round1', slotIndex, station.id);
-    chosen = slotRes.item as EventImage | null;
+    // If the station already has this slot's image on screen and clicks Random Image again,
+    // they want to re-roll/re-shuffle! Let them re-roll a new image from candidates below.
+    if (!slotRes.isNew && station.selectedImageId && slotRes.item && station.selectedImageId === slotRes.item.id) {
+      chosen = null;
+    } else {
+      chosen = slotRes.item as EventImage | null;
+    }
   }
 
   if (!chosen) {
-    const availablePool = db.images.filter((img) => img.status === 'available');
-    let candidates: EventImage[] = availablePool;
+    // Build a station-aware pool, mirroring the frontend's stationImages filter:
+    // 1. Dedicated pool: images explicitly assigned to this station
+    // 2. Universal pool: images with no station assignment (or 'all')
+    // Images assigned to a DIFFERENT station are always excluded.
+    const eligibleImages = db.images.filter((img) => {
+      if (img.stationId && img.stationId !== 'all' && img.stationId !== station.id) {
+        return false; // belongs to a different station
+      }
+      return true;
+    });
+    const dedicatedImages = eligibleImages.filter((img) => img.stationId === station.id);
+    const stationPool = dedicatedImages.length > 0 ? dedicatedImages : eligibleImages;
+
+    // Filter out images already displayed on this station to ensure re-roll picks a different image
+    let candidates: EventImage[] = stationPool.filter(
+      (img) => img.status === 'available' && (!station.selectedImageId || img.id !== station.selectedImageId)
+    );
+    if (candidates.length === 0) {
+      candidates = stationPool.filter((img) => img.status === 'available');
+    }
     if (candidates.length === 0 && db.settings.round1.allowImageReuse) {
-      candidates = db.images;
+      candidates = stationPool.filter((img) => !station.selectedImageId || img.id !== station.selectedImageId);
+      if (candidates.length === 0) candidates = stationPool;
     }
 
     if (candidates.length === 0) {
-      if (db.settings.round1.allowImageReuse && db.images.length > 0) {
-        candidates = db.images;
+      if (db.settings.round1.allowImageReuse && stationPool.length > 0) {
+        candidates = stationPool;
       } else {
         return res.status(409).json({
-          error: `No unused images available in universal pool. Please upload images or allow image reuse in settings.`,
+          error: `No unused images available for this station. Please upload images or allow image reuse in settings.`,
         });
       }
     }
 
     chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    if (isSynchronized && chosen) {
+      db.synchronizedSlots.round1[slotIndex] = chosen.id;
+      persistDB();
+      broadcastSSE('slots_updated', db.synchronizedSlots);
+    }
   }
 
   // Mark as used globally if NOT in synchronized slots mode (synchronized slots are shared across stations for that slot)

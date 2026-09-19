@@ -617,27 +617,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const station = currentStations[stationId];
         if (!station) return prev;
 
-        // In Round 1 with synchronized slots, resolve slot image if available
-        let optimisticImage = station.activeParticipantId === participantId ? station.selectedImage : null;
-        let optimisticImageId = station.activeParticipantId === participantId ? station.selectedImageId : null;
-        if (participantId && (station.currentRound === 1 || prev.liveSync?.currentRound === 1)) {
-          if (prev.settings?.round1?.synchronizedSlots !== false) {
-            const resultsCount = (prev.round1Results || []).filter((r) => {
-              const p = prev.participants?.find((item) => item.id === r.participantId);
-              return p?.stationId === stationId || p?.round1StationId === stationId;
-            }).length;
-            const slot =
-              typeof (targetParticipant as any)?.round1SlotIndex === 'number' &&
-              (targetParticipant as any).round1SlotIndex >= 0
-                ? (targetParticipant as any).round1SlotIndex
-                : resultsCount;
-            const syncImgId = prev.synchronizedSlots?.round1?.[slot];
-            if (syncImgId) {
-              const found = prev.images?.find((i) => i.id === syncImgId || i.imageId === syncImgId);
-              if (found) {
-                optimisticImage = found;
-                optimisticImageId = found.id;
-              }
+        // When selecting a participant, only restore an image if this participant already had one assigned previously
+        let optimisticImage: EventImage | null = null;
+        let optimisticImageId: string | null = null;
+        if (targetParticipant) {
+          const r1Res = (prev.round1Results || []).find((r) => r.participantId === targetParticipant.id);
+          const savedImgId = r1Res?.imageId || (targetParticipant as any)?.round1ImageId;
+          if (savedImgId) {
+            const found = prev.images?.find((i) => i.id === savedImgId || i.imageId === savedImgId);
+            if (found) {
+              optimisticImage = found;
+              optimisticImageId = found.id;
             }
           }
         }

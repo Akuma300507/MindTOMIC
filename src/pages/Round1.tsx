@@ -208,13 +208,13 @@ export const Round1: React.FC = () => {
   useEffect(() => {
     if (currentStation?.selectedImage) {
       setSelectedImage(currentStation.selectedImage);
-    } else if (!currentStation?.activeParticipantId) {
+    } else {
       setSelectedImage(null);
     }
-  }, [currentStation?.selectedImage, currentStation?.activeParticipantId]);
+  }, [currentStation?.selectedImage]);
 
   // Heat slot index within this station:
-  // Dynamically determined by turn order (number of completed Round 1 contestants at this station),
+  // Dynamically determined by contestant index within the station's roster,
   // or the contestant's locked round1SlotIndex if already assigned/completed.
   const slotIndex = useMemo(() => {
     if (!activeParticipant) return 0;
@@ -225,8 +225,12 @@ export const Round1: React.FC = () => {
     if (typeof r1Result?.slotIndex === 'number' && r1Result.slotIndex >= 0) {
       return r1Result.slotIndex;
     }
+    const idx = checkedInStationParticipants.findIndex((p) => p.id === activeParticipant.id);
+    if (idx >= 0) return idx;
+    const allIdx = stationParticipants.findIndex((p) => p.id === activeParticipant.id);
+    if (allIdx >= 0) return allIdx;
     return completedStationParticipants.length;
-  }, [activeParticipant, db?.round1Results, completedStationParticipants.length]);
+  }, [activeParticipant, db?.round1Results, checkedInStationParticipants, stationParticipants, completedStationParticipants.length]);
 
   // Available images based on reuse policy or synchronized slots
   const availableImages = useMemo(() => {
@@ -236,20 +240,6 @@ export const Round1: React.FC = () => {
     const filtered = stationImages.filter((img) => img.status === 'available');
     return filtered.length > 0 ? filtered : stationImages;
   }, [stationImages, db?.settings?.round1?.allowImageReuse, db?.settings?.round1?.synchronizedSlots]);
-
-  // Synchronized slot image auto-loader:
-  // If synchronized slots are enabled and an image has already been chosen/pre-generated for this heat slot,
-  // load and assign that exact image automatically so all stations at this heat stay aligned.
-  useEffect(() => {
-    const isSync = db?.settings?.round1?.synchronizedSlots !== false;
-    if (isSync && activeParticipant && db?.synchronizedSlots?.round1 && typeof db.synchronizedSlots.round1[slotIndex] === 'string') {
-      const slotImageId = db.synchronizedSlots.round1[slotIndex];
-      const matched = (db?.images || []).find((img) => img.id === slotImageId || img.imageId === slotImageId);
-      if (matched && (!selectedImage || selectedImage.id !== matched.id)) {
-        setSelectedImage(matched);
-      }
-    }
-  }, [db?.settings?.round1?.synchronizedSlots, db?.synchronizedSlots?.round1, db?.images, slotIndex, activeParticipant, selectedImage]);
 
   // Atomic Random image selector
   const handleRandomImage = useCallback(async () => {
