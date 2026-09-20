@@ -2307,8 +2307,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (nextDb) storageService.savePersistedDatabase(nextDb);
       return nextDb;
     });
+    await reloadState();
     return updated;
-  }, []);
+  }, [reloadState]);
 
   // Results
   const saveRound1Result = useCallback(async (res: Omit<Round1Result, 'id'>) => {

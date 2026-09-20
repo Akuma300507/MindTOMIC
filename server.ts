@@ -86,7 +86,7 @@ const defaultSettings: EventSettings = {
     speechTimeSeconds: 120,
     buzzerEnabled: true,
     buzzerTimeSeconds: 120,
-    activeWheelTopicCount: 16,
+    activeWheelTopicCount: 20,
     topicReuseAllowed: false,
     warningBuzzerEnabled: true,
     warningTimeSeconds: 30,
@@ -1532,10 +1532,11 @@ function getStation(id: string): StationState {
     }
   }
 
-  // Pre-populate Round 2 wheel topics if station is in Round 2
+  // Pre-populate Round 2 wheel topics if station is in Round 2 or activeWheelTopics count mismatches setting
+  const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
   if (
     db.stations[id].currentRound === 2 &&
-    (!db.stations[id].activeWheelTopics || db.stations[id].activeWheelTopics.length === 0)
+    (!db.stations[id].activeWheelTopics || db.stations[id].activeWheelTopics.length !== expectedWheelCount)
   ) {
     db.stations[id].activeWheelTopics = getInitialStationWheelTopics(id, db.stations[id].name);
   }
@@ -1913,8 +1914,8 @@ app.post('/api/event/stage-permission', (req: Request, res: Response) => {
       station.selectedImage = null;
       station.selectedTopicId = null;
       station.selectedTopic = null;
-      station.wheelSpin = null;
-      if (roundNum === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length === 0)) {
+      const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
+      if (roundNum === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length !== expectedWheelCount)) {
         station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
       }
       station.timerMode = 'idle';
@@ -2024,8 +2025,8 @@ app.post('/api/event/set-round', (req: Request, res: Response) => {
       station.selectedImage = null;
       station.selectedTopicId = null;
       station.selectedTopic = null;
-      station.wheelSpin = null;
-      if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length === 0)) {
+      const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
+      if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length !== expectedWheelCount)) {
         station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
       }
       station.timerMode = 'idle';
@@ -2101,7 +2102,8 @@ app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
   station.selectedTopicId = null;
   station.selectedTopic = null;
   station.wheelSpin = null;
-  if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length === 0)) {
+  const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
+  if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length !== expectedWheelCount)) {
     station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
   }
 
@@ -4048,9 +4050,27 @@ app.put('/api/settings', (req: Request, res: Response) => {
     ...db.settings,
     ...req.body,
   };
+  if (db.settings.round2) {
+    db.settings.round2.activeWheelTopicCount = Math.max(
+      4,
+      Math.min(50, Number(db.settings.round2.activeWheelTopicCount) || 20)
+    );
+  }
+  const wheelCount = Number(db.settings.round2?.activeWheelTopicCount) || 20;
+
+  // Synchronize active wheel topics for all stations to match updated wheel count
+  if (db.stations) {
+    Object.values(db.stations).forEach((station) => {
+      station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
+    });
+  }
+
   persistDB();
-  logAction('Settings Updated', 'Organizer modified event configuration');
+  logAction('Settings Updated', `Organizer modified event configuration (Active Wheel Topics: ${wheelCount})`);
   broadcastSSE('settings_updated', db.settings);
+  if (db.stations) {
+    broadcastSSE('stations_updated', Object.values(db.stations));
+  }
   res.json(db.settings);
 });
 

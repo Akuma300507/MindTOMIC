@@ -365,10 +365,12 @@ export const ProjectorDisplay: React.FC = () => {
     return Math.max(48, Math.min(136, Math.floor(round3TimerSize * 0.22)));
   }, [round3TimerSize]);
 
+  const wheelTopicCount = Number(db?.settings?.round2?.activeWheelTopicCount) || 20;
+
   // STRICT STATION ISOLATION: Default active topics for this station
   const stationDefaultWheelTopics = useMemo(() => {
     if (!db?.topics || db.topics.length === 0) return [];
-    const count = db?.settings?.round2?.activeWheelTopicCount ?? 20;
+    const count = wheelTopicCount;
     const reuseAllowed = db?.settings?.round2?.topicReuseAllowed ?? false;
 
     let stationPool: Topic[] = [];
@@ -425,14 +427,30 @@ export const ProjectorDisplay: React.FC = () => {
     return result.filter(Boolean).slice(0, count);
   }, [db?.topics, db?.settings?.round2?.activeWheelTopicCount, db?.settings?.round2?.topicReuseAllowed, selectedStationId, db?.stations]);
 
-  // The topics currently rendered on the projector wheel
+  // The topics currently rendered on the projector wheel (strictly adheres to configured count)
   const activeTopics = useMemo(() => {
-    if (projectorWheelTopics.length > 0) return projectorWheelTopics;
-    if (currentStationState?.activeWheelTopics && currentStationState.activeWheelTopics.length > 0) {
-      return currentStationState.activeWheelTopics;
+    if (projectorWheelTopics.length > 0) {
+      return projectorWheelTopics.filter(Boolean).slice(0, wheelTopicCount);
     }
-    return stationDefaultWheelTopics;
-  }, [projectorWheelTopics, currentStationState?.activeWheelTopics, stationDefaultWheelTopics]);
+    if (currentStationState?.activeWheelTopics && currentStationState.activeWheelTopics.length > 0) {
+      const stationList = currentStationState.activeWheelTopics.filter(Boolean);
+      if (stationList.length === wheelTopicCount) {
+        return stationList;
+      }
+      if (stationList.length > wheelTopicCount) {
+        return stationList.slice(0, wheelTopicCount);
+      }
+      const combined = [...stationList];
+      for (const t of stationDefaultWheelTopics) {
+        if (combined.length >= wheelTopicCount) break;
+        if (!combined.some((c) => c.id === t.id)) {
+          combined.push(t);
+        }
+      }
+      return combined.slice(0, wheelTopicCount);
+    }
+    return (stationDefaultWheelTopics || []).filter(Boolean).slice(0, wheelTopicCount);
+  }, [projectorWheelTopics, currentStationState?.activeWheelTopics, stationDefaultWheelTopics, wheelTopicCount]);
 
   // STRICT STATION ISOLATION: Watch for wheel spin events ONLY for this station
   useEffect(() => {

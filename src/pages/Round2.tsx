@@ -299,14 +299,35 @@ export const Round2: React.FC = () => {
     return result.filter(Boolean).slice(0, wheelCount);
   }, [topicsPool, allTopicsPool, wheelCount, reuseAllowed]);
 
-  // Actual topics rendered on the wheel: locked takes priority during/after spin, then station state
+  // Actual topics rendered on the wheel: locked takes priority during/after spin, then station state strictly sized to wheelCount
   const activeWheelTopics = useMemo(() => {
-    if (lockedWheelTopics && lockedWheelTopics.length > 0) return lockedWheelTopics.filter(Boolean);
-    if (currentStation?.activeWheelTopics && currentStation.activeWheelTopics.length > 0) {
-      return currentStation.activeWheelTopics.filter(Boolean);
+    // 1. Locked wheel topics during spin
+    if (lockedWheelTopics && lockedWheelTopics.length > 0) {
+      return lockedWheelTopics.filter(Boolean).slice(0, wheelCount);
     }
-    return (dynamicWheelTopics || []).filter(Boolean);
-  }, [lockedWheelTopics, currentStation?.activeWheelTopics, dynamicWheelTopics]);
+
+    // 2. Station state active wheel topics (strictly synchronized to wheelCount)
+    if (currentStation?.activeWheelTopics && currentStation.activeWheelTopics.length > 0) {
+      const stationList = currentStation.activeWheelTopics.filter(Boolean);
+      if (stationList.length === wheelCount) {
+        return stationList;
+      }
+      if (stationList.length > wheelCount) {
+        return stationList.slice(0, wheelCount);
+      }
+      const combined = [...stationList];
+      for (const t of dynamicWheelTopics) {
+        if (combined.length >= wheelCount) break;
+        if (!combined.some((c) => c.id === t.id)) {
+          combined.push(t);
+        }
+      }
+      return combined.slice(0, wheelCount);
+    }
+
+    // 3. Dynamic wheel topics fallback
+    return (dynamicWheelTopics || []).filter(Boolean).slice(0, wheelCount);
+  }, [lockedWheelTopics, currentStation?.activeWheelTopics, dynamicWheelTopics, wheelCount]);
 
   // Color palette for slices
   const sliceColors = useMemo(

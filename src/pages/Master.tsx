@@ -632,7 +632,7 @@ export const Master: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Wheel Slices:</span>
-                  <span className="text-purple-300 font-bold">{db?.settings?.round2?.activeWheelTopicCount || 16} active</span>
+                  <span className="text-purple-300 font-bold">{db?.settings?.round2?.activeWheelTopicCount || 20} active</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Topic Pool:</span>

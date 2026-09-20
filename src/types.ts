@@ -191,7 +191,7 @@ export interface EventSettings {
     speechTimeSeconds: number; // default 120
     buzzerEnabled: boolean; // default true
     buzzerTimeSeconds: number; // default 120
-    activeWheelTopicCount: number; // default 16
+    activeWheelTopicCount: number; // default 20
     topicReuseAllowed: boolean;
     warningBuzzerEnabled?: boolean; // default true
     warningTimeSeconds?: number; // default 30 (seconds remaining)

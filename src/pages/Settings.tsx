@@ -108,7 +108,16 @@ export const Settings: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings(form);
+    const sanitizedWheelCount = Math.max(4, Math.min(50, Number(form.round2.activeWheelTopicCount) || 20));
+    const cleanForm = {
+      ...form,
+      round2: {
+        ...form.round2,
+        activeWheelTopicCount: sanitizedWheelCount,
+      },
+    };
+    setForm(cleanForm);
+    await updateSettings(cleanForm);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -494,12 +503,22 @@ export const Settings: React.FC = () => {
           </p>
         </div>
 
-        {savedSuccess && (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Settings saved successfully!</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {savedSuccess && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Settings saved successfully!</span>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleSave}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-950/50 active:scale-95 transition-all cursor-pointer shrink-0"
+          >
+            <Save className="w-4 h-4" />
+            <span>Save Settings</span>
+          </button>
+        </div>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
@@ -831,17 +850,29 @@ export const Settings: React.FC = () => {
                 type="number"
                 min={4}
                 max={50}
-                value={form.round2.activeWheelTopicCount}
-                onChange={(e) =>
+                value={form.round2.activeWheelTopicCount ?? 20}
+                onChange={(e) => {
+                  const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
                   setForm({
                     ...form,
-                    round2: { ...form.round2, activeWheelTopicCount: parseInt(e.target.value) || 20 },
-                  })
-                }
+                    round2: {
+                      ...form.round2,
+                      activeWheelTopicCount: typeof val === 'number' && !isNaN(val) ? val : ('' as any),
+                    },
+                  });
+                }}
+                onBlur={() => {
+                  const currentVal = Number(form.round2.activeWheelTopicCount);
+                  const clamped = Math.max(4, Math.min(50, isNaN(currentVal) || currentVal <= 0 ? 20 : currentVal));
+                  setForm({
+                    ...form,
+                    round2: { ...form.round2, activeWheelTopicCount: clamped },
+                  });
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                Displayed on the wheel (Default: 20).
+                Number of slices displayed on Round 2 wheel (Min: 4, Max: 50, Default: 20).
               </span>
             </div>
 
