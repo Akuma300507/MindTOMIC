@@ -2204,7 +2204,7 @@ app.post('/api/stations/:id/set-participant', (req: Request, res: Response) => {
       const r2Res = db.round2Results.find((r) => r.participantId === assignedParticipant?.id);
       if (r2Res) {
         resolvedTopic = db.topics.find(
-          (t) => t.id === r2Res.topicId || t.topic === r2Res.topicTitle
+          (t) => t.id === r2Res.topicId || t.topic === r2Res.topic || (r2Res as any).topicTitle === t.topic
         ) || null;
       }
 
