@@ -2329,30 +2329,10 @@ function getOrAssignSlotItem(
     persistDB();
     broadcastSSE('slots_updated', db.synchronizedSlots);
 
-    // Synchronize any other stations currently waiting at this same heat slot in Round 2
-    if (db.stations) {
-      Object.values(db.stations).forEach((st) => {
-        if (st.currentRound === 2 && st.activeParticipant) {
-          const stResultsCount = db.round2Results.filter((r) => {
-            const p = db.participants.find((item) => item.id === r.participantId);
-            return p?.stationId === st.id || p?.round2StationId === st.id;
-          }).length;
-          const stSlot =
-            typeof (st.activeParticipant as any).round2SlotIndex === 'number' &&
-            (st.activeParticipant as any).round2SlotIndex >= 0
-              ? (st.activeParticipant as any).round2SlotIndex
-              : stResultsCount;
-
-          if (stSlot === slotIndex && (!st.selectedTopic || st.selectedTopic.id !== chosen.id)) {
-            st.selectedTopic = chosen;
-            st.selectedTopicId = chosen.id;
-            (st.activeParticipant as any).round2SlotIndex = slotIndex;
-            (st.activeParticipant as any).round2TopicId = chosen.id;
-            broadcastStationUpdate(st.id, 'station_updated', st);
-          }
-        }
-      });
-    }
+    // NOTE: We intentionally do NOT force selectedTopic onto other stations here.
+    // Each station's operator must explicitly trigger their own wheel spin.
+    // When they spin, getOrAssignSlotItem will return this exact same pre-locked slot topic (via the early-return above),
+    // and their wheel will spin and land on this exact topic with full animations and sound!
 
     return { item: chosen, isNew: true };
   }

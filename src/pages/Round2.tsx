@@ -246,6 +246,17 @@ export const Round2: React.FC = () => {
     return completedRound2Participants.length;
   }, [activeParticipant, db?.round2Results, completedRound2Participants.length]);
 
+  const isSync = db?.settings?.round2?.synchronizedSlots !== false;
+  const lockedSlotTopicId =
+    isSync && db?.synchronizedSlots?.round2 && typeof db.synchronizedSlots.round2[slotIndex] === 'string'
+      ? db.synchronizedSlots.round2[slotIndex]
+      : null;
+  const isSlotTopicLocked = Boolean(lockedSlotTopicId);
+  const lockedTopicObj = useMemo(() => {
+    if (!lockedSlotTopicId || !db?.topics) return null;
+    return db.topics.find((t) => t.id === lockedSlotTopicId || t.topicId === lockedSlotTopicId) || null;
+  }, [lockedSlotTopicId, db?.topics]);
+
   // Sync winningTopic if currentStation already has a selectedTopic
   useEffect(() => {
     if (currentStation?.selectedTopic) {
@@ -306,28 +317,39 @@ export const Round2: React.FC = () => {
       return lockedWheelTopics.filter(Boolean).slice(0, wheelCount);
     }
 
+    let baseList: Topic[] = [];
+
     // 2. Station state active wheel topics (strictly synchronized to wheelCount)
     if (currentStation?.activeWheelTopics && currentStation.activeWheelTopics.length > 0) {
       const stationList = currentStation.activeWheelTopics.filter(Boolean);
       if (stationList.length === wheelCount) {
-        return stationList;
-      }
-      if (stationList.length > wheelCount) {
-        return stationList.slice(0, wheelCount);
-      }
-      const combined = [...stationList];
-      for (const t of dynamicWheelTopics) {
-        if (combined.length >= wheelCount) break;
-        if (!combined.some((c) => c.id === t.id)) {
-          combined.push(t);
+        baseList = stationList;
+      } else if (stationList.length > wheelCount) {
+        baseList = stationList.slice(0, wheelCount);
+      } else {
+        const combined = [...stationList];
+        for (const t of dynamicWheelTopics) {
+          if (combined.length >= wheelCount) break;
+          if (!combined.some((c) => c.id === t.id)) {
+            combined.push(t);
+          }
         }
+        baseList = combined.slice(0, wheelCount);
       }
-      return combined.slice(0, wheelCount);
+    } else {
+      // 3. Dynamic wheel topics fallback
+      baseList = (dynamicWheelTopics || []).filter(Boolean).slice(0, wheelCount);
     }
 
-    // 3. Dynamic wheel topics fallback
-    return (dynamicWheelTopics || []).filter(Boolean).slice(0, wheelCount);
-  }, [lockedWheelTopics, currentStation?.activeWheelTopics, dynamicWheelTopics, wheelCount]);
+    // 4. If this heat slot is pre-locked across stations, guarantee the locked topic is mounted on the wheel!
+    if (lockedTopicObj && baseList.length > 0 && !baseList.some((t) => t.id === lockedTopicObj.id)) {
+      const mounted = [...baseList];
+      mounted[0] = lockedTopicObj;
+      return mounted;
+    }
+
+    return baseList;
+  }, [lockedWheelTopics, currentStation?.activeWheelTopics, dynamicWheelTopics, wheelCount, lockedTopicObj]);
 
   // Color palette for slices
   const sliceColors = useMemo(
@@ -369,6 +391,10 @@ export const Round2: React.FC = () => {
     let currentWheel = cleanedWheel.length > 0 ? [...cleanedWheel] : [...activeWheelTopics];
     if (currentWheel.length === 0 && pool.length > 0) {
       currentWheel = pool.slice(0, wheelCount);
+    }
+    // Guarantee locked topic is mounted into currentWheel if heat slot was already locked
+    if (lockedTopicObj && !currentWheel.some((t) => t?.id === lockedTopicObj.id)) {
+      currentWheel[0] = lockedTopicObj;
     }
     setLockedWheelTopics(currentWheel);
     setIsSpinning(true);
@@ -1019,10 +1045,22 @@ export const Round2: React.FC = () => {
         {/* Left Column: Canvas Spinning Wheel */}
         <div className="lg:col-span-7 bg-slate-900/90 border border-purple-900/30 rounded-3xl p-5 shadow-2xl flex flex-col items-center justify-between space-y-4">
           <div className="w-full flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              Dynamic Wheel Arena ({activeWheelTopics.length} Slices)
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                Dynamic Wheel Arena ({activeWheelTopics.length} Slices)
+              </span>
+
+              {isSlotTopicLocked && (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-bold shadow-sm animate-in fade-in">
+                  <Lock className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span>Heat #{slotIndex + 1} Locked:</span>
+                  <span className="text-white font-['Outfit'] font-extrabold max-w-[140px] sm:max-w-[220px] truncate">
+                    "{lockedTopicObj?.topic || 'Assigned Topic'}"
+                  </span>
+                </span>
+              )}
+            </div>
 
             {/* Font Size Adjuster for Wheel Topics */}
             <div className="flex items-center gap-2">
@@ -1061,10 +1099,33 @@ export const Round2: React.FC = () => {
               <button
                 onClick={handleSpin}
                 disabled={isSpinning || timerPhase === 'speech'}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white font-bold text-xs shadow-lg shadow-purple-950/60 transition-all active:scale-95 cursor-pointer"
+                className={`flex items-center gap-2 px-5 py-2 rounded-xl text-white font-bold text-xs shadow-lg transition-all active:scale-95 cursor-pointer disabled:opacity-40 ${
+                  isSlotTopicLocked
+                    ? 'bg-gradient-to-r from-amber-600 via-purple-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 shadow-amber-950/50 border border-amber-400/40'
+                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-950/60'
+                }`}
+                title={
+                  isSlotTopicLocked
+                    ? `Heat #${slotIndex + 1} topic is locked across all stations. Click to spin and land on the synchronized topic.`
+                    : `First station at Heat #${slotIndex + 1}: spinning will randomly pick and lock this topic across all stations.`
+                }
               >
-                <RotateCw className={`w-4 h-4 ${isSpinning ? 'animate-spin' : ''}`} />
-                <span>{isSpinning ? 'SPINNING...' : 'SPIN THE WHEEL'}</span>
+                {isSpinning ? (
+                  <>
+                    <RotateCw className="w-4 h-4 animate-spin" />
+                    <span>SPINNING...</span>
+                  </>
+                ) : isSlotTopicLocked ? (
+                  <>
+                    <Lock className="w-4 h-4 text-amber-300" />
+                    <span>SPIN WHEEL (Heat #{slotIndex + 1} Locked)</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCw className="w-4 h-4 text-purple-200" />
+                    <span>SPIN THE WHEEL</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
