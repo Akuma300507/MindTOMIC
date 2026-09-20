@@ -15,8 +15,8 @@ import {
   type StationState,
   type DeviceRole,
   type ProjectorDevice,
-  isParticipantCheckedIn,
 } from '../types';
+import { isParticipantCheckedIn } from '../lib/participantUtils';
 import { api } from '../lib/api';
 import { soundEngine } from '../lib/audio';
 import { getServerNow, recordServerTimestamp } from '../lib/timeSync';

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { Participant, Topic, AppDatabase, CustomFieldDefinition } from '../types';
-import { isParticipantCheckedIn } from '../types';
+import { isParticipantCheckedIn } from './participantUtils';
 
 export const excelService = {
   // Generate & download participant template

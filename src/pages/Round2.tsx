@@ -26,13 +26,8 @@ import confetti from 'canvas-confetti';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
 import { SpinRevealCardModal } from '../components/common/SpinRevealCardModal';
 import { ParticipantSearchInput } from '../components/common/ParticipantSearchInput';
-import {
-  isParticipantCheckedIn,
-  isParticipantRoundCompleted,
-  type Topic,
-  type Round2Result,
-  type Participant,
-} from '../types';
+import { isParticipantCheckedIn, isParticipantRoundCompleted } from '../lib/participantUtils';
+import type { Topic, Round2Result, Participant } from '../types';
 
 export const Round2: React.FC = () => {
   const {

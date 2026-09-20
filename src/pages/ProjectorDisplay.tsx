@@ -31,7 +31,8 @@ import { computeStationTimer, formatTimeMMSS } from '../lib/timerUtils';
 import { getServerNow } from '../lib/timeSync';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
 import { InspireLogo } from '../components/common/InspireLogo';
-import { type Topic, type Participant, isParticipantCheckedIn } from '../types';
+import { type Topic, type Participant } from '../types';
+import { isParticipantCheckedIn } from '../lib/participantUtils';
 
 export const ProjectorDisplay: React.FC = () => {
   const {

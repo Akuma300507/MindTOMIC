@@ -15,12 +15,8 @@ import {
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
 import { ParticipantSearchInput } from '../components/common/ParticipantSearchInput';
-import {
-  isParticipantCheckedIn,
-  isParticipantRoundCompleted,
-  type Round3Result,
-  type Participant,
-} from '../types';
+import { isParticipantCheckedIn, isParticipantRoundCompleted } from '../lib/participantUtils';
+import type { Round3Result, Participant } from '../types';
 
 export const Round3: React.FC = () => {
   const {

@@ -56,7 +56,6 @@ import { getServerNow } from '../lib/timeSync';
 import { MindToMicLogo } from '../components/common/MindToMicLogo';
 import { MiniProjectorPreview } from '../components/common/MiniProjectorPreview';
 import {
-  isParticipantCheckedIn,
   type StationState,
   type StationStatus,
   type Participant,
@@ -65,6 +64,7 @@ import {
   type Round2Result,
   type Round3Result,
 } from '../types';
+import { isParticipantCheckedIn } from '../lib/participantUtils';
 
 export const Master: React.FC = () => {
   const {

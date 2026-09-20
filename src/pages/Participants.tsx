@@ -24,7 +24,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { excelService } from '../lib/excel';
 import type { Participant, CustomFieldDefinition, CustomFieldType, RoundStatus, QualificationStatus } from '../types';
-import { isParticipantCheckedIn } from '../types';
+import { isParticipantCheckedIn } from '../lib/participantUtils';
 
 export const Participants: React.FC = () => {
   const {

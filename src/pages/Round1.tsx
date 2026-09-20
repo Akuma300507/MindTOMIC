@@ -21,7 +21,8 @@ import {
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
 import { ParticipantSearchInput } from '../components/common/ParticipantSearchInput';
-import { isParticipantCheckedIn, isParticipantRoundCompleted, type EventImage, type Participant, type Round1Result } from '../types';
+import { isParticipantCheckedIn, isParticipantRoundCompleted } from '../lib/participantUtils';
+import type { EventImage, Participant, Round1Result } from '../types';
 
 export const Round1: React.FC = () => {
   const {
