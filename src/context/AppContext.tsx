@@ -217,9 +217,9 @@ interface AppContextType {
   ) => Promise<Participant[]>;
   // Buzzer & Sound
   triggerBuzzer: (reason?: string, round?: string) => Promise<void>;
-  playBuzzerLocal: () => void;
+  playBuzzerLocal: (forStationId?: string) => void;
   triggerWarningBuzzer: (reason?: string, round?: string) => Promise<void>;
-  playWarningBuzzerLocal: () => void;
+  playWarningBuzzerLocal: (forStationId?: string) => void;
   uploadCustomBuzzer: (audioData: string, fileName?: string) => Promise<void>;
   resetCustomBuzzer: () => Promise<void>;
   uploadCustomPrepBuzzer: (audioData: string, fileName?: string) => Promise<void>;
@@ -353,6 +353,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const urlStation = new URLSearchParams(window.location.search).get('station');
       if (urlStation) return urlStation;
+      const sessionSaved = sessionStorage.getItem('m2m_current_station_id');
+      if (sessionSaved) return sessionSaved;
       const saved = localStorage.getItem('m2m_current_station_id');
       if (saved) return saved;
     } catch {}
@@ -361,11 +363,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const setCurrentStationId = useCallback((id: string | null) => {
     setCurrentStationIdState(id);
+    currentStationIdRef.current = id;
     try {
       if (id) {
+        sessionStorage.setItem('m2m_current_station_id', id);
         localStorage.setItem('m2m_current_station_id', id);
+        const url = new URL(window.location.href);
+        url.searchParams.set('station', id);
+        window.history.replaceState({}, '', url.toString());
       } else {
+        sessionStorage.removeItem('m2m_current_station_id');
         localStorage.removeItem('m2m_current_station_id');
+        const url = new URL(window.location.href);
+        url.searchParams.delete('station');
+        window.history.replaceState({}, '', url.toString());
       }
     } catch {}
 
@@ -485,7 +496,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  const playBuzzerLocal = useCallback(() => {
+  const playBuzzerLocal = useCallback((forStationId?: string) => {
+    const activeStation = currentStationIdRef.current;
+    if (forStationId && forStationId !== 'all') {
+      if (!activeStation || activeStation === 'all' || activeStation !== forStationId) {
+        return; // Target station mismatch -> Silence completely!
+      }
+    }
     const currentDb = dbRef.current;
     if (currentDb?.settings?.buzzer?.laptopBuzzer !== false) {
       soundEngine.playBuzzer(
@@ -496,7 +513,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  const playBuzzerWithDebounce = useCallback((eventId?: string) => {
+  const playBuzzerWithDebounce = useCallback((eventId?: string, forStationId?: string) => {
+    const activeStation = currentStationIdRef.current;
+    if (forStationId && forStationId !== 'all') {
+      if (!activeStation || activeStation === 'all' || activeStation !== forStationId) {
+        return; // Target station mismatch -> Silence completely!
+      }
+    }
     const now = Date.now();
     if (eventId && lastPlayedBuzzerEventId.current === eventId) {
       return; // Already played for this event
@@ -508,10 +531,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastPlayedBuzzerEventId.current = eventId;
     }
     lastPlayedBuzzerTime.current = now;
-    playBuzzerLocal();
+    playBuzzerLocal(forStationId);
   }, [playBuzzerLocal]);
 
-  const playWarningBuzzerLocal = useCallback(() => {
+  const playWarningBuzzerLocal = useCallback((forStationId?: string) => {
+    const activeStation = currentStationIdRef.current;
+    if (forStationId && forStationId !== 'all') {
+      if (!activeStation || activeStation === 'all' || activeStation !== forStationId) {
+        return; // Target station mismatch -> Silence completely!
+      }
+    }
     const currentDb = dbRef.current;
     if (currentDb?.settings?.buzzer?.laptopBuzzer !== false) {
       soundEngine.playWarningBuzzer(
@@ -522,7 +551,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  const playWarningBuzzerWithDebounce = useCallback((eventId?: string) => {
+  const playWarningBuzzerWithDebounce = useCallback((eventId?: string, forStationId?: string) => {
+    const activeStation = currentStationIdRef.current;
+    if (forStationId && forStationId !== 'all') {
+      if (!activeStation || activeStation === 'all' || activeStation !== forStationId) {
+        return; // Target station mismatch -> Silence completely!
+      }
+    }
     const now = Date.now();
     if (eventId && lastPlayedBuzzerEventId.current === eventId) {
       return;
@@ -534,7 +569,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastPlayedBuzzerEventId.current = eventId;
     }
     lastPlayedBuzzerTime.current = now;
-    playWarningBuzzerLocal();
+    playWarningBuzzerLocal(forStationId);
   }, [playWarningBuzzerLocal]);
 
   const reloadState = useCallback(async () => {
@@ -1069,13 +1104,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         startedAt: payload.action === 'start' ? (payload.startedAt || serverNow) : payload.startedAt,
       };
 
-      // Immediate local zero-delay buzzer trigger ONLY on natural Time Up (Stop button must NOT play buzzer)
+      // Immediate local zero-delay buzzer trigger ONLY on natural Time Up for THIS station
       if (payload.action === 'time_up') {
-        const roundNum = db?.stations?.[stationId]?.currentRound || 1;
-        const roundSettings = (db?.settings as any)?.[`round${roundNum}`] || db?.settings?.round1;
-        if (roundSettings?.buzzerEnabled !== false) {
-          const localEventId = `buzzer-${Date.now()}-${stationId}`;
-          playBuzzerWithDebounce(localEventId);
+        const isDeviceForStation = currentStationIdRef.current === stationId;
+        if (isDeviceForStation) {
+          const roundNum = db?.stations?.[stationId]?.currentRound || 1;
+          const roundSettings = (db?.settings as any)?.[`round${roundNum}`] || db?.settings?.round1;
+          if (roundSettings?.buzzerEnabled !== false) {
+            const localEventId = `buzzer-${Date.now()}-${stationId}`;
+            playBuzzerWithDebounce(localEventId, stationId);
+          }
         }
       }
 
@@ -1203,33 +1241,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const devStation = currentStationIdRef.current;
 
           // STRICT MULTI-STATION AUDIO ISOLATION:
-          // 1. If this buzzer event specifies a stationId:
-          //    It MUST ONLY sound on devices/projectors currently operating or assigned to THAT station!
-          //    If this device is on another station (e.g. Station B while buzzer is for Station A), SILENCE IT!
-          if (payload?.stationId) {
-            if (devStation && devStation !== 'all' && payload.stationId !== devStation) {
-              return; // Station mismatch -> Silence immediately!
+          // 1. If this buzzer specifies a stationId:
+          //    It MUST ONLY sound on devices/projectors currently operating THAT station!
+          //    If this device is on another station (e.g. Station B while buzzer is for Station A)
+          //    or in overview/master mode (devStation is 'all' or not matched), SILENCE IT!
+          if (payload?.stationId && payload.stationId !== 'all') {
+            if (!devStation || devStation === 'all' || devStation !== payload.stationId) {
+              return; // Station mismatch or non-station monitor -> Silence immediately!
             }
           }
 
-          // 2. If this device is operating a specific station (e.g. Station B):
-          //    Never play ANY timer/time_limit buzzers unless specifically addressed to THIS station!
-          //    This prevents un-isolated global timer alarms from disrupting this station's ongoing speech.
-          if (devStation && devStation !== 'all') {
-            const isTimerBuzzer =
-              payload?.source === 'time_limit' ||
-              payload?.source === 'timer' ||
-              payload?.source === 'timer_auto' ||
-              payload?.reason?.toLowerCase().includes('time');
-            if (isTimerBuzzer && payload?.stationId !== devStation) {
-              return; // Silence timer alarm from other station!
+          // 2. Timer/time-over buzzers of any kind MUST be station-bound:
+          const isTimerBuzzer =
+            payload?.source === 'time_limit' ||
+            payload?.source === 'timer' ||
+            payload?.source === 'timer_auto' ||
+            payload?.reason?.toLowerCase().includes('time') ||
+            payload?.reason?.toLowerCase().includes('expired') ||
+            payload?.reason?.toLowerCase().includes('limit');
+
+          if (isTimerBuzzer) {
+            // A timer buzzer MUST specify a stationId and MUST match this station!
+            if (!payload?.stationId || payload.stationId === 'all' || !devStation || devStation === 'all' || payload.stationId !== devStation) {
+              return; // Silence timer alarm on any non-matching station, master console, or unassigned view!
             }
           }
 
           if (payload?.soundType === 'warning' || payload?.source === 'warning_buzzer') {
-            playWarningBuzzerWithDebounce(payload?.eventId);
+            playWarningBuzzerWithDebounce(payload?.eventId, payload?.stationId);
           } else {
-            playBuzzerWithDebounce(payload?.eventId);
+            playBuzzerWithDebounce(payload?.eventId, payload?.stationId);
           }
         } catch (err) {
           console.error('Failed to handle buzzer SSE event:', err);
@@ -1654,8 +1695,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!currentDb?.stations) return;
       const now = getServerNow();
 
+      const devStation = currentStationIdRef.current;
+
       Object.values(currentDb.stations).forEach((st) => {
         if (!st.isTimerRunning || st.timerStatus !== 'running') return;
+
+        // Strict station isolation: If this client is operating a specific station, only manage THAT station.
+        // Overview devices (devStation === 'all' or null) should NEVER trigger station timer actions!
+        if (!devStation || devStation === 'all' || st.id !== devStation) {
+          return;
+        }
 
         // Auto-transition from prep to speech when prep ends
         if (st.timerMode === 'prep' && st.timerEndsAt && now >= st.timerEndsAt) {
@@ -1890,31 +1939,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const triggerBuzzer = useCallback(
     async (reason: string = 'Manual Buzzer', round: string = 'General') => {
       unlockSound();
-      playBuzzerLocal();
+      const station = currentStationIdRef.current;
+      playBuzzerLocal(station && station !== 'all' ? station : undefined);
       await api.triggerBuzzer({
         source: 'organizer',
         reason,
         round,
         participantName: activeParticipant?.name,
-        stationId: currentStationId || undefined,
+        stationId: station && station !== 'all' ? station : undefined,
       });
     },
-    [activeParticipant?.name, currentStationId, unlockSound, playBuzzerLocal]
+    [activeParticipant?.name, unlockSound, playBuzzerLocal]
   );
 
   const triggerWarningBuzzer = useCallback(
     async (reason: string = 'Warning Buzzer', round: string = 'General') => {
       unlockSound();
-      playWarningBuzzerLocal();
+      const station = currentStationIdRef.current;
+      playWarningBuzzerLocal(station && station !== 'all' ? station : undefined);
       await api.triggerBuzzer({
         source: 'warning_buzzer',
         reason,
         round,
         participantName: activeParticipant?.name,
-        stationId: currentStationId || undefined,
+        stationId: station && station !== 'all' ? station : undefined,
       });
     },
-    [activeParticipant?.name, currentStationId, unlockSound, playWarningBuzzerLocal]
+    [activeParticipant?.name, unlockSound, playWarningBuzzerLocal]
   );
 
   // Keyboard shortcuts (SPACE, S, R, B, N, F)

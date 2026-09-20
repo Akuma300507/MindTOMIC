@@ -562,10 +562,12 @@ function broadcastStationUpdate(stationId: string, event: string, data: any) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   const targetChannel = `station:${stationId}`;
   sseClients.forEach((client) => {
-    // Audio isolation: buzzer_trigger must ONLY be sent to clients explicitly listening to THIS station!
-    // Never leak audio buzzers across stations or to general master channels!
     if (event === 'buzzer_trigger') {
-      if (client.channels.has(targetChannel) || client.stationId === stationId) {
+      // Audio isolation: buzzer_trigger must ONLY be sent to clients explicitly operating THIS station!
+      // Never send to clients assigned to other stations (e.g. station-b when station-a fires) or overview
+      const isTargetStation = client.stationId === stationId || client.channels.has(targetChannel);
+      const isNotDifferentStation = !client.stationId || client.stationId === stationId;
+      if (isTargetStation && isNotDifferentStation) {
         try {
           client.res.write(payload);
         } catch {
@@ -991,7 +993,11 @@ app.post('/api/buzzer/trigger', (req: Request, res: Response) => {
   if (stationId && stationId !== 'all') {
     broadcastStationUpdate(stationId, 'buzzer_trigger', triggerPayload);
   } else {
-    broadcastSSE('buzzer_trigger', triggerPayload);
+    // Only broadcast manual organizer buzzers globally if not a timer alarm
+    const isTimerRelated = source === 'timer' || source === 'time_limit' || source === 'timer_auto' || Boolean(reason?.toLowerCase().includes('time'));
+    if (!isWarning && !isTimerRelated) {
+      broadcastSSE('buzzer_trigger', triggerPayload);
+    }
   }
 
   logAction('Buzzer Triggered', `${reason || 'Manual Buzzer'} sounded by ${source || 'organizer'} (${round || 'General'}) ${participantName ? 'for ' + participantName : ''}${stationId ? ` [${stationId}]` : ''}`);
@@ -1283,17 +1289,7 @@ app.post('/api/timer/action', (req: Request, res: Response) => {
         });
       }
     } else {
-      if (db.settings.buzzer.autoBuzzerOnZero) {
-        broadcastSSE('buzzer_trigger', {
-          timestamp: now,
-          eventId: `buzzer-${now}-global`,
-          source: 'timer_auto',
-          reason: 'Time Expired (00:00)',
-          round: round || 'General',
-          sound: db.settings.buzzer.sound,
-          volume: db.settings.buzzer.volume,
-        });
-      }
+      // Audio safety: Never broadcast timer auto-buzzers globally across all stations without an explicit stationId
     }
   }
 

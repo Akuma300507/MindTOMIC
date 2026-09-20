@@ -82,18 +82,28 @@ export const Timer: React.FC<TimerProps> = ({
   const isStationMatchingRound = !activeStation?.currentRound || activeStation.currentRound === roundNum;
 
   const playCurrentPrepBuzzer = useCallback(() => {
+    if (activeStationId && activeStationId !== 'all') {
+      if (currentStationId && currentStationId !== activeStationId) {
+        return; // Don't play on non-matching station
+      }
+    }
     const prepSound = db?.settings?.buzzer?.prepSound || 'dual_alert';
     const prepVol = db?.settings?.buzzer?.prepVolume ?? 85;
     const customUrl = db?.settings?.buzzer?.prepCustomAudioUrl;
     soundEngine.playPrepOverBuzzer(prepSound, prepVol, customUrl);
-  }, [db?.settings?.buzzer?.prepSound, db?.settings?.buzzer?.prepVolume, db?.settings?.buzzer?.prepCustomAudioUrl]);
+  }, [db?.settings?.buzzer?.prepSound, db?.settings?.buzzer?.prepVolume, db?.settings?.buzzer?.prepCustomAudioUrl, activeStationId, currentStationId]);
 
   const playCurrentWarningBuzzer = useCallback(() => {
+    if (activeStationId && activeStationId !== 'all') {
+      if (currentStationId && currentStationId !== activeStationId) {
+        return; // Don't play on non-matching station
+      }
+    }
     const warnSound = db?.settings?.buzzer?.warningSound || 'double_beep';
     const warnVol = db?.settings?.buzzer?.warningVolume ?? 85;
     const customUrl = db?.settings?.buzzer?.warningCustomAudioUrl;
     soundEngine.playWarningBuzzer(warnSound, warnVol, customUrl);
-  }, [db?.settings?.buzzer?.warningSound, db?.settings?.buzzer?.warningVolume, db?.settings?.buzzer?.warningCustomAudioUrl]);
+  }, [db?.settings?.buzzer?.warningSound, db?.settings?.buzzer?.warningVolume, db?.settings?.buzzer?.warningCustomAudioUrl, activeStationId, currentStationId]);
 
   // Initial state calculation directly from active station state if running/paused
   const getInitialTimerState = () => {
@@ -260,15 +270,21 @@ export const Timer: React.FC<TimerProps> = ({
         if (tickerPhase === 'speech' && diff <= 10 && diff > 0) {
           if (lastTickedSecondRef.current !== diff) {
             lastTickedSecondRef.current = diff;
-            soundEngine.playWarningTick(75);
+            const isLocalStation = !activeStationId || activeStationId === 'all' || activeStationId === currentStationId;
+            if (isLocalStation) {
+              soundEngine.playWarningTick(75);
+            }
           }
         }
 
         if (diff <= 0) {
           clearIntervalSafe();
+          const isLocalStation = !activeStationId || activeStationId === 'all' || activeStationId === currentStationId;
           if (tickerPhase === 'prep') {
             // Sound 1: Buzzer sound when the prep time is over
-            playCurrentPrepBuzzer();
+            if (isLocalStation) {
+              playCurrentPrepBuzzer();
+            }
             transitionToSpeechRef.current();
           } else {
             // Sound 3: Finish buzzer sound after speech time limit is reached
@@ -280,9 +296,6 @@ export const Timer: React.FC<TimerProps> = ({
               // sendStationTimerAction handles local zero-delay station-scoped buzzer and scoped server broadcast
               sendStationTimerAction(activeStationId, { action: 'time_up', phase: 'speech', remainingSeconds: 0 }).catch(() => {});
             } else {
-              if (buzzerEnabled) {
-                triggerBuzzer('Time Limit Reached', roundName);
-              }
               sendTimerAction({ action: 'time_up', round: roundName, phase: 'speech' });
             }
             startOvertimeTicker(timeUpEndsAt);
