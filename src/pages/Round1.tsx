@@ -214,7 +214,7 @@ export const Round1: React.FC = () => {
   }, [currentStation?.selectedImage]);
 
   // Heat slot index within this station:
-  // Dynamically determined by contestant index within the station's roster,
+  // Dynamically determined by turn order (number of completed Round 1 contestants at this station),
   // or the contestant's locked round1SlotIndex if already assigned/completed.
   const slotIndex = useMemo(() => {
     if (!activeParticipant) return 0;
@@ -225,12 +225,15 @@ export const Round1: React.FC = () => {
     if (typeof r1Result?.slotIndex === 'number' && r1Result.slotIndex >= 0) {
       return r1Result.slotIndex;
     }
-    const idx = checkedInStationParticipants.findIndex((p) => p.id === activeParticipant.id);
-    if (idx >= 0) return idx;
-    const allIdx = stationParticipants.findIndex((p) => p.id === activeParticipant.id);
-    if (allIdx >= 0) return allIdx;
     return completedStationParticipants.length;
-  }, [activeParticipant, db?.round1Results, checkedInStationParticipants, stationParticipants, completedStationParticipants.length]);
+  }, [activeParticipant, db?.round1Results, completedStationParticipants.length]);
+
+  const isSync = db?.settings?.round1?.synchronizedSlots !== false;
+  const lockedSlotImageId =
+    isSync && db?.synchronizedSlots?.round1 && typeof db.synchronizedSlots.round1[slotIndex] === 'string'
+      ? db.synchronizedSlots.round1[slotIndex]
+      : null;
+  const isSlotImageLocked = Boolean(lockedSlotImageId);
 
   // Available images based on reuse policy or synchronized slots
   const availableImages = useMemo(() => {
@@ -587,6 +590,28 @@ export const Round1: React.FC = () => {
             </span>
           </button>
 
+          {/* Pick Random Contestant Button */}
+          <button
+            onClick={() => {
+              const pool = checkedInPendingStationParticipants.length > 0
+                ? checkedInPendingStationParticipants
+                : pendingStationParticipants.length > 0
+                ? pendingStationParticipants
+                : stationParticipants;
+              if (pool.length === 0) return;
+              const unchosen = pool.filter((p) => p.id !== activeParticipant?.id);
+              const candidates = unchosen.length > 0 ? unchosen : pool;
+              const picked = candidates[Math.floor(Math.random() * candidates.length)];
+              handleSelectContestant(picked);
+            }}
+            disabled={stationParticipants.length === 0 && (!db?.participants || db.participants.length === 0)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 border border-purple-800/40 text-xs font-bold transition-all shadow-md disabled:opacity-40 cursor-pointer"
+            title="Randomly choose a contestant for this station"
+          >
+            <Shuffle className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Random</span>
+          </button>
+
           <button
             onClick={() => {
               if (checkedInPendingStationParticipants.length > 0) {
@@ -767,11 +792,30 @@ export const Round1: React.FC = () => {
               <button
                 onClick={handleRandomImage}
                 disabled={timerPhase === 'prep' || timerPhase === 'speech'}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 disabled:opacity-40"
-                title="Randomly choose an unused image"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer disabled:opacity-40 ${
+                  isSlotImageLocked && !selectedImage
+                    ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/50 shadow-md shadow-amber-950/40 animate-pulse'
+                    : isSlotImageLocked
+                    ? 'bg-amber-950/40 text-amber-300 border-amber-600/40'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                }`}
+                title={
+                  isSlotImageLocked
+                    ? `Heat #${slotIndex + 1} image is locked across all stations. Click to reveal.`
+                    : `First station at Heat #${slotIndex + 1}: randomly chooses and locks image for all stations.`
+                }
               >
-                <Shuffle className="w-3.5 h-3.5 text-blue-400" />
-                <span>Random Image</span>
+                {isSlotImageLocked ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{selectedImage ? `Heat #${slotIndex + 1} Locked` : `Reveal Heat #${slotIndex + 1} Image`}</span>
+                  </>
+                ) : (
+                  <>
+                    <Shuffle className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Random Image</span>
+                  </>
+                )}
               </button>
 
               <button
@@ -829,10 +873,20 @@ export const Round1: React.FC = () => {
                   </div>
                 </div>
               </>
+            ) : isSlotImageLocked ? (
+              <div className="text-center p-8 text-amber-300/80 animate-in fade-in">
+                <div className="w-12 h-12 mx-auto mb-2 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-950/50">
+                  <Lock className="w-6 h-6 text-amber-400" />
+                </div>
+                <p className="font-extrabold text-base text-white">Heat #{slotIndex + 1} Image Locked</p>
+                <p className="text-xs text-amber-300/80 mt-1 max-w-sm mx-auto">
+                  Pre-registered across all stations for Contestant #{slotIndex + 1}. Click <strong>Reveal Heat #{slotIndex + 1} Image</strong> above when the contestant is ready on stage.
+                </p>
+              </div>
             ) : (
               <div className="text-center p-8 text-slate-500">
                 <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-40" />
-                <p>No image selected. Click Random or Gallery.</p>
+                <p>No image selected. Click Random Image or Gallery.</p>
               </div>
             )}
           </div>

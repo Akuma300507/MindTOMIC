@@ -15,6 +15,7 @@ import {
   Plus,
   Minus,
   Lock,
+  Shuffle,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Timer, TimerPhase } from '../components/common/Timer';
@@ -870,6 +871,26 @@ export const Round2: React.FC = () => {
             onSelectParticipant={handleSelectContestant}
             placeholder="Search #ID or name..."
           />
+
+          {/* Pick Random Contestant Button */}
+          <button
+            onClick={() => {
+              const pool = pendingRound2Participants.length > 0
+                ? pendingRound2Participants
+                : (stationEligibleRound2Participants.length > 0 ? stationEligibleRound2Participants : []);
+              if (pool.length === 0) return;
+              const unchosen = pool.filter((p) => p.id !== activeParticipant?.id);
+              const candidates = unchosen.length > 0 ? unchosen : pool;
+              const picked = candidates[Math.floor(Math.random() * candidates.length)];
+              handleSelectContestant(picked);
+            }}
+            disabled={pendingRound2Participants.length === 0 && stationEligibleRound2Participants.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 border border-purple-800/40 text-xs font-bold transition-all shadow-md disabled:opacity-40 cursor-pointer"
+            title="Randomly choose a qualified contestant for this station"
+          >
+            <Shuffle className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Random</span>
+          </button>
 
           <button
             onClick={() => {

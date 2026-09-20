@@ -2270,10 +2270,13 @@ function getOrAssignSlotItem(
   });
 
   if (round === 'round1') {
-    // Candidates not assigned to any other slot
-    const candidates = db.images.filter(
-      (img) => !assignedSlotIds.has(img.id) && !assignedSlotIds.has(img.imageId || '')
-    );
+    // Candidates not assigned to any other slot and compatible with this station
+    const candidates = db.images.filter((img) => {
+      if (stationId && img.stationId && img.stationId !== 'all' && img.stationId !== stationId) {
+        return false;
+      }
+      return !assignedSlotIds.has(img.id) && !assignedSlotIds.has(img.imageId || '');
+    });
     let pool = candidates.filter((i) => i.status === 'available');
     if (pool.length === 0) {
       pool = candidates.length > 0 ? candidates : db.images.filter((img) => !assignedSlotIds.has(img.id));
@@ -2378,13 +2381,6 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
       slotIndex = (targetParticipant as any).round1SlotIndex;
     }
   }
-  if (slotIndex === -1 && targetParticipant) {
-    const stParticipants = db.participants.filter(
-      (p) => p.stationId === station.id || p.round1StationId === station.id
-    );
-    const pIdx = stParticipants.findIndex((p) => p.id === targetParticipant.id);
-    if (pIdx >= 0) slotIndex = pIdx;
-  }
   if (slotIndex === -1) {
     slotIndex = db.round1Results.filter((r) => {
       const p = db.participants.find((item) => item.id === r.participantId);
@@ -2410,13 +2406,7 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
 
   if (!chosen && isSynchronized) {
     const slotRes = getOrAssignSlotItem('round1', slotIndex, station.id);
-    // If the station already has this slot's image on screen and clicks Random Image again,
-    // they want to re-roll/re-shuffle! Let them re-roll a new image from candidates below.
-    if (!slotRes.isNew && station.selectedImageId && slotRes.item && station.selectedImageId === slotRes.item.id) {
-      chosen = null;
-    } else {
-      chosen = slotRes.item as EventImage | null;
-    }
+    chosen = slotRes.item as EventImage | null;
   }
 
   if (!chosen) {
