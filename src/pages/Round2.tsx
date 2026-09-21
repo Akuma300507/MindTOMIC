@@ -224,11 +224,11 @@ export const Round2: React.FC = () => {
   }, [allTopicsPool, currentStationId]);
 
   const topicsPool = stationTopicsPool;
-  const wheelCount = db?.settings?.round2?.activeWheelTopicCount ?? 20;
-  const speechSeconds = db?.settings?.round2?.speechTimeSeconds ?? 120;
+  const wheelCount = db?.settings?.round2?.activeWheelTopicCount ?? 10;
+  const speechSeconds = db?.settings?.round2?.speechTimeSeconds ?? 480;
   const buzzerEnabled = db?.settings?.round2?.buzzerEnabled ?? true;
   const warningBuzzerEnabled = db?.settings?.round2?.warningBuzzerEnabled ?? true;
-  const warningTimeSeconds = db?.settings?.round2?.warningTimeSeconds ?? 30;
+  const warningTimeSeconds = db?.settings?.round2?.warningTimeSeconds ?? 120;
   const reuseAllowed = db?.settings?.round2?.topicReuseAllowed ?? false;
 
   // Heat slot index within this station for Round 2:

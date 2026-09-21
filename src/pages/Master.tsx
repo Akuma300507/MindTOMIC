@@ -325,7 +325,7 @@ export const Master: React.FC = () => {
 
   // Overall event & stage telemetry metrics
   const eventName = db?.settings?.event?.name || 'Mind to Mic 2026';
-  const eventTagline = db?.settings?.event?.tagline || 'Think Fast, Speak Faster';
+  const eventTagline = db?.settings?.event?.tagline || 'WHERE THOUGHTS FIND THEIR VOICE';
   const totalSpeechesConducted =
     (db?.round1Results?.length || 0) +
     (db?.round2Results?.length || 0) +
@@ -599,11 +599,11 @@ export const Master: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Speech Time:</span>
-                  <span className="text-emerald-300 font-bold">{db?.settings?.round1?.speechTimeSeconds || 120}s</span>
+                  <span className="text-emerald-300 font-bold">{db?.settings?.round1?.speechTimeSeconds || 180}s</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Warning Buzzer:</span>
-                  <span className="text-amber-300 font-bold">At {db?.settings?.round1?.warningTimeSeconds || 30}s rem</span>
+                  <span className="text-amber-300 font-bold">At {db?.settings?.round1?.warningTimeSeconds || 60}s rem</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Image Pool:</span>
@@ -628,11 +628,11 @@ export const Master: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Speech Time:</span>
-                  <span className="text-emerald-300 font-bold">{db?.settings?.round2?.speechTimeSeconds || 120}s</span>
+                  <span className="text-emerald-300 font-bold">{db?.settings?.round2?.speechTimeSeconds || 480}s</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Wheel Slices:</span>
-                  <span className="text-purple-300 font-bold">{db?.settings?.round2?.activeWheelTopicCount || 20} active</span>
+                  <span className="text-purple-300 font-bold">{db?.settings?.round2?.activeWheelTopicCount || 10} active</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Topic Pool:</span>
@@ -657,11 +657,11 @@ export const Master: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Speech Time:</span>
-                  <span className="text-emerald-300 font-bold">{db?.settings?.round3?.speechTimeSeconds || 120}s</span>
+                  <span className="text-emerald-300 font-bold">{db?.settings?.round3?.speechTimeSeconds || 300}s</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Warning Chime:</span>
-                  <span className="text-amber-300 font-bold">At {db?.settings?.round3?.warningTimeSeconds || 30}s rem</span>
+                  <span className="text-amber-300 font-bold">At {db?.settings?.round3?.warningTimeSeconds || 60}s rem</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Evaluators:</span>

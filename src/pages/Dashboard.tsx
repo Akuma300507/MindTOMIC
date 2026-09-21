@@ -57,7 +57,7 @@ export const Dashboard: React.FC = () => {
               </h1>
             </div>
             <p className="text-base sm:text-lg font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-indigo-200 to-blue-300 font-mono">
-              {db?.settings?.event?.tagline || 'THINK. SPEAK. EXPRESS.'}
+              {db?.settings?.event?.tagline || 'WHERE THOUGHTS FIND THEIR VOICE'}
             </p>
           </div>
 

@@ -86,7 +86,7 @@ export const Settings: React.FC = () => {
   // Synchronized Slot Management States
   const [slotActionLoading, setSlotActionLoading] = useState(false);
   const [slotActionNotice, setSlotActionNotice] = useState<string | null>(null);
-  const [pregenerateCount, setPregenerateCount] = useState<number>(30);
+  const [pregenerateCount, setPregenerateCount] = useState<number>(60);
 
   // New Station Inputs
   const [newStationName, setNewStationName] = useState('');
@@ -101,6 +101,9 @@ export const Settings: React.FC = () => {
   useEffect(() => {
     if (db?.settings) {
       setForm(JSON.parse(JSON.stringify(db.settings)));
+      if (typeof db.settings.heatCount === 'number') {
+        setPregenerateCount(db.settings.heatCount);
+      }
     }
   }, [db?.settings]);
 
@@ -108,9 +111,10 @@ export const Settings: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const sanitizedWheelCount = Math.max(4, Math.min(50, Number(form.round2.activeWheelTopicCount) || 20));
+    const sanitizedWheelCount = Math.max(4, Math.min(50, Number(form.round2.activeWheelTopicCount) || 10));
     const cleanForm = {
       ...form,
+      heatCount: pregenerateCount,
       round2: {
         ...form.round2,
         activeWheelTopicCount: sanitizedWheelCount,
@@ -729,12 +733,12 @@ export const Settings: React.FC = () => {
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    round1: { ...form.round1, speechTimeSeconds: parseInt(e.target.value) || 120 },
+                    round1: { ...form.round1, speechTimeSeconds: parseInt(e.target.value) || 180 },
                   })
                 }
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">Default: 120s (2 minutes).</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">Default: 180s (3 minutes).</span>
             </div>
 
             <div>
@@ -744,17 +748,17 @@ export const Settings: React.FC = () => {
               <input
                 type="number"
                 min={5}
-                max={Math.max(5, (form.round1.speechTimeSeconds || 120) - 1)}
-                value={form.round1.warningTimeSeconds ?? 30}
+                max={Math.max(5, (form.round1.speechTimeSeconds || 180) - 1)}
+                value={form.round1.warningTimeSeconds ?? 60}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    round1: { ...form.round1, warningTimeSeconds: parseInt(e.target.value) || 30 },
+                    round1: { ...form.round1, warningTimeSeconds: parseInt(e.target.value) || 60 },
                   })
                 }
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">Default: 30s remaining. Plays warning buzzer.</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">Default: 60s remaining (warning at 2 minutes). Plays warning buzzer.</span>
             </div>
           </div>
 
@@ -850,7 +854,7 @@ export const Settings: React.FC = () => {
                 type="number"
                 min={4}
                 max={50}
-                value={form.round2.activeWheelTopicCount ?? 20}
+                value={form.round2.activeWheelTopicCount ?? 10}
                 onChange={(e) => {
                   const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
                   setForm({
@@ -863,7 +867,7 @@ export const Settings: React.FC = () => {
                 }}
                 onBlur={() => {
                   const currentVal = Number(form.round2.activeWheelTopicCount);
-                  const clamped = Math.max(4, Math.min(50, isNaN(currentVal) || currentVal <= 0 ? 20 : currentVal));
+                  const clamped = Math.max(4, Math.min(50, isNaN(currentVal) || currentVal <= 0 ? 10 : currentVal));
                   setForm({
                     ...form,
                     round2: { ...form.round2, activeWheelTopicCount: clamped },
@@ -872,7 +876,7 @@ export const Settings: React.FC = () => {
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                Number of slices displayed on Round 2 wheel (Min: 4, Max: 50, Default: 20).
+                Number of slices displayed on Round 2 wheel (Min: 4, Max: 50, Default: 10).
               </span>
             </div>
 
@@ -904,12 +908,12 @@ export const Settings: React.FC = () => {
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    round2: { ...form.round2, speechTimeSeconds: parseInt(e.target.value) || 120 },
+                    round2: { ...form.round2, speechTimeSeconds: parseInt(e.target.value) || 480 },
                   })
                 }
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">Default: 120s (2 minutes).</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">Default: 480s (8 minutes).</span>
             </div>
 
             <div>
@@ -919,17 +923,17 @@ export const Settings: React.FC = () => {
               <input
                 type="number"
                 min={5}
-                max={Math.max(5, (form.round2.speechTimeSeconds || 120) - 1)}
-                value={form.round2.warningTimeSeconds ?? 30}
+                max={Math.max(5, (form.round2.speechTimeSeconds || 480) - 1)}
+                value={form.round2.warningTimeSeconds ?? 120}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    round2: { ...form.round2, warningTimeSeconds: parseInt(e.target.value) || 30 },
+                    round2: { ...form.round2, warningTimeSeconds: parseInt(e.target.value) || 120 },
                   })
                 }
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">Default: 30s remaining. Plays warning buzzer.</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">Default: 120s remaining (warning at 6 minutes). Plays warning buzzer.</span>
             </div>
           </div>
 
@@ -1032,12 +1036,12 @@ export const Settings: React.FC = () => {
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    round3: { ...form.round3, speechTimeSeconds: parseInt(e.target.value) || 120 },
+                    round3: { ...form.round3, speechTimeSeconds: parseInt(e.target.value) || 300 },
                   })
                 }
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">Default: 120s.</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">Default: 300s (5 minutes).</span>
             </div>
 
             <div>
@@ -1047,17 +1051,17 @@ export const Settings: React.FC = () => {
               <input
                 type="number"
                 min={5}
-                max={Math.max(5, (form.round3.speechTimeSeconds || 120) - 1)}
-                value={form.round3.warningTimeSeconds ?? 30}
+                max={Math.max(5, (form.round3.speechTimeSeconds || 300) - 1)}
+                value={form.round3.warningTimeSeconds ?? 60}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    round3: { ...form.round3, warningTimeSeconds: parseInt(e.target.value) || 30 },
+                    round3: { ...form.round3, warningTimeSeconds: parseInt(e.target.value) || 60 },
                   })
                 }
                 className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:border-purple-500 focus:outline-none"
               />
-              <span className="text-[10px] text-slate-500 mt-1 block">Default: 30s remaining. Plays warning buzzer.</span>
+              <span className="text-[10px] text-slate-500 mt-1 block">Default: 60s remaining (warning at 4 minutes). Plays warning buzzer.</span>
             </div>
           </div>
 
@@ -1860,7 +1864,7 @@ export const Settings: React.FC = () => {
                 min={5}
                 max={150}
                 value={pregenerateCount}
-                onChange={(e) => setPregenerateCount(parseInt(e.target.value) || 30)}
+                onChange={(e) => setPregenerateCount(parseInt(e.target.value) || 60)}
                 className="w-16 bg-transparent text-white font-mono font-bold focus:outline-none"
               />
             </div>

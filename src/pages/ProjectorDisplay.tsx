@@ -173,7 +173,7 @@ export const ProjectorDisplay: React.FC = () => {
   ]);
 
   const eventName = db?.settings?.event?.name || 'MIND TO MIC';
-  const tagline = db?.settings?.event?.tagline || 'THINK. SPEAK. EXPRESS.';
+  const tagline = db?.settings?.event?.tagline || 'WHERE THOUGHTS FIND THEIR VOICE';
 
   // STRICT STATION ISOLATION: Round number for this station
   const currentRound = useMemo(() => {
@@ -365,7 +365,7 @@ export const ProjectorDisplay: React.FC = () => {
     return Math.max(48, Math.min(136, Math.floor(round3TimerSize * 0.22)));
   }, [round3TimerSize]);
 
-  const wheelTopicCount = Number(db?.settings?.round2?.activeWheelTopicCount) || 20;
+  const wheelTopicCount = Number(db?.settings?.round2?.activeWheelTopicCount) || 10;
 
   // STRICT STATION ISOLATION: Default active topics for this station
   const stationDefaultWheelTopics = useMemo(() => {

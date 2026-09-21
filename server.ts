@@ -66,40 +66,40 @@ app.use(express.static(path.join(process.cwd(), 'public')));
 const defaultSettings: EventSettings = {
   event: {
     name: 'MIND TO MIC',
-    tagline: 'THINK. SPEAK. EXPRESS.',
+    tagline: 'WHERE THOUGHTS FIND THEIR VOICE',
     logoText: 'MIND TO MIC',
   },
   round1: {
     prepEnabled: true,
     prepTimeSeconds: 30,
-    speechTimeSeconds: 120,
+    speechTimeSeconds: 180,
     buzzerEnabled: true,
-    buzzerTimeSeconds: 120,
+    buzzerTimeSeconds: 180,
     allowImageReuse: false,
     warningBuzzerEnabled: true,
-    warningTimeSeconds: 30,
+    warningTimeSeconds: 60,
     synchronizedSlots: true,
   },
   round2: {
     prepEnabled: false, // Round 2 starts speaking immediately
     prepTimeSeconds: 0,
-    speechTimeSeconds: 120,
+    speechTimeSeconds: 480,
     buzzerEnabled: true,
-    buzzerTimeSeconds: 120,
-    activeWheelTopicCount: 20,
+    buzzerTimeSeconds: 480,
+    activeWheelTopicCount: 10,
     topicReuseAllowed: false,
     warningBuzzerEnabled: true,
-    warningTimeSeconds: 30,
+    warningTimeSeconds: 120,
     synchronizedSlots: true,
   },
   round3: {
     prepEnabled: false,
     prepTimeSeconds: 0,
-    speechTimeSeconds: 120,
+    speechTimeSeconds: 300,
     buzzerEnabled: true,
-    buzzerTimeSeconds: 120,
+    buzzerTimeSeconds: 300,
     warningBuzzerEnabled: true,
-    warningTimeSeconds: 30,
+    warningTimeSeconds: 60,
   },
   buzzer: {
     laptopBuzzer: true,
@@ -113,11 +113,12 @@ const defaultSettings: EventSettings = {
     warningVolume: 85,
   },
   stations: [
-    { id: 'station-a', name: 'Station A', location: 'Room 101', handlerName: 'Alex Rivera', handlerPhone: '+1 (555) 234-5678', handlerRole: 'Stage Lead', handlerStatus: 'ready' },
-    { id: 'station-b', name: 'Station B', location: 'Room 102', handlerName: 'Maya Lin', handlerPhone: '+1 (555) 345-6789', handlerRole: 'Timekeeper', handlerStatus: 'ready' },
-    { id: 'station-c', name: 'Station C', location: 'Room 103', handlerName: 'Liam Carter', handlerPhone: '+1 (555) 456-7890', handlerRole: 'Coordinator', handlerStatus: 'ready' },
-    { id: 'station-d', name: 'Station D', location: 'Auditorium Stage', handlerName: 'Sophia Chen', handlerPhone: '+1 (555) 567-8901', handlerRole: 'Stage Manager', handlerStatus: 'ready' },
+    { id: 'station-a', name: 'Station A', location: 'D1-Seminar Hall', handlerName: 'Tirth Chaudhari', handlerPhone: '9426430507', handlerRole: 'Stage Lead', handlerStatus: 'ready' },
+    { id: 'station-b', name: 'Station B', location: 'D1-207(1) Computer Lab', handlerName: 'Meet Jariwala', handlerPhone: '9428867728', handlerRole: 'Stage Lead', handlerStatus: 'ready' },
+    { id: 'station-c', name: 'Station C', location: 'D1-209(1) Computer Lab', handlerName: 'Nitya Jariwala', handlerPhone: '9054496072', handlerRole: 'Stage Lead', handlerStatus: 'ready' },
+    { id: 'station-d', name: 'Station D', location: 'Controll Area', handlerName: 'Tirth', handlerPhone: '9426430507', handlerRole: 'Coordinator', handlerStatus: 'ready' },
   ],
+  heatCount: 60,
 };
 
 const defaultCustomFields: CustomFieldDefinition[] = [];
@@ -169,16 +170,16 @@ function createInitialStationState(
     wheelSpin: null,
     timerMode: 'idle',
     timerStatus: 'idle',
-    timerDuration: 120,
+    timerDuration: defaultSettings.round1.speechTimeSeconds || 180,
     timerStartTime: null,
     timerAccumulatedMs: 0,
     timerStopTime: null,
-    timerTotalSeconds: 120,
-    timerRemainingSeconds: 120,
+    timerTotalSeconds: defaultSettings.round1.speechTimeSeconds || 180,
+    timerRemainingSeconds: defaultSettings.round1.speechTimeSeconds || 180,
     isTimerRunning: false,
     timerStartedAt: null,
     timerEndsAt: null,
-    buzzerTimeSeconds: 120,
+    buzzerTimeSeconds: defaultSettings.round1.speechTimeSeconds || 180,
     buzzerPlayed: false,
     isOvertime: false,
     overtimeSeconds: 0,
@@ -365,11 +366,23 @@ try {
     // Ensure all configured stations have station states
     (db.settings.stations || []).forEach((s) => {
       if (!db.stations![s.id]) {
-        db.stations![s.id] = createInitialStationState(s.id, s.name, s.location);
+        db.stations![s.id] = createInitialStationState(
+          s.id,
+          s.name,
+          s.location,
+          s.handlerName,
+          s.handlerPhone,
+          s.handlerRole,
+          s.handlerStatus,
+          s.handlerNotes
+        );
       } else {
-        // Sync name & location
+        // Sync name, location & handler details
         db.stations![s.id].name = s.name;
         db.stations![s.id].location = s.location;
+        if (s.handlerName !== undefined) db.stations![s.id].handlerName = s.handlerName;
+        if (s.handlerPhone !== undefined) db.stations![s.id].handlerPhone = s.handlerPhone;
+        if (s.handlerRole !== undefined) db.stations![s.id].handlerRole = s.handlerRole;
       }
     });
 
@@ -801,16 +814,17 @@ const handleCompleteDataReset = async (req: Request, res: Response) => {
         s.wheelSpin = null;
         s.timerMode = 'idle';
         s.timerStatus = 'idle';
-        s.timerDuration = 120;
+        const r1Sec = db.settings?.round1?.speechTimeSeconds || 180;
+        s.timerDuration = r1Sec;
         s.timerStartTime = null;
         s.timerAccumulatedMs = 0;
         s.timerStopTime = null;
-        s.timerTotalSeconds = 120;
-        s.timerRemainingSeconds = 120;
+        s.timerTotalSeconds = r1Sec;
+        s.timerRemainingSeconds = r1Sec;
         s.isTimerRunning = false;
         s.timerStartedAt = null;
         s.timerEndsAt = null;
-        s.buzzerTimeSeconds = 120;
+        s.buzzerTimeSeconds = r1Sec;
         s.buzzerPlayed = false;
         s.isOvertime = false;
         s.overtimeSeconds = 0;
@@ -1413,7 +1427,7 @@ app.post('/api/round2/spin-topic', (req: Request, res: Response) => {
   }
 
   // Ensure selection is strictly among topics rendered on the active wheel (preserving wheel order)
-  const wheelCount = db.settings.round2.activeWheelTopicCount || 20;
+  const wheelCount = db.settings.round2.activeWheelTopicCount || 10;
   let candidates: Topic[] = pool;
   if (Array.isArray(wheelTopicIds) && wheelTopicIds.length > 0) {
     const topicsMap = new Map(db.topics.map((t) => [t.id, t]));
@@ -1490,7 +1504,7 @@ app.post('/api/round2/spin-topic', (req: Request, res: Response) => {
 // Helper to get initial wheel topics matching configured slice count
 function getInitialStationWheelTopics(stationId: string, stationName?: string): Topic[] {
   if (!db || !db.topics || db.topics.length === 0) return [];
-  const wheelCount = db.settings?.round2?.activeWheelTopicCount || 20;
+  const wheelCount = db.settings?.round2?.activeWheelTopicCount || 10;
   const reuseAllowed = db.settings?.round2?.topicReuseAllowed || false;
 
   const stationTopics = db.topics.filter(
@@ -1554,7 +1568,7 @@ function getStation(id: string): StationState {
   }
 
   // Pre-populate Round 2 wheel topics if station is in Round 2 or activeWheelTopics count mismatches setting
-  const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
+  const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 10;
   if (
     db.stations[id].currentRound === 2 &&
     (!db.stations[id].activeWheelTopics || db.stations[id].activeWheelTopics.length !== expectedWheelCount)
@@ -1935,7 +1949,7 @@ app.post('/api/event/stage-permission', (req: Request, res: Response) => {
       station.selectedImage = null;
       station.selectedTopicId = null;
       station.selectedTopic = null;
-      const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
+      const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 10;
       if (roundNum === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length !== expectedWheelCount)) {
         station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
       }
@@ -2046,7 +2060,7 @@ app.post('/api/event/set-round', (req: Request, res: Response) => {
       station.selectedImage = null;
       station.selectedTopicId = null;
       station.selectedTopic = null;
-      const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
+      const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 10;
       if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length !== expectedWheelCount)) {
         station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
       }
@@ -2123,7 +2137,7 @@ app.post('/api/stations/:id/set-round', (req: Request, res: Response) => {
   station.selectedTopicId = null;
   station.selectedTopic = null;
   station.wheelSpin = null;
-  const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 20;
+  const expectedWheelCount = Number(db.settings?.round2?.activeWheelTopicCount) || 10;
   if (targetRound === 2 && (!station.activeWheelTopics || station.activeWheelTopics.length !== expectedWheelCount)) {
     station.activeWheelTopics = getInitialStationWheelTopics(station.id, station.name);
   }
@@ -2570,7 +2584,7 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
   }
 
   // Ensure candidates are selected from the active wheel slices (preserving wheel order)
-  const wheelCount = db.settings.round2.activeWheelTopicCount || 20;
+  const wheelCount = db.settings.round2.activeWheelTopicCount || 10;
   let candidates: Topic[] = [];
 
   const topicsMap = new Map(db.topics.map((t) => [t.id, t]));
@@ -2696,7 +2710,7 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
     // Replace the used topic in the wheel candidates with a fresh unused topic from the pool
     let currentWheel = (station.activeWheelTopics || station.wheelSpin?.wheelTopics || []).filter(Boolean);
     if (currentWheel.length === 0) {
-      const wheelCount = db.settings.round2.activeWheelTopicCount || 20;
+      const wheelCount = db.settings.round2.activeWheelTopicCount || 10;
       currentWheel = db.topics.filter((t) => t && t.status === 'available').slice(0, wheelCount);
     }
     const targetIdx = currentWheel.findIndex((t) => t && t.id === winningTopic.id);
@@ -2741,7 +2755,7 @@ app.post('/api/stations/:id/wheel-replace', (req: Request, res: Response) => {
   const station = getStation(req.params.id);
   const { usedTopicId, replacementTopicId } = req.body;
   let currentWheel = (station.activeWheelTopics || []).filter(Boolean);
-  const wheelCount = db.settings.round2.activeWheelTopicCount || 20;
+  const wheelCount = db.settings.round2.activeWheelTopicCount || 10;
   if (currentWheel.length === 0) {
     currentWheel = db.topics.filter((t) => t && t.status === 'available').slice(0, wheelCount);
   }
@@ -2828,7 +2842,7 @@ app.post('/api/slots/reset', (req: Request, res: Response) => {
 });
 
 app.post('/api/slots/pregenerate', (req: Request, res: Response) => {
-  const { count = 30, round = 'all' } = req.body;
+  const { count = db?.settings?.heatCount || 60, round = 'all' } = req.body;
   if (!db.synchronizedSlots) db.synchronizedSlots = { round1: {}, round2: {} };
 
   if (round === 'all' || round === 'round1') {
@@ -4054,10 +4068,10 @@ app.put('/api/settings', (req: Request, res: Response) => {
   if (db.settings.round2) {
     db.settings.round2.activeWheelTopicCount = Math.max(
       4,
-      Math.min(50, Number(db.settings.round2.activeWheelTopicCount) || 20)
+      Math.min(50, Number(db.settings.round2.activeWheelTopicCount) || 10)
     );
   }
-  const wheelCount = Number(db.settings.round2?.activeWheelTopicCount) || 20;
+  const wheelCount = Number(db.settings.round2?.activeWheelTopicCount) || 10;
 
   // Synchronize active wheel topics for all stations to match updated wheel count
   if (db.stations) {

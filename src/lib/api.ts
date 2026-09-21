@@ -267,7 +267,7 @@ export const api = {
     return res.json();
   },
 
-  async pregenerateSynchronizedSlots(count?: number, round?: 'round1' | 'round2' | 'all'): Promise<{ success: boolean; synchronizedSlots: { round1: Record<number, string>; round2: Record<number, string> } }> {
+  async pregenerateSynchronizedSlots(count: number = 60, round?: 'round1' | 'round2' | 'all'): Promise<{ success: boolean; synchronizedSlots: { round1: Record<number, string>; round2: Record<number, string> } }> {
     const res = await fetch('/api/slots/pregenerate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
