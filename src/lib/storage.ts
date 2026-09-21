@@ -195,6 +195,7 @@ export const storageService = {
       participants: Participant[];
       topics: Topic[];
       images: EventImage[];
+      clientResetAt?: number;
     };
   } {
     if (!localDb) {
@@ -214,7 +215,19 @@ export const storageService = {
       return {
         mergedDb: sanitizedDb,
         hasLocalAdditions: false,
-        localAdditions: { participants: [], topics: [], images: [] },
+        localAdditions: { participants: [], topics: [], images: [], clientResetAt: serverDb.lastResetAt },
+      };
+    }
+
+    // Check if the server performed a complete factory reset AFTER the local cache was captured
+    if (serverDb.lastResetAt && (!localDb.lastResetAt || localDb.lastResetAt < serverDb.lastResetAt)) {
+      console.info('[storage] Server reset timestamp is newer than local cache. Purging stale local data and adopting clean server state.');
+      this.clearDeletedRecords();
+      this.savePersistedDatabase(serverDb);
+      return {
+        mergedDb: serverDb,
+        hasLocalAdditions: false,
+        localAdditions: { participants: [], topics: [], images: [], clientResetAt: serverDb.lastResetAt },
       };
     }
 
@@ -258,11 +271,14 @@ export const storageService = {
     const mergedTopics = [...serverTopics, ...localOnlyTopics];
     const mergedImages = [...serverImages, ...localOnlyImages];
 
+    const currentResetAt = serverDb.lastResetAt || localDb.lastResetAt || 0;
+
     const mergedDb: AppDatabase = {
       ...serverDb,
       participants: mergedParticipants,
       topics: mergedTopics,
       images: mergedImages,
+      lastResetAt: currentResetAt,
     };
 
     this.savePersistedDatabase(mergedDb);
@@ -277,6 +293,7 @@ export const storageService = {
         participants: localOnlyParticipants,
         topics: localOnlyTopics,
         images: localOnlyImages,
+        clientResetAt: currentResetAt,
       },
     };
   },

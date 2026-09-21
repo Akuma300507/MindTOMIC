@@ -52,7 +52,7 @@ export const TopicsManager: React.FC = () => {
 
   const openAddModal = () => {
     setEditingTopic(null);
-    setTopicIdInput(`TOP-${String((db?.topics.length || 0) + 1).padStart(3, '0')}`);
+    setTopicIdInput(`TOP-${String((db?.topics?.length || 0) + 1).padStart(3, '0')}`);
     setTopicText('');
     setShowAddModal(true);
   };
@@ -68,7 +68,7 @@ export const TopicsManager: React.FC = () => {
     e.preventDefault();
     if (!topicText.trim()) return;
 
-    const finalTopicId = (topicIdInput.trim() || `TOP-${String((db?.topics.length || 0) + 1).padStart(3, '0')}`).toUpperCase();
+    const finalTopicId = (topicIdInput.trim() || `TOP-${String((db?.topics?.length || 0) + 1).padStart(3, '0')}`).toUpperCase();
 
     if (editingTopic) {
       await updateTopic(editingTopic.id, {
@@ -104,8 +104,8 @@ export const TopicsManager: React.FC = () => {
     }
   };
 
-  const total = db?.topics.length || 0;
-  const available = db?.topics.filter((t) => t.status === 'available').length || 0;
+  const total = db?.topics?.length || 0;
+  const available = db?.topics?.filter((t) => t.status === 'available')?.length || 0;
   const used = total - available;
 
   return (
@@ -384,7 +384,7 @@ export const TopicsManager: React.FC = () => {
             </div>
             <h4 className="text-base font-bold text-white">Remove All Topics?</h4>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Are you sure you want to permanently delete all <strong className="text-white">{db?.topics.length || 0}</strong> topics from the repository? This action cannot be undone.
+              Are you sure you want to permanently delete all <strong className="text-white">{db?.topics?.length || 0}</strong> topics from the repository? This action cannot be undone.
             </p>
             <div className="flex justify-center gap-3 pt-2">
               <button

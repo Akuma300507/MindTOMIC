@@ -371,7 +371,7 @@ export const Round3: React.FC = () => {
                   filteredPendingParticipants.find((item) => item.id === targetId) ||
                   pendingRound3Participants.find((item) => item.id === targetId) ||
                   stationEligibleRound3Participants.find((item) => item.id === targetId) ||
-                  db?.participants.find((item) => item.id === targetId);
+                  db?.participants?.find((item) => item.id === targetId);
                 if (p) {
                   handleSelectContestant(p);
                 }
@@ -433,7 +433,7 @@ export const Round3: React.FC = () => {
                 const p =
                   filteredCompletedParticipants.find((item) => item.id === targetId) ||
                   completedRound3Participants.find((item) => item.id === targetId) ||
-                  db?.participants.find((item) => item.id === targetId);
+                  db?.participants?.find((item) => item.id === targetId);
                 if (p) {
                   handleSelectContestant(p);
                 }

@@ -234,6 +234,7 @@ function getInitialDatabase(): AppDatabase {
       isTimerRunning: false,
       stationStates: stations,
     },
+    lastResetAt: 0,
   };
 }
 
@@ -346,6 +347,7 @@ try {
     if (!Array.isArray(db.history)) db.history = [];
     else db.history = db.history.filter((h) => !h.participantId || !LEGACY_DEFAULT_IDS.has(h.participantId));
     if (!db.stations) db.stations = {};
+    if (db.lastResetAt === undefined) db.lastResetAt = 0;
 
     if (!db.synchronizedSlots) {
       db.synchronizedSlots = { round1: {}, round2: {} };
@@ -674,7 +676,14 @@ app.get('/api/state', (req: Request, res: Response) => {
 // Restore / merge local client additions if missing on server
 app.post('/api/sync-restore', (req: Request, res: Response) => {
   try {
-    const { participants, topics, images } = req.body;
+    const { participants, topics, images, clientResetAt } = req.body;
+
+    // Ignore restore attempt if client's data was recorded prior to a complete factory reset
+    if (db.lastResetAt && (!clientResetAt || clientResetAt < db.lastResetAt)) {
+      console.warn(`[sync-restore] Ignored restore attempt with obsolete reset timestamp (client: ${clientResetAt}, server: ${db.lastResetAt})`);
+      return res.json({ success: false, ignored: true, reason: 'obsolete_reset', message: 'Ignored pre-reset data' });
+    }
+
     let addedCount = 0;
 
     if (Array.isArray(participants)) {
@@ -733,7 +742,7 @@ app.post('/api/sync-restore', (req: Request, res: Response) => {
 
 
 // Reset database to completely clean new fresh state (Purge all data)
-const handleCompleteDataReset = (req: Request, res: Response) => {
+const handleCompleteDataReset = async (req: Request, res: Response) => {
   try {
     // 1. Clean uploaded image files in UPLOADS_DIR (protecting custom logo files)
     if (fs.existsSync(UPLOADS_DIR)) {
@@ -750,6 +759,8 @@ const handleCompleteDataReset = (req: Request, res: Response) => {
       }
     }
 
+    const resetTimestamp = Date.now();
+
     // 2. Re-initialize database to an empty, fresh slate
     db = getInitialDatabase();
     db.participants = [];
@@ -763,6 +774,7 @@ const handleCompleteDataReset = (req: Request, res: Response) => {
       round1: {},
       round2: {},
     };
+    db.lastResetAt = resetTimestamp;
     db.liveSync = {
       currentRound: 1,
       activeParticipantId: null,
@@ -803,6 +815,19 @@ const handleCompleteDataReset = (req: Request, res: Response) => {
         s.isOvertime = false;
         s.overtimeSeconds = 0;
       });
+    }
+
+    if (mongoDb) {
+      try {
+        await mongoDb.collection('app_state').updateOne(
+          { _id: 'current_state' },
+          { $set: { data: db, updatedAt: new Date() } },
+          { upsert: true }
+        );
+        console.log('[mongodb] Successfully flushed factory reset state to MongoDB Atlas');
+      } catch (mongoErr) {
+        console.error('[mongodb] Error persisting reset to MongoDB Atlas:', mongoErr);
+      }
     }
 
     persistDB();

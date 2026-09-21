@@ -388,6 +388,7 @@ export interface AppDatabase {
     round1: Record<number, string>; // slotIndex -> imageId
     round2: Record<number, string>; // slotIndex -> topicId
   };
+  lastResetAt?: number;
 }
 
 export type DeviceRole = 'station' | 'master' | 'projector';

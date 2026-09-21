@@ -63,7 +63,7 @@ export const Results: React.FC = () => {
   // Helper to get synchronized qualification status from result or participant
   const getQualification = (participantId: string, round: 1 | 2 | 3, resultQual?: QualificationStatus): QualificationStatus => {
     if (resultQual && resultQual !== 'pending') return resultQual;
-    const p = db?.participants.find((item) => item.id === participantId);
+    const p = db?.participants?.find((item) => item.id === participantId);
     if (round === 1) return p?.round1Qualified || resultQual || 'pending';
     if (round === 2) return p?.round2Qualified || resultQual || 'pending';
     return p?.round3Qualified || resultQual || 'pending';
@@ -73,7 +73,7 @@ export const Results: React.FC = () => {
 
   const filteredR1 = useMemo(() => {
     return r1Results.filter((r) => {
-      const p = db?.participants.find((item) => item.id === r.participantId);
+      const p = db?.participants?.find((item) => item.id === r.participantId);
       const imgId = r.imageId || '';
       const imgName = r.imageName || '';
       const num = r.participantNumber || p?.participantNumber || '';
@@ -92,7 +92,7 @@ export const Results: React.FC = () => {
 
   const filteredR2 = useMemo(() => {
     return r2Results.filter((r) => {
-      const p = db?.participants.find((item) => item.id === r.participantId);
+      const p = db?.participants?.find((item) => item.id === r.participantId);
       const topicString = r.topicText || r.topic || '';
       const topicId = r.topicId || '';
       const num = r.participantNumber || p?.participantNumber || '';
@@ -111,7 +111,7 @@ export const Results: React.FC = () => {
 
   const filteredR3 = useMemo(() => {
     return r3Results.filter((r) => {
-      const p = db?.participants.find((item) => item.id === r.participantId);
+      const p = db?.participants?.find((item) => item.id === r.participantId);
       const num = r.participantNumber || p?.participantNumber || '';
       const mob = r.mobile || p?.mobile || p?.phone || '';
       const matchesSearch =
@@ -554,7 +554,7 @@ export const Results: React.FC = () => {
                   filteredR1.map((r) => {
                     const isSelected = selectedIds.includes(r.participantId);
                     const qualStatus = getQualification(r.participantId, 1, r.qualification);
-                    const p = db?.participants.find((item) => item.id === r.participantId);
+                    const p = db?.participants?.find((item) => item.id === r.participantId);
 
                     return (
                       <tr
@@ -722,7 +722,7 @@ export const Results: React.FC = () => {
                   filteredR2.map((r) => {
                     const isSelected = selectedIds.includes(r.participantId);
                     const qualStatus = getQualification(r.participantId, 2, r.qualification);
-                    const p = db?.participants.find((item) => item.id === r.participantId);
+                    const p = db?.participants?.find((item) => item.id === r.participantId);
 
                     return (
                       <tr
@@ -893,7 +893,7 @@ export const Results: React.FC = () => {
                   filteredR3.map((r) => {
                     const isSelected = selectedIds.includes(r.participantId);
                     const qualStatus = getQualification(r.participantId, 3, r.qualification);
-                    const p = db?.participants.find((item) => item.id === r.participantId);
+                    const p = db?.participants?.find((item) => item.id === r.participantId);
 
                     return (
                       <tr

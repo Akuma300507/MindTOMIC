@@ -2465,7 +2465,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const resetAllData = useCallback(async () => {
     storageService.clearAll();
-    await api.resetData();
+    try {
+      const res = await api.resetData();
+      if (res?.db) {
+        storageService.savePersistedDatabase(res.db);
+        setDb(res.db);
+      }
+    } catch (err) {
+      console.error('Failed to reset all data:', err);
+    }
     setActiveParticipant(null);
     setCurrentStationId(null);
     await reloadState();

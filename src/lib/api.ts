@@ -41,9 +41,10 @@ export const api = {
     return res.json();
   },
 
-  async resetData(): Promise<void> {
+  async resetData(): Promise<{ success: boolean; message: string; db: AppDatabase }> {
     const res = await fetch('/api/reset-data', { method: 'POST' });
     if (!res.ok) throw new Error('Failed to reset database');
+    return res.json();
   },
 
   // RESET ALL STATUSES (Master / Admin)
@@ -908,7 +909,8 @@ export const api = {
     participants?: Participant[];
     topics?: Topic[];
     images?: EventImage[];
-  }): Promise<{ success: boolean; message: string }> {
+    clientResetAt?: number;
+  }): Promise<{ success: boolean; message?: string; ignored?: boolean; reason?: string }> {
     const res = await fetch('/api/sync-restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

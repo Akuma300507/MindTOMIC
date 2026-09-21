@@ -64,7 +64,7 @@ export const Sidebar: React.FC = () => {
           <div className="flex items-center justify-between text-xs mb-1.5">
             <span className="text-purple-300 font-semibold uppercase tracking-wider text-[10px]">Contest Progress</span>
             <span className="text-white font-bold text-[11px]">
-              {db?.round1Results.length || 0} / {db?.participants.length || 0}
+              {db?.round1Results?.length || 0} / {db?.participants?.length || 0}
             </span>
           </div>
           <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
@@ -72,8 +72,17 @@ export const Sidebar: React.FC = () => {
               className="bg-gradient-to-r from-purple-500 to-blue-500 h-full transition-all duration-500"
               style={{
                 width: `${
-                  db?.participants.length
-                    ? Math.min(100, Math.round(((db.round1Results.length + db.round2Results.length + db.round3Results.length) / (db.participants.length * 3)) * 100))
+                  db?.participants?.length
+                    ? Math.min(
+                        100,
+                        Math.round(
+                          (((db.round1Results?.length || 0) +
+                            (db.round2Results?.length || 0) +
+                            (db.round3Results?.length || 0)) /
+                            (db.participants.length * 3)) *
+                            100
+                        )
+                      )
                     : 0
                 }%`,
               }}

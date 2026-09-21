@@ -227,7 +227,7 @@ export const Participants: React.FC = () => {
 
   const openAddModal = () => {
     setEditingParticipant(null);
-    const nextNum = `M2M-${String((db?.participants.length || 0) + 1).padStart(3, '0')}`;
+    const nextNum = `M2M-${String((db?.participants?.length || 0) + 1).padStart(3, '0')}`;
     setFormData({
       name: '',
       participantNumber: nextNum,

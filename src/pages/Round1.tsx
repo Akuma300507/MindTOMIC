@@ -421,7 +421,7 @@ export const Round1: React.FC = () => {
                   filteredPendingParticipants.find((item) => item.id === targetId) ||
                   pendingStationParticipants.find((item) => item.id === targetId) ||
                   stationParticipants.find((item) => item.id === targetId) ||
-                  db?.participants.find((item) => item.id === targetId);
+                  db?.participants?.find((item) => item.id === targetId);
                 if (p) {
                   handleSelectContestant(p);
                 }
@@ -497,7 +497,7 @@ export const Round1: React.FC = () => {
                 const p =
                   filteredCompletedParticipants.find((item) => item.id === targetId) ||
                   completedStationParticipants.find((item) => item.id === targetId) ||
-                  db?.participants.find((item) => item.id === targetId);
+                  db?.participants?.find((item) => item.id === targetId);
                 if (p) {
                   handleSelectContestant(p);
                 }

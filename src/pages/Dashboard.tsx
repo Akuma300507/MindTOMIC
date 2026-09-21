@@ -20,13 +20,13 @@ import { MindToMicLogo } from '../components/common/MindToMicLogo';
 export const Dashboard: React.FC = () => {
   const { db, setCurrentPage, currentStationId, allStations, activeParticipant, selectNextParticipant, triggerBuzzer } = useApp();
 
-  const totalParticipants = db?.participants.length || 0;
-  const r1Completed = db?.round1Results.length || 0;
-  const r2Completed = db?.round2Results.length || 0;
-  const r3Completed = db?.round3Results.length || 0;
+  const totalParticipants = db?.participants?.length || 0;
+  const r1Completed = db?.round1Results?.length || 0;
+  const r2Completed = db?.round2Results?.length || 0;
+  const r3Completed = db?.round3Results?.length || 0;
 
-  const totalTopics = db?.topics.length || 0;
-  const usedTopics = db?.topics.filter((t) => t.status === 'used').length || 0;
+  const totalTopics = db?.topics?.length || 0;
+  const usedTopics = db?.topics?.filter((t) => t.status === 'used')?.length || 0;
   const availableTopics = totalTopics - usedTopics;
 
   const progressTotalPossible = totalParticipants * 3;
@@ -53,11 +53,11 @@ export const Dashboard: React.FC = () => {
                 <MindToMicLogo size={42} variant="emblem" showGlow={false} />
               </div>
               <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-purple-300 to-pink-400 font-['Outfit'] tracking-tight">
-                {db?.settings.event.name || 'MIND TO MIC'}
+                {db?.settings?.event?.name || 'MIND TO MIC'}
               </h1>
             </div>
             <p className="text-base sm:text-lg font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-indigo-200 to-blue-300 font-mono">
-              {db?.settings.event.tagline || 'THINK. SPEAK. EXPRESS.'}
+              {db?.settings?.event?.tagline || 'THINK. SPEAK. EXPRESS.'}
             </p>
           </div>
 

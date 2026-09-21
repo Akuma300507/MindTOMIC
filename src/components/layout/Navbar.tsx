@@ -94,7 +94,7 @@ export const Navbar: React.FC = () => {
             <div className="hidden sm:block">
               <div className="flex items-center gap-2">
                 <span className="font-extrabold tracking-tight text-base sm:text-lg text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-purple-300 to-pink-400 font-['Outfit']">
-                  {db?.settings.event.name || 'MIND TO MIC'}
+                  {db?.settings?.event?.name || 'MIND TO MIC'}
                 </span>
                 <span className="px-1.5 py-0.5 text-[9px] uppercase font-bold tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded">
                   Live
