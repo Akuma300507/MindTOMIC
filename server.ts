@@ -2560,10 +2560,15 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
     }
   }
   if (slotIndex === -1) {
-    slotIndex = db.round2Results.filter((r) => {
+    const slottedCount = db.participants.filter((p) => {
+      const matchesStation = p?.stationId === station.id || p?.round2StationId === station.id;
+      return matchesStation && typeof p.round2SlotIndex === 'number' && p.round2SlotIndex >= 0 && p.id !== targetParticipant?.id;
+    }).length;
+    const resultsCount = db.round2Results.filter((r) => {
       const p = db.participants.find((item) => item.id === r.participantId);
       return p?.stationId === station.id || p?.round2StationId === station.id;
     }).length;
+    slotIndex = Math.max(resultsCount, slottedCount);
   }
   if (slotIndex === -1) slotIndex = 0;
 
@@ -2591,15 +2596,21 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
 
   if (Array.isArray(wheelTopicIds) && wheelTopicIds.length > 0) {
     // Preserve exact client slot count and order
+    const usedInWheel = new Set<string>();
     candidates = wheelTopicIds.map((id) => {
       const topic = topicsMap.get(id);
-      // If topic is available or reuse allowed, keep it
-      if (topic && (db.settings.round2.topicReuseAllowed || topic.status === 'available')) {
+      // If topic is available or reuse allowed and not duplicate on wheel, keep it
+      if (topic && (db.settings.round2.topicReuseAllowed || topic.status === 'available') && !usedInWheel.has(topic.id)) {
+        usedInWheel.add(topic.id);
         return topic;
       }
       // Otherwise replace this slot with next unused topic
-      const nextUnused = pool.find((p) => !wheelTopicIds.includes(p.id) && !candidates.some((c) => c?.id === p.id));
-      return nextUnused || topic || pool[0];
+      const nextUnused = pool.find((p) => !usedInWheel.has(p.id) && !wheelTopicIds.includes(p.id));
+      if (nextUnused) {
+        usedInWheel.add(nextUnused.id);
+        return nextUnused;
+      }
+      return topic || pool[0];
     });
   } else if (station.activeWheelTopics && station.activeWheelTopics.length > 0) {
     candidates = [...station.activeWheelTopics];
@@ -2616,10 +2627,11 @@ app.post('/api/stations/:id/spin-topic', (req: Request, res: Response) => {
   let chosen: Topic;
   if (isSynchronized) {
     const slotRes = getOrAssignSlotItem('round2', slotIndex, station.id, candidates.map((c) => c.id));
-    chosen = (slotRes.item as Topic) || candidates[0];
-    // Guarantee that chosen topic is mounted onto the wheel slices!
+    chosen = (slotRes.item as Topic) || candidates[Math.floor(Math.random() * candidates.length)];
+    // Guarantee that chosen topic is mounted onto the wheel slices at a random slice!
     if (!candidates.some((c) => c.id === chosen.id)) {
-      candidates[0] = chosen;
+      const randomSliceIdx = Math.floor(Math.random() * candidates.length);
+      candidates[randomSliceIdx] = chosen;
     }
   } else {
     chosen = candidates[Math.floor(Math.random() * candidates.length)];
@@ -2705,6 +2717,13 @@ app.post('/api/stations/:id/spin-complete', (req: Request, res: Response) => {
   if (winningTopic) {
     station.selectedTopic = winningTopic;
     station.selectedTopicId = winningTopic.id;
+
+    if (!db.settings.round2.topicReuseAllowed) {
+      winningTopic.status = 'used';
+      winningTopic.usedByParticipantId = station.activeParticipantId || undefined;
+      winningTopic.usedByParticipantName = station.activeParticipant?.name || undefined;
+      winningTopic.usedAt = new Date().toISOString();
+    }
 
     // Slot-preservation topic replacement:
     // Replace the used topic in the wheel candidates with a fresh unused topic from the pool

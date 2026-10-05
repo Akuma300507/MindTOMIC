@@ -243,8 +243,15 @@ export const Round2: React.FC = () => {
     if (typeof r2Result?.slotIndex === 'number' && r2Result.slotIndex >= 0) {
       return r2Result.slotIndex;
     }
-    return completedRound2Participants.length;
-  }, [activeParticipant, db?.round2Results, completedRound2Participants.length]);
+    // Count contestants already slotted or completed at this station to prevent colliding on slot 0
+    const slottedCount = stationEligibleRound2Participants.filter((p) => {
+      if (p.id === activeParticipant.id) return false;
+      const hasSlot = typeof p.round2SlotIndex === 'number' && p.round2SlotIndex >= 0;
+      const isDone = isParticipantRoundCompleted(p, 2, db);
+      return hasSlot || isDone;
+    }).length;
+    return Math.max(completedRound2Participants.length, slottedCount);
+  }, [activeParticipant, db, completedRound2Participants.length, stationEligibleRound2Participants]);
 
   const isSync = db?.settings?.round2?.synchronizedSlots !== false;
   const lockedSlotTopicId =
@@ -344,12 +351,13 @@ export const Round2: React.FC = () => {
     // 4. If this heat slot is pre-locked across stations, guarantee the locked topic is mounted on the wheel!
     if (lockedTopicObj && baseList.length > 0 && !baseList.some((t) => t.id === lockedTopicObj.id)) {
       const mounted = [...baseList];
-      mounted[0] = lockedTopicObj;
+      const mountIdx = slotIndex % baseList.length;
+      mounted[mountIdx] = lockedTopicObj;
       return mounted;
     }
 
     return baseList;
-  }, [lockedWheelTopics, currentStation?.activeWheelTopics, dynamicWheelTopics, wheelCount, lockedTopicObj]);
+  }, [lockedWheelTopics, currentStation?.activeWheelTopics, dynamicWheelTopics, wheelCount, lockedTopicObj, slotIndex]);
 
   // Color palette for slices
   const sliceColors = useMemo(
@@ -376,13 +384,18 @@ export const Round2: React.FC = () => {
 
     // Clean wheel topics before spinning: replace any topic that is already used with a fresh unused topic from the station pool
     const pool = topicsPool.filter(Boolean);
+    const selectedIds = new Set(activeWheelTopics.map((w) => w?.id).filter(Boolean));
     const cleanedWheel = activeWheelTopics.map((sliceTopic) => {
       if (!sliceTopic) return null;
       const dbTopic = pool.find((t) => t?.id === sliceTopic.id);
       const isUsed = sliceTopic.status === 'used' || (!reuseAllowed && dbTopic?.status === 'used');
       if (isUsed) {
-        const unused = pool.find((p) => p && p.status === 'available' && !activeWheelTopics.some((w) => w?.id === p.id));
-        return unused || sliceTopic;
+        const unused = pool.find((p) => p && p.status === 'available' && !selectedIds.has(p.id));
+        if (unused) {
+          selectedIds.add(unused.id);
+          return unused;
+        }
+        return sliceTopic;
       }
       return sliceTopic;
     }).filter(Boolean) as Topic[];
@@ -394,7 +407,8 @@ export const Round2: React.FC = () => {
     }
     // Guarantee locked topic is mounted into currentWheel if heat slot was already locked
     if (lockedTopicObj && !currentWheel.some((t) => t?.id === lockedTopicObj.id)) {
-      currentWheel[0] = lockedTopicObj;
+      const mountIdx = slotIndex % currentWheel.length;
+      currentWheel[mountIdx] = lockedTopicObj;
     }
     setLockedWheelTopics(currentWheel);
     setIsSpinning(true);
@@ -424,8 +438,9 @@ export const Round2: React.FC = () => {
 
     // Verify chosenTopic is positioned in currentWheel
     if (targetIndex === -1 && chosenTopic) {
-      currentWheel[0] = chosenTopic;
-      targetIndex = 0;
+      const fallbackIdx = Math.floor(Math.random() * currentWheel.length);
+      currentWheel[fallbackIdx] = chosenTopic;
+      targetIndex = fallbackIdx;
       setLockedWheelTopics([...currentWheel]);
     }
 
