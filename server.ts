@@ -2399,10 +2399,15 @@ app.post('/api/stations/:id/assign-image', (req: Request, res: Response) => {
     }
   }
   if (slotIndex === -1) {
-    slotIndex = db.round1Results.filter((r) => {
+    const slottedCount = db.participants.filter((p) => {
+      const matchesStation = p?.stationId === station.id || p?.round1StationId === station.id;
+      return matchesStation && typeof p.round1SlotIndex === 'number' && p.round1SlotIndex >= 0 && p.id !== targetParticipant?.id;
+    }).length;
+    const resultsCount = db.round1Results.filter((r) => {
       const p = db.participants.find((item) => item.id === r.participantId);
       return p?.stationId === station.id || p?.round1StationId === station.id;
     }).length;
+    slotIndex = Math.max(resultsCount, slottedCount);
   }
   if (slotIndex === -1) slotIndex = 0;
 

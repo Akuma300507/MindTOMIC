@@ -226,8 +226,14 @@ export const Round1: React.FC = () => {
     if (typeof r1Result?.slotIndex === 'number' && r1Result.slotIndex >= 0) {
       return r1Result.slotIndex;
     }
-    return completedStationParticipants.length;
-  }, [activeParticipant, db?.round1Results, completedStationParticipants.length]);
+    const slottedCount = stationParticipants.filter((p) => {
+      if (p.id === activeParticipant.id) return false;
+      const hasSlot = typeof p.round1SlotIndex === 'number' && p.round1SlotIndex >= 0;
+      const isDone = isParticipantRoundCompleted(p, 1, db);
+      return hasSlot || isDone;
+    }).length;
+    return Math.max(completedStationParticipants.length, slottedCount);
+  }, [activeParticipant, db, completedStationParticipants.length, stationParticipants]);
 
   const isSync = db?.settings?.round1?.synchronizedSlots !== false;
   const lockedSlotImageId =
